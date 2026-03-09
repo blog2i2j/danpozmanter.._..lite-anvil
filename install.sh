@@ -5,6 +5,8 @@
 #   Default:  Install to ~/.local (Linux) or /Applications (macOS)
 set -euo pipefail
 
+cargo build --release
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY="$SCRIPT_DIR/target/release/lite-anvil"
 DATA_SRC="$SCRIPT_DIR/data"

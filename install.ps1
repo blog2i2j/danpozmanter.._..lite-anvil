@@ -4,6 +4,8 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
+cargo build --release
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Binary    = Join-Path $ScriptDir 'target\release\lite-anvil.exe'
 $DataSrc   = Join-Path $ScriptDir 'data'
