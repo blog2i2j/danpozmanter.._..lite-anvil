@@ -1,5 +1,14 @@
 # Change Log
 
+## [0.2.3] - 2026-03-10 — Lua fixes.
+
+## [0.2.2] - 2026-03-10 — Fixes / polishing:
+
+* Ctrl + +/- changes font for sidebar as well as main window.
+* Command instead of control on Mac OS
+* Ctrl + Shift + ? for Help dialog.
+* Window resize on folder open bugfix.
+
 ## [0.2.2] - 2026-03-10 — Mac OS display bug fix.
 
 ## [0.2.1] - 2026-03-10 — Fixing Mac OS bundling bug.

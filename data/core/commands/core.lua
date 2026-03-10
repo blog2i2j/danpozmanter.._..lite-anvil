@@ -2,6 +2,7 @@ local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
 local config = require "core.config"
+local Doc = require "core.doc"
 local keymap = require "core.keymap"
 local LogView = require "core.logview"
 
@@ -153,6 +154,35 @@ local function add_project_directory(use_dialog)
   end)
 end
 
+local function shortcuts_help_message()
+  local items = {}
+  local commands = command.get_all_valid()
+  table.sort(commands)
+  local width = 0
+  for _, name in ipairs(commands) do
+    width = math.max(width, #command.prettify_name(name))
+  end
+  for _, name in ipairs(commands) do
+    local bindings = keymap.get_bindings_display(name)
+    if bindings == "" then
+      bindings = "Unbound"
+    end
+    table.insert(items, string.format("%-" .. width .. "s  %s", command.prettify_name(name), bindings))
+  end
+  return table.concat(items, "\n")
+end
+
+local function open_shortcuts_help_doc()
+  local doc = Doc()
+  doc:set_filename("Shortcuts.txt")
+  doc:insert(1, 1, shortcuts_help_message())
+  doc.new_file = false
+  doc:clean()
+  local view = core.root_view:open_doc(doc)
+  view.scroll.to.y = 0
+  view.scroll.y = 0
+end
+
 command.add(nil, {
   ["core:quit"] = function()
     core.quit()
@@ -207,13 +237,17 @@ command.add(nil, {
         for i, name in ipairs(matched) do
           res[i] = {
             text = command.prettify_name(name),
-            info = keymap.get_binding(name),
+            info = keymap.get_bindings_display(name),
             command = name,
           }
         end
         return res
       end
     })
+  end,
+
+  ["core:show-shortcuts-help"] = function()
+    open_shortcuts_help_doc()
   end,
 
   ["core:new-doc"] = function()

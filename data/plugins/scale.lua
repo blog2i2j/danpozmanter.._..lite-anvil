@@ -53,12 +53,10 @@ local function set_scale(scale)
     style.expanded_scrollbar_size = style.expanded_scrollbar_size * s
     style.caret_width             = style.caret_width             * s
     style.tab_width               = style.tab_width               * s
+  end
 
-    for _, name in ipairs {"font", "big_font", "icon_font", "icon_big_font", "code_font"} do
-      style[name]:set_size(s * style[name]:get_size())
-    end
-  else
-    style.code_font:set_size(s * style.code_font:get_size())
+  for _, name in ipairs {"font", "big_font", "icon_font", "icon_big_font", "code_font"} do
+    style[name]:set_size(s * style[name]:get_size())
   end
 
   for name, font in pairs(style.syntax_fonts) do
@@ -181,13 +179,30 @@ keymap.add {
   ["ctrl+-"]       = "scale:decrease",
   ["ctrl+="]       = "scale:increase",
   ["ctrl+shift+="] = "scale:increase",
+  ["ctrl+shift+/"] = "core:show-shortcuts-help",
 }
+
+if PLATFORM == "Mac OS X" then
+  keymap.add {
+    ["cmd+0"]       = "scale:reset",
+    ["cmd+-"]       = "scale:decrease",
+    ["cmd+="]       = "scale:increase",
+    ["cmd+shift+="] = "scale:increase",
+    ["cmd+shift+/"] = "core:show-shortcuts-help",
+  }
+end
 
 if config.plugins.scale.use_mousewheel then
   keymap.add {
     ["ctrl+wheelup"] = "scale:increase",
     ["ctrl+wheeldown"] = "scale:decrease"
   }
+  if PLATFORM == "Mac OS X" then
+    keymap.add {
+      ["cmd+wheelup"] = "scale:increase",
+      ["cmd+wheeldown"] = "scale:decrease"
+    }
+  end
 end
 
 local old_DocView_on_context_menu = DocView.on_context_menu

@@ -371,10 +371,11 @@ function core.init()
   -- Load core and user plugins giving preference to user ones with same name.
   local plugins_success, plugins_refuse_list = core.load_plugins()
 
-  core.window = core.window or renwindow._restore() or renwindow.create("")
-  if session.window_mode == "normal" then
+  local restored_window = renwindow._restore()
+  core.window = core.window or restored_window or renwindow.create("")
+  if not restored_window and session.window_mode == "normal" and type(session.window) == "table" then
     system.set_window_size(core.window, table.unpack(session.window))
-  elseif session.window_mode == "maximized" then
+  elseif not restored_window and session.window_mode == "maximized" then
     system.set_window_mode(core.window, "maximized")
   end
 

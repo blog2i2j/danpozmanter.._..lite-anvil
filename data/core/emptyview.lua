@@ -35,7 +35,7 @@ function EmptyView:draw()
 
   local displayed_cmds = {}
   for _, command in ipairs(self.commands) do
-    local keybinding = keymap.get_binding(command.cmd)
+    local keybinding = keymap.get_binding_display(command.cmd)
      if keybinding ~= nil then
       table.insert(displayed_cmds,{
         fmt = command.fmt,

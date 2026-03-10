@@ -50,7 +50,12 @@ function Doc:reset_syntax()
   local header = self:get_text(1, 1, self:position_offset(1, 1, 128))
   local path = self.abs_filename
   if not path and self.filename then
-    path = core.project_dir .. PATHSEP .. self.filename
+    local root_project = core.root_project and core.root_project()
+    if root_project and root_project.path then
+      path = root_project.path .. PATHSEP .. self.filename
+    else
+      path = self.filename
+    end
   end
   if path then path = common.normalize_path(path) end
   local syn = syntax.get(path, header)

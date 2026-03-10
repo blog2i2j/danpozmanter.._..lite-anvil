@@ -34,6 +34,16 @@ local modkey_map = modkeys_os.map
 ---@type keymap.modkey[]
 local modkeys = modkeys_os.keys
 
+local display_names = {
+  ctrl = macos and "Command" or "Ctrl",
+  cmd = "Command",
+  alt = "Alt",
+  altgr = "AltGr",
+  option = "Option",
+  shift = "Shift",
+  super = "Super",
+}
+
 
 ---Normalizes a stroke sequence to follow the modkeys table
 ---@param stroke string
@@ -53,6 +63,46 @@ local function normalize_stroke(stroke)
     return a < b
   end)
   return table.concat(stroke_table, "+")
+end
+
+local function split_stroke(stroke)
+  local parts = {}
+  for key in stroke:gmatch("[^+]+") do
+    table.insert(parts, key)
+  end
+  return parts
+end
+
+local function macos_cmd_alias(stroke)
+  if not macos then return nil end
+  local parts = split_stroke(stroke)
+  local has_ctrl, has_cmd = false, false
+  for _, part in ipairs(parts) do
+    has_ctrl = has_ctrl or part == "ctrl"
+    has_cmd = has_cmd or part == "cmd"
+  end
+  if not has_ctrl or has_cmd then
+    return nil
+  end
+  for i, part in ipairs(parts) do
+    if part == "ctrl" then
+      parts[i] = "cmd"
+    end
+  end
+  return normalize_stroke(table.concat(parts, "+"))
+end
+
+local function with_macos_aliases(map)
+  if not macos then return map end
+  local expanded = {}
+  for stroke, commands in pairs(map) do
+    expanded[stroke] = commands
+    local alias = macos_cmd_alias(stroke)
+    if alias and map[alias] == nil then
+      expanded[alias] = commands
+    end
+  end
+  return expanded
 end
 
 
@@ -121,6 +171,7 @@ end
 ---Add bindings by replacing commands that were previously assigned to a shortcut.
 ---@param map keymap.map
 function keymap.add_direct(map)
+  map = with_macos_aliases(map)
   for stroke, commands in pairs(map) do
     stroke = normalize_stroke(stroke)
 
@@ -146,6 +197,7 @@ end
 ---@param map keymap.map
 ---@param overwrite? boolean
 function keymap.add(map, overwrite)
+  map = with_macos_aliases(map)
   remove_duplicates(map)
   for stroke, commands in pairs(map) do
     stroke = normalize_stroke(stroke)
@@ -193,6 +245,47 @@ end
 ---@return table<integer, string> | nil shortcuts
 function keymap.get_bindings(cmd)
   return keymap.reverse_map[cmd]
+end
+
+function keymap.format_shortcut(shortcut)
+  if not shortcut then return nil end
+  local parts = split_stroke(shortcut)
+  for i, part in ipairs(parts) do
+    parts[i] = display_names[part] or part:gsub("^%l", string.upper)
+  end
+  return table.concat(parts, "+")
+end
+
+function keymap.format_bindings(bindings)
+  if not bindings or #bindings == 0 then
+    return ""
+  end
+  local formatted = {}
+  for _, shortcut in ipairs(bindings) do
+    table.insert(formatted, keymap.format_shortcut(shortcut))
+  end
+  return table.concat(formatted, ", ")
+end
+
+function keymap.get_binding_display(cmd)
+  local bindings = keymap.get_bindings(cmd)
+  if not bindings or #bindings == 0 then
+    return nil
+  end
+  if macos then
+    for _, shortcut in ipairs(bindings) do
+      for _, part in ipairs(split_stroke(shortcut)) do
+        if part == "cmd" then
+          return keymap.format_shortcut(shortcut)
+        end
+      end
+    end
+  end
+  return keymap.format_shortcut(bindings[1])
+end
+
+function keymap.get_bindings_display(cmd)
+  return keymap.format_bindings(keymap.get_bindings(cmd))
 end
 
 
