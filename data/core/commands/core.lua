@@ -156,18 +156,23 @@ end
 
 local function shortcuts_help_message()
   local items = {}
-  local commands = command.get_all_valid()
+  local commands = {}
+  for name in pairs(command.map) do
+    table.insert(commands, name)
+  end
   table.sort(commands)
   local width = 0
   for _, name in ipairs(commands) do
-    width = math.max(width, #command.prettify_name(name))
+    local pretty = command.prettify_name(name)
+    width = math.max(width, #pretty)
   end
   for _, name in ipairs(commands) do
+    local pretty = command.prettify_name(name)
     local bindings = keymap.get_bindings_display(name)
     if bindings == "" then
       bindings = "Unbound"
     end
-    table.insert(items, string.format("%-" .. width .. "s  %s", command.prettify_name(name), bindings))
+    table.insert(items, string.format("%-" .. width .. "s  %s", pretty, bindings))
   end
   return table.concat(items, "\n")
 end

@@ -164,11 +164,42 @@ end
 
 -- ── Toggle command ────────────────────────────────────────────────────────────
 
-local function find_preview(doc)
+local function find_previews(doc)
+  local previews = {}
   for _, view in ipairs(core.root_view.root_node:get_children()) do
     if view:is(MarkdownView) and view.doc == doc then
-      return view, core.root_view.root_node:get_node_for_view(view)
+      table.insert(previews, {
+        view = view,
+        node = core.root_view.root_node:get_node_for_view(view),
+      })
     end
+  end
+  return previews
+end
+
+local function close_preview(entry, fallback_view)
+  local root = core.root_view.root_node
+  local node = entry.node
+  if not node then
+    return
+  end
+
+  if #node.views == 1 and not node.is_primary_node then
+    local parent = node:get_parent_node(root)
+    if parent then
+      local other = parent.a == node and parent.b or parent.a
+      parent:consume(other)
+      parent:update_layout()
+      if fallback_view then
+        core.set_active_view(fallback_view)
+      end
+      return
+    end
+  end
+
+  node:close_view(root, entry.view)
+  if fallback_view then
+    core.set_active_view(fallback_view)
   end
 end
 
@@ -180,9 +211,11 @@ command.add("core.docview", {
       core.warn("markdown-preview: active file is not a markdown document")
       return
     end
-    local existing, node = find_preview(dv.doc)
-    if existing then
-      node:close_view(core.root_view.root_node, existing)
+    local previews = find_previews(dv.doc)
+    if #previews > 0 then
+      for _, entry in ipairs(previews) do
+        close_preview(entry, dv)
+      end
     else
       local src_node = core.root_view.root_node:get_node_for_view(dv)
       src_node:split("right", MarkdownView(dv.doc))

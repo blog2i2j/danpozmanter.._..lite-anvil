@@ -3,6 +3,22 @@
 
 local M = {}
 
+local function quote_padding(gap)
+  return math.max(10, gap)
+end
+
+local function quote_trailing_padding(gap)
+  return math.max(14, gap * 2)
+end
+
+local function quote_block_gap(gap)
+  return math.max(10, gap)
+end
+
+local function list_item_gap(gap)
+  return math.max(2, math.floor(gap * 0.5))
+end
+
 -- Simulate word-wrap and return the pixel height of the inline span list.
 function M.inlines_height(inlines, width, fonts)
   if not inlines or #inlines == 0 then return 0 end
@@ -45,15 +61,20 @@ function M.block_height(blk, width, fonts, gap)
     for _ in (blk.text .. "\n"):gmatch("[^\n]+") do lines = lines + 1 end
     return math.max(1, lines) * clh + gap * 2
   elseif t == "blockquote" then
-    local h = math.floor(gap / 2)
+    local pad = quote_padding(gap)
+    local block_gap = quote_block_gap(gap)
+    local trailing = quote_trailing_padding(gap)
+    local h = pad
     for _, sub in ipairs(blk.blocks) do
-      h = h + M.block_height(sub, width - 14, fonts, gap) + math.floor(gap / 2)
+      h = h + M.block_height(sub, width - 14, fonts, gap) + block_gap
     end
+    h = h + trailing
     return math.max(h, lh)
   elseif t == "list" then
+    local item_gap = list_item_gap(gap)
     local h = 0
     for _, item in ipairs(blk.items) do
-      h = h + M.inlines_height(item, width - 20, fonts) + 2
+      h = h + M.inlines_height(item, width - 20, fonts) + item_gap
     end
     return math.max(h, lh)
   elseif t == "table" then

@@ -8,6 +8,22 @@ local LINK_COLOR = { 88, 166, 255, 255 }
 
 local M = {}
 
+local function quote_padding(gap)
+  return math.max(10, gap)
+end
+
+local function quote_trailing_padding(gap)
+  return math.max(14, gap * 2)
+end
+
+local function quote_block_gap(gap)
+  return math.max(10, gap)
+end
+
+local function list_item_gap(gap)
+  return math.max(2, math.floor(gap * 0.5))
+end
+
 -- ── Color and font helpers ────────────────────────────────────────────────────
 
 local function span_color(span)
@@ -92,28 +108,32 @@ local function draw_rule(x, y, max_x, lh)
 end
 
 local function draw_blockquote(view, blk, x, y, max_x, fonts, lh, gap)
-  local sx     = x + 14
-  local start_y = y
-  local cur_y  = y + math.floor(gap / 4)
+  local pad      = quote_padding(gap)
+  local block_gap = quote_block_gap(gap)
+  local trailing = quote_trailing_padding(gap)
+  local sx       = x + 14
+  local start_y  = y
+  local cur_y    = y + pad
   for _, sub in ipairs(blk.blocks) do
     local sh = layout.block_height(sub, max_x - sx, fonts, gap)
     M.draw_block(view, sub, sx, cur_y, max_x, fonts, lh, gap)
-    cur_y = cur_y + sh + math.floor(gap / 2)
+    cur_y = cur_y + sh + block_gap
   end
-  renderer.draw_rect(x, start_y, 3, cur_y - start_y, style.syntax["comment"])
+  renderer.draw_rect(x, start_y, 3, cur_y - start_y + trailing, style.syntax["comment"])
 end
 
-local function draw_list(view, blk, x, y, max_x, fonts, lh)
+local function draw_list(view, blk, x, y, max_x, fonts, lh, gap)
   local cx    = x + 20
   local cur_y = y
+  local item_gap = list_item_gap(gap)
   for i, item in ipairs(blk.items) do
     local bullet = blk.ordered and (tostring(blk.start + i - 1) .. ".") or "\xE2\x80\xA2"
     renderer.draw_text(fonts.body, bullet, x + 4, cur_y, style.text)
     local ih = layout.inlines_height(item, max_x - cx, fonts)
-    core.push_clip_rect(cx, cur_y, max_x - cx, ih + 2)
+    core.push_clip_rect(cx, cur_y, max_x - cx, ih + item_gap)
     M.draw_inlines(view, item, cx, cur_y, max_x, fonts)
     core.pop_clip_rect()
-    cur_y = cur_y + ih + 2
+    cur_y = cur_y + ih + item_gap
   end
 end
 
@@ -167,7 +187,7 @@ function M.draw_block(view, blk, x, y, max_x, fonts, lh, gap)
   elseif t == "code_block" then draw_code_block(view, blk, x, y, max_x, fonts, gap)
   elseif t == "rule"       then draw_rule(x, y, max_x, lh)
   elseif t == "blockquote" then draw_blockquote(view, blk, x, y, max_x, fonts, lh, gap)
-  elseif t == "list"       then draw_list(view, blk, x, y, max_x, fonts, lh)
+  elseif t == "list"       then draw_list(view, blk, x, y, max_x, fonts, lh, gap)
   elseif t == "table"      then draw_table(view, blk, x, y, max_x, fonts, lh, gap)
   end
 end

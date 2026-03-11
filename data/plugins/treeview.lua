@@ -577,6 +577,9 @@ function core.on_quit_project()
 end
 
 local function is_project_folder(item)
+  if not item or not item.project then
+    return false
+  end
   return item.abs_filename == item.project.path
 end
 
@@ -602,8 +605,9 @@ end
 
 local projectsearch = pcall(require, "plugins.projectsearch")
 if projectsearch then
-  command.add(function()
+  command.add(function(active_view)
     return view.hovered_item and view.hovered_item.type == "dir"
+      and (active_view or core.active_view) == view
   end, {
     ["treeview:search-in-directory"] = function(item)
       command.perform("project-search:find", view.hovered_item.abs_filename)
@@ -611,9 +615,11 @@ if projectsearch then
   })
 end
 
-command.add(function()
+command.add(function(active_view)
   local item = treeitem()
-  return not is_project_folder(item), item
+  return item ~= nil
+    and not is_project_folder(item)
+    and (active_view or core.active_view) == view, item
 end, {
   ["treeview:delete"] = function(item)
     local filename = item.abs_filename
@@ -866,11 +872,12 @@ command.add(
   end
 })
 
-command.add(function()
+command.add(function(active_view)
     local item = treeitem()
     return item
       and not is_primary_project_folder(item.abs_filename)
-      and is_project_folder(item), item
+      and is_project_folder(item)
+      and (active_view or core.active_view) == view, item
   end, {
   ["treeview:remove-project-directory"] = function(item)
     core.remove_project(item.project)

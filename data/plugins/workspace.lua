@@ -121,10 +121,22 @@ local function save_node(node)
         end
       end
     end
+    if #res.views == 0 then
+      return nil
+    end
   else
+    local a = save_node(node.a)
+    local b = save_node(node.b)
+    if not a and not b then
+      return nil
+    elseif not a then
+      return b
+    elseif not b then
+      return a
+    end
     res.divider = node.divider
-    res.a = save_node(node.a)
-    res.b = save_node(node.b)
+    res.a = a
+    res.b = b
   end
   return res
 end
@@ -156,6 +168,11 @@ local function load_node(node, t)
     node.divider = t.divider
     local res1 = load_node(node.a, t.a)
     local res2 = load_node(node.b, t.b)
+    if node.a:is_empty() and not node.a.is_primary_node then
+      node:consume(node.b)
+    elseif node.b:is_empty() and not node.b.is_primary_node then
+      node:consume(node.a)
+    end
     return res1 or res2
   end
 end
@@ -182,13 +199,17 @@ local function save_workspace()
     id = id + 1
   end
   local root = get_unlocked_root(core.root_view.root_node)
-  storage.save(STORAGE_MODULE, project_dir .. "-" .. id, { path = core.root_project().path, documents = save_node(root), directories = save_directories() })
+  local documents = save_node(root)
+  if not documents then
+    return
+  end
+  storage.save(STORAGE_MODULE, project_dir .. "-" .. id, { path = core.root_project().path, documents = documents, directories = save_directories() })
 end
 
 
 local function load_workspace()
   local workspace = consume_workspace(core.root_project().path)
-  if workspace then
+  if workspace and workspace.documents then
     local root = get_unlocked_root(core.root_view.root_node)
     local active_view = load_node(root, workspace.documents)
     if active_view then
