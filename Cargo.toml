@@ -3,6 +3,8 @@ members = ["forge-core"]
 resolver = "2"
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = "thin"
 strip = true
+codegen-units = 1
+panic = "abort"

@@ -1,5 +1,7 @@
 # Change Log
 
+## [0.3.1] - 2026-03-11 — Release binary size optimization.
+
 ## [0.3.0] - 2026-03-11 — Config + editing upgrades and language support.
 
 * Moved editor fonts, theme colors, syntax colors, and UI style tuning into `config.lua`
