@@ -47,6 +47,7 @@ local function keymap_macos(keymap)
     ["cmd+shift+s"] = "doc:save-as",
 
     ["cmd+z"] = "doc:undo",
+    ["cmd+shift+z"] = "doc:redo",
     ["cmd+y"] = "doc:redo",
     ["cmd+x"] = "doc:cut",
     ["cmd+c"] = "doc:copy",
@@ -73,6 +74,7 @@ local function keymap_macos(keymap)
     ["cmd+j"] = "doc:join-lines",
     ["cmd+a"] = "doc:select-all",
     ["cmd+d"] = { "find-replace:select-add-next", "doc:select-word" },
+    ["cmd+option+l"] = "find-replace:select-all-found",
     ["cmd+f3"] = "find-replace:select-next",
     ["cmd+l"] = "doc:select-lines",
     ["cmd+shift+l"] = { "find-replace:select-add-all", "doc:select-word" },

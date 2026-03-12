@@ -12,7 +12,7 @@ which is supported by LSP servers like the
 [Sumneko Lua LSP](https://github.com/sumneko/lua-language-server).
 This means that you can get nice code autocompletion and descriptions
 of Lite core libraries and symbols when developing plugins or adding
-any options to your **User Module File** (init.lua).
+any options to your user configuration file (`config.lua`).
 
 ## The Base Core
 

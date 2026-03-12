@@ -23,6 +23,44 @@ There will be a tag "InitialPort" for the initial port into Rust, before I begin
 - PCRE2 regex engine
 - Cross-platform filesystem monitoring via the `notify` crate
 - No system Lua required — Lua 5.4 is vendored via `mlua`
+- User `config.lua` as the main customization surface for fonts, theme colors, syntax colors, and UI tuning
+- Multi-cursor editing, including select-next, select-all-occurrences, and find-to-multi-cursor workflows
+- Remote SSH project editing via `sshfs`
+
+## Editing Workflows
+
+### Multi-cursor editing
+
+Lite-Anvil supports "select many, edit once" workflows.
+
+- `Ctrl+D` / `Cmd+D`: add the next occurrence of the current selection
+- `Ctrl+Shift+L` / `Cmd+Shift+L`: select all occurrences of the current selection at once
+- `Ctrl+Alt+L` / `Cmd+Option+L`: after `Ctrl+F` / `Cmd+F`, turn the current find term into multi-cursors for every match in the file
+
+Typical flow:
+
+1. Select a word or phrase, or run Find with `Ctrl+F` / `Cmd+F`.
+2. Use `Ctrl+D` / `Cmd+D` to grow one match at a time, or `Ctrl+Shift+L` / `Cmd+Shift+L` to grab every occurrence of the current selection.
+3. If you used Find, press `Ctrl+Alt+L` / `Cmd+Option+L` to convert all matches of the current find term into simultaneous selections.
+4. Type once to edit all selected matches together.
+
+### Remote SSH editing
+
+Remote editing is implemented by mounting a remote path locally with `sshfs`, then opening that mount as a normal project.
+
+Requirements:
+
+- `sshfs` must be installed on the machine running Lite-Anvil
+- SSH authentication should already work non-interactively, or be handled by your SSH agent
+
+Usage:
+
+1. Open the command palette.
+2. Run `Remote Ssh Open Project` to replace the current project with a remote one, or `Remote Ssh Add Project` to add a second remote project.
+3. Enter a remote spec in the form `user@host:/absolute/path`.
+4. Browse and edit files normally in the tree view and editor.
+
+The mount is cleaned up when the remote project is removed from the session.
 
 ## Building
 

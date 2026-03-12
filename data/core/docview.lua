@@ -558,6 +558,19 @@ end
 
 
 function DocView:draw_overlay()
+  if self:is(DocView) and config.long_line_indicator and config.line_limit > 0 then
+    local line_x = self:get_line_screen_position(1)
+    local character_width = self:get_font():get_width("n")
+    local x = line_x + (character_width * config.line_limit)
+    renderer.draw_rect(
+      x,
+      self.position.y,
+      math.max(1, config.long_line_indicator_width),
+      self.size.y,
+      style.guide or style.selection
+    )
+  end
+
   if core.active_view == self then
     local minline, maxline = self:get_visible_line_range()
     -- draw caret if it overlaps this line
@@ -616,6 +629,9 @@ function DocView:on_context_menu()
     { text = "Cut",     command = "doc:cut" },
     { text = "Copy",    command = "doc:copy" },
     { text = "Paste",   command = "doc:paste" },
+    ContextMenu.DIVIDER,
+    { text = "Add Next Occurrence", command = "find-replace:select-add-next" },
+    { text = "Add All Occurrences", command = "find-replace:select-add-all" },
     ContextMenu.DIVIDER,
     { text = "Find",    command = "find-replace:find"    },
     { text = "Replace", command = "find-replace:replace" }

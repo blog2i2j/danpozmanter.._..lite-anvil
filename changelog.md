@@ -1,5 +1,14 @@
 # Change Log
 
+## [0.3.0] - 2026-03-11 — Config + editing upgrades and language support.
+
+* Moved editor fonts, theme colors, syntax colors, and UI style tuning into `config.lua`
+* Added long-line indicator
+* Added log font controls
+* Multi-selection editing commands, including find-to-multi-cursor selection of all matches at once.
+* Remote SSH project mounting via `sshfs`.
+* Added syntax highlighting for F#, SQL, PHP, Assembly, Ruby, Dart, Swift, R, Elixir, Clojure, and Scala.
+
 ## [0.2.6] - 2026-03-11 — Markdown + fonts.
 
 * Switching to [Lilex Font](https://github.com/mishamyrt/Lilex)
@@ -1731,7 +1740,7 @@ can be optionally specified:
 - antialiasing: grayscale or subpixel
 - hinting: none, slight or full
 
-See data/core/style.lua for the details about its utilisation.
+These options are now configured from `config.lua` via `config.fonts.*.options`.
 
 The default remains antialiasing subpixel and hinting slight to reproduce the
 behavior of previous versions.

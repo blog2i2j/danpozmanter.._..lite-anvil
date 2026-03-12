@@ -285,7 +285,8 @@ command.add(nil, {
   end,
 
   ["core:open-user-module"] = function()
-    local user_module_doc = core.open_doc(USERDIR .. "/init.lua")
+    core.ensure_user_directory()
+    local user_module_doc = core.open_doc(USERDIR .. "/config.lua")
     if not user_module_doc then return end
     core.root_view:open_doc(user_module_doc)
   end,

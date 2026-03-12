@@ -1,51 +1,48 @@
-local b05 = 'rgba(0,0,0,0.5)'   local red = '#994D4D'
-local b80 = '#333333'       local orange  = '#B3661A'
-local b60 = '#808080'       local green   = '#52994D'
-local b40 = '#ADADAD'       local teal    = '#4D9999'
-local b20 = '#CECECE'       local blue    = '#1A66B3'
-local b00 = '#E6E6E6'       local magenta = '#994D99'
---------------------------=--------------------------
-local style               =     require  'core.style'
-local common              =     require 'core.common'
---------------------------=--------------------------
-style.line_highlight      =     { common.color(b20) }
-style.background          =     { common.color(b00) }
-style.background2         =     { common.color(b20) }
-style.background3         =     { common.color(b20) }
-style.text                =     { common.color(b60) }
-style.caret               =     { common.color(b80) }
-style.accent              =     { common.color(b80) }
-style.dim                 =     { common.color(b60) }
-style.divider             =     { common.color(b40) }
-style.selection           =     { common.color(b40) }
-style.line_number         =     { common.color(b60) }
-style.line_number2        =     { common.color(b80) }
-style.scrollbar           =     { common.color(b40) }
-style.scrollbar2          =     { common.color(b60) }
-style.nagbar              =     { common.color(red) }
-style.nagbar_text         =     { common.color(b00) }
-style.nagbar_dim          =     { common.color(b05) }
---------------------------=--------------------------
-style.syntax              =                        {}
-style.syntax['normal']    =     { common.color(b80) }
-style.syntax['symbol']    =     { common.color(b80) }
-style.syntax['comment']   =     { common.color(b60) }
-style.syntax['keyword']   =    { common.color(blue) }
-style.syntax['keyword2']  =     { common.color(red) }
-style.syntax['number']    =    { common.color(teal) }
-style.syntax['literal']   =    { common.color(blue) }
-style.syntax['string']    =   { common.color(green) }
-style.syntax['operator']  = { common.color(magenta) }
-style.syntax['function']  =    { common.color(blue) }
---------------------------=--------------------------
-style.syntax.paren1       = { common.color(magenta) }
-style.syntax.paren2       =  { common.color(orange) }
-style.syntax.paren3       =    { common.color(teal) }
-style.syntax.paren4       =    { common.color(blue) }
-style.syntax.paren5       =     { common.color(red) }
---------------------------=--------------------------
-style.lint                =                        {}
-style.lint.info           =    { common.color(blue) }
-style.lint.hint           =   { common.color(green) }
-style.lint.warning        =     { common.color(red) }
-style.lint.error          =  { common.color(orange) }
+local config = require "core.config"
+local style = require "core.style"
+
+style.register_theme("textadept", {
+  background = "#E6E6E6",
+  background2 = "#CECECE",
+  background3 = "#CECECE",
+  text = "#808080",
+  caret = "#333333",
+  accent = "#333333",
+  dim = "#808080",
+  divider = "#ADADAD",
+  selection = "#ADADAD",
+  line_number = "#808080",
+  line_number2 = "#333333",
+  line_highlight = "#CECECE",
+  scrollbar = "#ADADAD",
+  scrollbar2 = "#808080",
+  nagbar = "#994D4D",
+  nagbar_text = "#E6E6E6",
+  nagbar_dim = "rgba(0,0,0,0.5)",
+  syntax = {
+    normal = "#333333",
+    symbol = "#333333",
+    comment = "#808080",
+    keyword = "#1A66B3",
+    keyword2 = "#994D4D",
+    number = "#4D9999",
+    literal = "#1A66B3",
+    string = "#52994D",
+    operator = "#994D99",
+    ["function"] = "#1A66B3",
+    paren1 = "#994D99",
+    paren2 = "#B3661A",
+    paren3 = "#4D9999",
+    paren4 = "#1A66B3",
+    paren5 = "#994D4D",
+  },
+  lint = {
+    info = "#1A66B3",
+    hint = "#52994D",
+    warning = "#994D4D",
+    error = "#B3661A",
+  },
+})
+
+config.theme = "textadept"
+return style

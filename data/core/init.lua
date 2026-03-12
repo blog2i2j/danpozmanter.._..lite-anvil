@@ -18,6 +18,15 @@ local Project
 
 local core = {}
 
+local function get_user_init_filename()
+  return USERDIR .. PATHSEP .. "init.lua"
+end
+
+
+local function get_user_config_filename()
+  return USERDIR .. PATHSEP .. "config.lua"
+end
+
 local function load_session()
   local ok, t = pcall(dofile, USERDIR .. PATHSEP .. "session.lua")
   return ok and t or {}
@@ -118,8 +127,24 @@ local function write_user_init_file(init_filename)
   local init_file = io.open(init_filename, "w")
   if not init_file then error("cannot create file: \"" .. init_filename .. "\"") end
   init_file:write([[
+-- Bootstrap the user configuration.
+-- Put all runtime settings and customizations in config.lua.
+
+if not rawget(_G, "__lite_anvil_user_config_loaded") then
+  require "config"
+end
+
+]])
+  init_file:close()
+end
+
+
+local function write_user_config_file(config_filename)
+  local config_file = io.open(config_filename, "w")
+  if not config_file then error("cannot create file: \"" .. config_filename .. "\"") end
+  config_file:write([[
 -- put user settings here
--- this module will be loaded after everything else when the application starts
+-- this module will be loaded during editor startup
 -- it will be automatically reloaded when saved
 
 local core = require "core"
@@ -143,31 +168,67 @@ local style = require "core.style"
 
 ------------------------------- Fonts ----------------------------------------
 
--- customize fonts in data/core/style.lua
---
 -- DATADIR is the location of the installed Lite-Anvil Lua code, default color
 -- schemes and fonts.
 -- USERDIR is the location of the Lite-Anvil configuration directory.
 --
--- font names used by lite:
--- style.font          : user interface
--- style.big_font      : big text in welcome screen
--- style.icon_font     : icons
--- style.icon_big_font : toolbar icons
--- style.code_font     : code
+-- Fonts can be customized entirely from this file.
+-- Available font options:
+-- antialiasing = "none" | "grayscale" | "subpixel"
+-- hinting      = "none" | "slight" | "full"
+-- bold         = true | false
+-- italic       = true | false
+-- underline    = true | false
+-- smoothing    = true | false
+-- strikethrough= true | false
 --
--- the function to load the font accept a 3rd optional argument like:
+-- Example:
+-- config.fonts.ui = {
+--   paths = {
+--     USERDIR .. "/fonts/YourUIFont.ttf",
+--     DATADIR .. "/fonts/Lilex-Regular.ttf",
+--   },
+--   size = 15,
+--   options = { antialiasing = "grayscale", hinting = "slight" }
+-- }
 --
--- {antialiasing="grayscale", hinting="full", bold=true, italic=true, underline=true, smoothing=true, strikethrough=true}
+-- config.fonts.code = {
+--   path = USERDIR .. "/fonts/YourMono.ttf",
+--   size = 15,
+--   options = { hinting = "full" }
+-- }
 --
--- possible values are:
--- antialiasing: grayscale, subpixel
--- hinting: none, slight, full
--- bold: true, false
--- italic: true, false
--- underline: true, false
--- smoothing: true, false
--- strikethrough: true, false
+-- config.fonts.syntax["comment"] = {
+--   path = USERDIR .. "/fonts/YourMonoItalic.ttf",
+--   size = 15,
+--   options = { italic = true }
+-- }
+
+------------------------------- Theme ----------------------------------------
+
+-- Built-in themes:
+-- config.theme = "default"
+-- config.theme = "fall"
+-- config.theme = "summer"
+-- config.theme = "textadept"
+--
+-- You can override any theme color here. These keys map to `style.*`.
+-- Syntax token colors go under `config.colors.syntax`.
+-- Log colors go under `config.colors.log`.
+--
+-- config.colors.background = "#1f2128"
+-- config.colors.text = "#d7dae0"
+-- config.colors.selection = "#364055"
+-- config.colors.guide = "#4c566a"
+-- config.colors.syntax.keyword = "#ff7a90"
+-- config.colors.syntax.string = "#ffd479"
+-- config.colors.syntax.comment = "#7f8c98"
+-- config.colors.log.ERROR = { icon = "!", color = "#ff5f56" }
+--
+-- UI sizing is customizable here too:
+-- config.ui.caret_width = 2
+-- config.ui.padding_x = 14
+-- config.ui.padding_y = 7
 
 ------------------------------ Plugins ----------------------------------------
 
@@ -175,6 +236,11 @@ local style = require "core.style"
 
 -- disable plugin detectindent, otherwise it is enabled by default:
 -- config.plugins.detectindent = false
+
+-------------------------- Editor Settings ------------------------------------
+
+-- draw a vertical marker at config.line_limit:
+-- config.long_line_indicator = true
 
 ---------------------------- Miscellaneous -------------------------------------
 
@@ -191,7 +257,7 @@ local style = require "core.style"
 -- }
 
 ]])
-  init_file:close()
+  config_file:close()
 end
 
 
@@ -242,9 +308,13 @@ function core.ensure_user_directory()
     if not system.get_file_info(USERDIR) then
       create_user_directory()
     end
-    local init_filename = USERDIR .. PATHSEP .. "init.lua"
+    local init_filename = get_user_init_filename()
     if not system.get_file_info(init_filename) then
       write_user_init_file(init_filename)
+    end
+    local config_filename = get_user_config_filename()
+    if not system.get_file_info(config_filename) then
+      write_user_config_file(config_filename)
     end
   end)
 end
@@ -506,7 +576,24 @@ end
 
 
 local function load_lua_plugin_if_exists(plugin)
-  return system.get_file_info(plugin.file) and dofile(plugin.file)
+  if not system.get_file_info(plugin.file) then
+    return nil
+  end
+  local result = dofile(plugin.file)
+  if plugin.name == "User Module" then
+    require("core.style").apply_config()
+  end
+  return result
+end
+
+
+local function load_user_config_if_exists(plugin)
+  if system.get_file_info(plugin.file) then
+    rawset(_G, "__lite_anvil_user_config_loaded", true)
+    local result = dofile(plugin.file)
+    require("core.style").apply_config()
+    return result
+  end
 end
 
 
@@ -596,7 +683,8 @@ function core.load_plugins()
     datadir = {dir = DATADIR, plugins = {}},
   }
   local files, ordered = {}, {
-    { priority = -2, load = load_lua_plugin_if_exists, version_match = true, file = USERDIR .. PATHSEP .. "init.lua", name = "User Module" },
+    { priority = -3, load = load_user_config_if_exists, version_match = true, file = get_user_config_filename(), name = "User Config" },
+    { priority = -2, load = load_lua_plugin_if_exists, version_match = true, file = get_user_init_filename(), name = "User Module" },
     { priority = -1, load = load_lua_plugin_if_exists, version_match = true, file = core.root_project().path .. PATHSEP .. ".lite_project.lua", name = "Project Module" }
   }
   for _, root_dir in ipairs {DATADIR, USERDIR} do
@@ -663,6 +751,9 @@ function core.reload_module(name)
   if type(old) == "table" then
     for k, v in pairs(new) do old[k] = v end
     package.loaded[name] = old
+  end
+  if name:find("^colors%.") then
+    require("core.style").apply_config()
   end
 end
 

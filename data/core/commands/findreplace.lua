@@ -3,6 +3,7 @@ local command = require "core.command"
 local config = require "core.config"
 local search = require "core.doc.search"
 local keymap = require "core.keymap"
+local style = require "core.style"
 local DocView = require "core.docview"
 local CommandView = require "core.commandview"
 local StatusView = require "core.statusview"
@@ -20,11 +21,13 @@ end
 
 local function get_find_tooltip()
   local rf = keymap.get_binding("find-replace:repeat-find")
+  local sa = keymap.get_binding("find-replace:select-all-found")
   local ti = keymap.get_binding("find-replace:toggle-sensitivity")
   local tr = keymap.get_binding("find-replace:toggle-regex")
   return (find_regex and "[Regex] " or "") ..
     (case_sensitive and "[Sensitive] " or "") ..
     (rf and ("Press " .. rf .. " to select the next match.") or "") ..
+    (sa and (" " .. sa .. " selects all matches as multi-cursors.") or "") ..
     (ti and (" " .. ti .. " toggles case sensitivity.") or "") ..
     (tr and (" " .. tr .. " toggles regex find.") or "")
 end
@@ -196,6 +199,49 @@ local function select_next(reverse)
   if l2 then doc():set_selection(l2, c2, l1, c1) end
 end
 
+
+local function select_all_found(dv)
+  if not last_text or last_text == "" then
+    core.error("No find text to convert into multi-cursors")
+    return
+  end
+
+  local matches = {}
+  local line, col = 1, 1
+  local opt = {
+    no_case = not case_sensitive,
+    regex = find_regex,
+  }
+
+  while true do
+    local l1, c1, l2, c2 = search.find(dv.doc, line, col, last_text, opt)
+    if not l1 then break end
+
+    table.insert(matches, { l2, c2, l1, c1 })
+
+    local next_line, next_col = l2, c2
+    if l1 == l2 and c1 == c2 then
+      next_line, next_col = dv.doc:position_offset(l2, c2, 1)
+      if next_line == l2 and next_col == c2 then
+        break
+      end
+    end
+    line, col = next_line, next_col
+  end
+
+  if #matches == 0 then
+    core.error("Couldn't find %q", last_text)
+    return
+  end
+
+  dv.doc:set_selection(table.unpack(matches[1]))
+  for i = 2, #matches do
+    dv.doc:add_selection(table.unpack(matches[i]))
+  end
+  dv:scroll_to_line(matches[1][3], true)
+  core.status_view:show_message("i", style.text, string.format("%d selection(s) active", #matches))
+end
+
 ---@param in_selection? boolean whether to replace in the selections only, or in the whole file.
 local function find_replace(in_selection)
   local l1, c1, l2, c2 = doc():get_selection()
@@ -292,6 +338,10 @@ command.add(valid_for_finding, {
         core.error("Couldn't find %q", last_text)
       end
     end
+  end,
+
+  ["find-replace:select-all-found"] = function(dv)
+    select_all_found(dv)
   end,
 })
 

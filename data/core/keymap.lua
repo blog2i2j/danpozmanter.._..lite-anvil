@@ -426,6 +426,7 @@ keymap.add_direct {
   ["ctrl+shift+s"] = "doc:save-as",
 
   ["ctrl+z"] = "doc:undo",
+  ["ctrl+shift+z"] = "doc:redo",
   ["ctrl+y"] = "doc:redo",
   ["ctrl+x"] = "doc:cut",
   ["ctrl+c"] = "doc:copy",
@@ -451,6 +452,7 @@ keymap.add_direct {
   ["ctrl+j"] = "doc:join-lines",
   ["ctrl+a"] = "doc:select-all",
   ["ctrl+d"] = { "find-replace:select-add-next", "doc:select-word" },
+  ["ctrl+alt+l"] = "find-replace:select-all-found",
   ["ctrl+f3"] = "find-replace:select-next",
   ["ctrl+shift+f3"] = "find-replace:select-previous",
   ["ctrl+l"] = "doc:select-lines",

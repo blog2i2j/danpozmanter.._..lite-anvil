@@ -171,6 +171,89 @@ config.line_endings = PLATFORM == "Windows" and "crlf" or "lf"
 ---@type number
 config.line_limit = 80
 
+---Name of the built-in color theme to use.
+---Available built-in themes are `default`, `fall`, `summer`, and `textadept`.
+---
+---Defaults to `default`.
+---@type string
+config.theme = "default"
+
+---UI metrics and spacing settings.
+---Values are specified before applying `SCALE`.
+config.ui = {
+  divider_size = 1,
+  scrollbar_size = 4,
+  expanded_scrollbar_size = 12,
+  minimum_thumb_size = 20,
+  contracted_scrollbar_margin = 8,
+  expanded_scrollbar_margin = 12,
+  caret_width = 2,
+  tab_width = 170,
+  padding_x = 14,
+  padding_y = 7,
+}
+
+---Font settings for the editor UI and code.
+---
+---Each font spec supports:
+---* `path` for one font file
+---* `paths` for a fallback font group
+---* `size` in points before scaling
+---* `options` matching `renderer.font.load()`
+config.fonts = {
+  ui = {
+    path = DATADIR .. "/fonts/Lilex-Regular.ttf",
+    size = 15,
+    options = {},
+  },
+  code = {
+    path = DATADIR .. "/fonts/Lilex-Medium.ttf",
+    size = 15,
+    options = {},
+  },
+  big = {
+    size = 46,
+    options = {},
+  },
+  icon = {
+    path = DATADIR .. "/fonts/icons.ttf",
+    size = 16,
+    options = {
+      antialiasing = "grayscale",
+      hinting = "full",
+    },
+  },
+  icon_big = {
+    size = 23,
+    options = {},
+  },
+  syntax = {},
+}
+
+---Color customization table.
+---
+---Top-level keys map directly to `style.*` colors such as `background`,
+---`text`, `selection`, `caret`, `guide`, `warn`, and `error`.
+---Syntax token colors belong under `syntax`.
+---Log colors belong under `log`.
+config.colors = {
+  syntax = {},
+  log = {},
+  lint = {},
+}
+
+---Draws a vertical indicator at `config.line_limit`.
+---
+---Defaults to false.
+---@type boolean
+config.long_line_indicator = false
+
+---Width, in pixels, of the long line indicator.
+---
+---Defaults to 1.
+---@type number
+config.long_line_indicator_width = 1
+
 ---Enables/disables all transitions.
 ---
 ---Defaults to true.
