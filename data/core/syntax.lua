@@ -1,5 +1,13 @@
 local common = require "core.common"
 local core   = require "core"
+local native_tokenizer = nil
+
+do
+  local ok, mod = pcall(require, "native_tokenizer")
+  if ok then
+    native_tokenizer = mod
+  end
+end
 
 local syntax = {}
 syntax.items = {}
@@ -7,6 +15,10 @@ syntax.lazy_items = {}
 syntax.lazy_loaded = {}
 
 syntax.plain_text_syntax = { name = "Plain Text", patterns = {}, symbols = {} }
+
+if native_tokenizer and native_tokenizer.register_syntax then
+  pcall(native_tokenizer.register_syntax, "Plain Text", syntax.plain_text_syntax)
+end
 
 
 ---Checks whether the pattern / regex compiles correctly and matches something.
@@ -76,6 +88,13 @@ function syntax.add(t)
   end
 
   table.insert(syntax.items, t)
+
+  if native_tokenizer and native_tokenizer.available and t.name then
+    local ok, err = pcall(native_tokenizer.register_syntax, t.name, t)
+    if not ok then
+      core.warn("Failed to register %s with native tokenizer: %s", t.name, err)
+    end
+  end
 end
 
 

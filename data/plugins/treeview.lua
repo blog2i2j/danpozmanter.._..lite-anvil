@@ -57,7 +57,10 @@ function TreeView:new()
   self.visible = config.plugins.treeview.visible
   self.init_size = true
   local saved_size = core.session and core.session.treeview_size
-  self.target_size = type(saved_size) == "number" and saved_size or config.plugins.treeview.size
+  if type(saved_size) == "number" then
+    config.plugins.treeview.size = saved_size
+  end
+  self.target_size = config.plugins.treeview.size
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
   self.cache = {}

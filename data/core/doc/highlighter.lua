@@ -1,8 +1,15 @@
 local core = require "core"
 local common = require "core.common"
-local config = require "core.config"
 local tokenizer = require "core.tokenizer"
 local Object = require "core.object"
+local native_tokenizer = nil
+
+do
+  local ok, mod = pcall(require, "native_tokenizer")
+  if ok then
+    native_tokenizer = mod
+  end
+end
 
 
 local Highlighter = Object:extend()
@@ -14,6 +21,7 @@ function Highlighter:new(doc)
   self.running = false
   self:reset()
 end
+
 
 -- init incremental syntax highlighting
 function Highlighter:start()
@@ -248,7 +256,30 @@ function Highlighter:tokenize_line(idx, state, resume)
   local res = {}
   res.init_state = state
   res.text = self.doc.lines[idx]
-  res.tokens, res.state, res.resume = tokenizer.tokenize(self.doc.syntax, res.text, state, resume)
+
+  local syntax_name = self.doc.syntax and self.doc.syntax.name
+  if native_tokenizer and syntax_name then
+    local native_resume = resume and resume.native_resume or resume
+    local ok, tokens, next_state, next_resume = pcall(
+      native_tokenizer.tokenize_line,
+      syntax_name,
+      res.text,
+      state,
+      native_resume
+    )
+    if ok then
+      res.tokens = tokens
+      res.state = next_state
+      res.resume = next_resume and { native_resume = next_resume } or nil
+    else
+      core.error("Native tokenizer error for %s: %s", syntax_name, tokens)
+      res.tokens = { "normal", res.text }
+      res.state = state or "\0"
+    end
+  else
+    res.tokens, res.state, res.resume = tokenizer.tokenize(self.doc.syntax, res.text, state, resume)
+  end
+
   res.base_positioned = pair_tokens_to_positioned(res.tokens)
   res.positioned = clone_positioned(res.base_positioned)
   res.signature = calc_signature(res.positioned)

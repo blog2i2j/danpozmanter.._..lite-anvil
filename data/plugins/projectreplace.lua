@@ -34,6 +34,7 @@ function ReplaceView:new(path, search, replace, fn_find, fn_apply, path_glob)
   self.brightness    = 0
   self.replaced_count = 0
   self.replaced_files = 0
+  self.operation      = "replace"
   self:begin_scan()
 end
 
@@ -274,19 +275,40 @@ function ReplaceView:draw()
 
   local msg
   if self.phase == "scanning" then
-    msg = string.format("Searching (%d files, %d matches) for %q%s...",
-      self.last_file_idx, #self.results, self.search,
-      self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
+    if self.operation == "swap" then
+      msg = string.format("Scanning (%d files, %d matches) to swap %q and %q%s...",
+        self.last_file_idx, #self.results, self.search, self.replace,
+        self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
+    else
+      msg = string.format("Searching (%d files, %d matches) for %q%s...",
+        self.last_file_idx, #self.results, self.search,
+        self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
+    end
   elseif self.phase == "confirming" then
-    msg = string.format("Found %d matches for %q%s — press F5 to replace all with %q",
-      #self.results, self.search,
-      self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "",
-      self.replace)
+    if self.operation == "swap" then
+      msg = string.format("Found %d matches to swap %q and %q%s — press F5 to apply",
+        #self.results, self.search, self.replace,
+        self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
+    else
+      msg = string.format("Found %d matches for %q%s — press F5 to replace all with %q",
+        #self.results, self.search,
+        self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "",
+        self.replace)
+    end
   elseif self.phase == "replacing" then
-    msg = string.format("Replacing... (%d files written)", self.replaced_files)
+    if self.operation == "swap" then
+      msg = string.format("Swapping... (%d files written)", self.replaced_files)
+    else
+      msg = string.format("Replacing... (%d files written)", self.replaced_files)
+    end
   else
-    msg = string.format("Done — replaced %d occurrences in %d files (%q -> %q)",
-      self.replaced_count, self.replaced_files, self.search, self.replace)
+    if self.operation == "swap" then
+      msg = string.format("Done — swapped %d occurrences in %d files (%q <-> %q)",
+        self.replaced_count, self.replaced_files, self.search, self.replace)
+    else
+      msg = string.format("Done — replaced %d occurrences in %d files (%q -> %q)",
+        self.replaced_count, self.replaced_files, self.search, self.replace)
+    end
   end
   renderer.draw_text(style.font, msg, x, y, color)
 
@@ -333,6 +355,55 @@ local function plain_replace(content, search_text, replace_text)
   return table.concat(parts), count
 end
 
+local function make_plain_matcher(search_text, case_sensitive)
+  local needle = case_sensitive and search_text or search_text:lower()
+  return {
+    find = function(text, pos)
+      local haystack = case_sensitive and text or text:lower()
+      local s, e = haystack:find(needle, pos or 1, true)
+      if not s then
+        return nil
+      end
+      return s, e + 1
+    end
+  }
+end
+
+local function make_regex_matcher(search_text, case_sensitive)
+  local re, errmsg = regex.compile(search_text, case_sensitive and "" or "i")
+  if not re then
+    return nil, errmsg
+  end
+  return {
+    find = function(text, pos)
+      return re:cmatch(text, pos or 1)
+    end
+  }
+end
+
+local function replace_with_matcher(content, matcher, replace_text)
+  local parts = {}
+  local count = 0
+  local pos = 1
+  while pos <= #content + 1 do
+    local s, e = matcher.find(content, pos)
+    if not s then
+      table.insert(parts, content:sub(pos))
+      break
+    end
+    table.insert(parts, content:sub(pos, s - 1))
+    table.insert(parts, replace_text)
+    count = count + 1
+    if e > s then
+      pos = e
+    else
+      table.insert(parts, content:sub(s, s))
+      pos = s + 1
+    end
+  end
+  return table.concat(parts), count
+end
+
 local function regex_replace(content, re, replace_text)
   local parts = {}
   local count  = 0
@@ -356,6 +427,50 @@ local function regex_replace(content, re, replace_text)
   return table.concat(parts), count
 end
 
+local function generate_swap_placeholder(content)
+  local counter = 0
+  while true do
+    counter = counter + 1
+    local token = ("__LITE_ANVIL_SWAP_%08x_%08x_%08x__"):format(
+      math.random(0, 0xffffffff),
+      math.random(0, 0xffffffff),
+      counter
+    )
+    if not content:find(token, 1, true) then
+      return token
+    end
+  end
+end
+
+local function swap_replace(content, matcher_a, matcher_b, text_a, text_b)
+  local placeholder = generate_swap_placeholder(content)
+  local after_a, count_a = replace_with_matcher(content, matcher_a, placeholder)
+
+  local parts = {}
+  local count_b = 0
+  local pos = 1
+  while true do
+    local s, e = after_a:find(placeholder, pos, true)
+    local segment
+    if not s then
+      segment = after_a:sub(pos)
+      local new_segment, seg_count = replace_with_matcher(segment, matcher_b, text_a)
+      count_b = count_b + seg_count
+      table.insert(parts, new_segment)
+      break
+    end
+    segment = after_a:sub(pos, s - 1)
+    local new_segment, seg_count = replace_with_matcher(segment, matcher_b, text_a)
+    count_b = count_b + seg_count
+    table.insert(parts, new_segment)
+    table.insert(parts, placeholder)
+    pos = e + 1
+  end
+
+  local final_content = table.concat(parts):gsub(placeholder, text_b)
+  return final_content, count_a + count_b
+end
+
 local function get_selected_text()
   local view = core.active_view
   local doc  = view and view.doc
@@ -364,12 +479,13 @@ local function get_selected_text()
   end
 end
 
-local function open_replace_view(path, search, replace, fn_find, fn_apply, path_glob)
+local function open_replace_view(path, search, replace, fn_find, fn_apply, path_glob, operation)
   if search == "" then
     core.error("Expected non-empty search string")
     return
   end
   local rv = ReplaceView(path, search, replace, fn_find, fn_apply, path_glob)
+  rv.operation = operation or "replace"
   core.root_view:get_active_node_default():add_view(rv)
   return rv
 end
@@ -380,6 +496,66 @@ local function prompt_path_glob(submit)
       submit(text ~= "" and text or nil)
     end
   })
+end
+
+local function parse_yes_no(text, default)
+  local trimmed = text:match("^%s*(.-)%s*$"):lower()
+  if trimmed == "" then
+    return default
+  end
+  if trimmed == "y" or trimmed == "yes" or trimmed == "true" or trimmed == "1" then
+    return true
+  end
+  if trimmed == "n" or trimmed == "no" or trimmed == "false" or trimmed == "0" then
+    return false
+  end
+  return nil
+end
+
+local function prompt_yes_no(label, default, submit)
+  core.command_view:enter(label, {
+    text = "",
+    validate = function(text)
+      return parse_yes_no(text, default) ~= nil
+    end,
+    submit = function(text)
+      submit(parse_yes_no(text, default))
+    end
+  })
+end
+
+local function find_first_of(line_text, matcher_a, matcher_b)
+  local a = { matcher_a.find(line_text, 1) }
+  local b = { matcher_b.find(line_text, 1) }
+  local sa = a[1]
+  local sb = b[1]
+  if sa and sb then
+    return math.min(sa, sb)
+  end
+  return sa or sb
+end
+
+local function prompt_swap_options(path, text_a, text_b, submit)
+  prompt_yes_no("Regex for A? [y/N]", false, function(a_regex)
+    prompt_yes_no("Match Case for A? [Y/n]", true, function(a_case)
+      prompt_yes_no("Regex for B? [y/N]", false, function(b_regex)
+        prompt_yes_no("Match Case for B? [Y/n]", true, function(b_case)
+          prompt_path_glob(function(path_glob)
+            submit({
+              path = path,
+              text_a = text_a,
+              text_b = text_b,
+              a_regex = a_regex,
+              a_case = a_case,
+              b_regex = b_regex,
+              b_case = b_case,
+              path_glob = path_glob,
+            })
+          end)
+        end)
+      end)
+    end)
+  end)
 end
 
 
@@ -399,7 +575,8 @@ command.add(nil, {
                 function(content)
                   return plain_replace(content, search, replace)
                 end,
-                path_glob
+                path_glob,
+                "replace"
               )
             end
           })
@@ -423,11 +600,65 @@ command.add(nil, {
                 function(content)
                   return regex_replace(content, re, replace)
                 end,
-                path_glob
+                path_glob,
+                "replace"
               )
             end
           })
         end)
+      end
+    })
+  end,
+
+  ["project-search:swap"] = function(path)
+    core.command_view:enter("Swap Text A In " .. (path or "Project"), {
+      text = get_selected_text(),
+      select_text = true,
+      submit = function(text_a)
+        core.command_view:enter("Swap Text B", {
+          submit = function(text_b)
+            if text_a == "" or text_b == "" then
+              core.error("Swap text cannot be empty")
+              return
+            end
+            prompt_swap_options(path, text_a, text_b, function(opts)
+              local matcher_a, err_a
+              if opts.a_regex then
+                matcher_a, err_a = make_regex_matcher(opts.text_a, opts.a_case)
+              else
+                matcher_a = make_plain_matcher(opts.text_a, opts.a_case)
+              end
+              if not matcher_a then
+                core.error("%s", err_a)
+                return
+              end
+              local matcher_b, err_b
+              if opts.b_regex then
+                matcher_b, err_b = make_regex_matcher(opts.text_b, opts.b_case)
+              else
+                matcher_b = make_plain_matcher(opts.text_b, opts.b_case)
+              end
+              if not matcher_b then
+                core.error("%s", err_b)
+                return
+              end
+
+              open_replace_view(
+                opts.path,
+                opts.text_a,
+                opts.text_b,
+                function(line_text)
+                  return find_first_of(line_text, matcher_a, matcher_b)
+                end,
+                function(content)
+                  return swap_replace(content, matcher_a, matcher_b, opts.text_a, opts.text_b)
+                end,
+                opts.path_glob,
+                "swap"
+              )
+            end)
+          end
+        })
       end
     })
   end,

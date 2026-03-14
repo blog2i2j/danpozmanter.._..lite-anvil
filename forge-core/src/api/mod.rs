@@ -5,6 +5,7 @@ mod process;
 #[cfg(unix)]
 mod terminal;
 mod regex;
+mod tokenizer;
 mod utf8extra;
 
 use mlua::prelude::*;
@@ -197,6 +198,9 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
 
     let md = make_markdown(lua)?;
     insert(&globals, &pkg_loaded, "markdown", md)?;
+
+    let tokenizer = tokenizer::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "native_tokenizer", tokenizer)?;
 
     Ok(())
 }

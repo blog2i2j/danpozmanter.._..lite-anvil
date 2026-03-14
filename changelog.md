@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.6.0] - 2026-03-14 — Native tokenizer, swap.
+
+* Moved tokenization from Lua to Rust.
+* Project swap operation with per-side regex and case-sensitivity options, using an isolated placeholder pass.
+
 ## [0.5.0] - 2026-03-14 — LSP, terminal, Git, and project workflow upgrades, fixes.
 
 * Added built-in LSP support with startup enabled by default, project lsp.json config, completion, hover, definition/type-definition/implementation, references, rename, symbols, code actions, formatting, signature help, diagnostics, and restart/refresh commands.

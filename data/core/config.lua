@@ -195,6 +195,12 @@ config.lsp = {
   inline_diagnostics = true,
 }
 
+---Native tokenizer rollout settings.
+config.native_tokenizer = {
+  ---Whether to ask the Rust core for token streams before falling back to Lua.
+  enabled = true,
+}
+
 ---UI metrics and spacing settings.
 ---Values are specified before applying `SCALE`.
 config.ui = {
