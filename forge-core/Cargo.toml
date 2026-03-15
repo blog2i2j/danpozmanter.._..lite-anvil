@@ -1,6 +1,6 @@
 [package]
 name = "forge-core"
-version = "0.11.0"
+version = "0.11.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Lite-Anvil text editor — Rust core"
@@ -37,7 +37,7 @@ mlua = { version = "0.11.6", features = ["lua54", "vendored", "send"] }
 
 # SDL3 window, input, and graphics — requires system libsdl3 (installed at /usr/local).
 # sdl3-sys provides raw FFI bindings; pkg-config locates the library.
-sdl3-sys = { version = "0.6", features = ["use-pkg-config"], optional = true }
+sdl3-sys = { version = "0.6", features = ["use-pkg-config", "use-vcpkg"], optional = true }
 
 # Font rasterization — pure Rust, no system dep.
 fontdue = "0.9.3"

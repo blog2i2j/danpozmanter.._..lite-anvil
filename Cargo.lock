@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "forge-core"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
  "bitflags 2.11.0",
@@ -761,6 +761,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d73fc820b0b6b9bd0557de7b799ec9da1ca4f35fcd1cb42f7ceb85e640d1477"
 dependencies = [
  "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -877,6 +878,12 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "walkdir"

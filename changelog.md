@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.11.1] - 2026-03-15 — Windows build fix.
+
+* Fixed Windows MSVC SDL3 linking by wiring vcpkg library discovery into the build.
+
 ## [0.11.0] - 2026-03-15 — Terminal placement, native hot-path work.
 
 * New terminals now open in a bottom pane by default, with configurable tab/left/right/top/bottom placement.

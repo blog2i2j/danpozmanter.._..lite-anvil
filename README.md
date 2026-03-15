@@ -17,14 +17,15 @@ There will be a tag "InitialPort" for the initial port into Rust, before I begin
 
 ## Features
 
-- Full Lua 5.4 plugin API — all Lite XL plugins work without modification
-- SDL3 window and input handling
-- FreeType2 font rendering with subpixel antialiasing
-- PCRE2 regex engine
-- Cross-platform filesystem monitoring via the `notify` crate
-- No system Lua required — Lua 5.4 is vendored via `mlua`
-- User `config.lua` as the main customization surface for fonts, theme colors, syntax colors, and UI tuning
-- Multi-cursor editing, including select-next, select-all-occurrences, and find-to-multi-cursor workflows
+- Full Lua 5.4 plugin API, preserving Lite XL plugin compatibility while replacing the C core with Rust
+- Native Rust core for tokenization, document buffers and undo/redo, search and replace, project scanning, tree/file state, Git status, terminal emulation, picker ranking, and LSP transport/state hot paths
+- Built-in LSP with diagnostics, inline diagnostics, semantic highlighting, completion, hover, go-to-definition, references, rename, symbols, code actions, formatting, and signature help
+- Embedded PTY terminal with ANSI colors, scrollback, rename, color schemes, auto-close on exit, and configurable open placement
+- Project-wide search, regex search, replace, and swap operations, plus native single-file find and replace
+- Git integration with branch/status in the UI, repo-aware tree highlighting, status view, and diff views
+- Multi-cursor editing, command palette, project file picker, split panes, and session restore for files and terminals
+- Config-driven UI theming, fonts, syntax colors, and behavior tuning through `config.lua`
+- Broad built-in syntax highlighting, including PowerShell, TSX, Vue, Svelte, Zig, Haskell, Julia, Lisp, OCaml, PostgreSQL, and more
 - Remote SSH project editing via `sshfs`
 
 ## Editing Workflows
