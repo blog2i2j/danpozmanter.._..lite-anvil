@@ -39,12 +39,27 @@ config.plugins.terminal = common.merge({
       type = "toggle",
       default = true,
     },
+    {
+      label = "Open Position",
+      description = "Where new terminal views open by default.",
+      path = "open_position",
+      type = "selection",
+      default = "bottom",
+      values = {
+        {"Bottom Pane", "bottom"},
+        {"New Tab", "tab"},
+        {"Left Pane", "left"},
+        {"Right Pane", "right"},
+        {"Top Pane", "top"},
+      },
+    },
   },
   shell = os.getenv("SHELL") or "sh",
   shell_args = {},
   scrollback = 5000,
   color_scheme = "eterm",
   close_on_exit = true,
+  open_position = "bottom",
 }, config.plugins.terminal)
 
 local TerminalView = require ".view"

@@ -8,6 +8,14 @@ local CommandView = require "core.commandview"
 local LogView = require "core.logview"
 local View = require "core.view"
 local Object = require "core.object"
+local native_status_model = nil
+
+do
+  local ok, mod = pcall(require, "status_model")
+  if ok then
+    native_status_model = mod
+  end
+end
 
 
 ---@alias core.statusview.styledtext table<integer, renderer.font|renderer.color|string>
@@ -871,7 +879,20 @@ function StatusView:update_active_items()
   self.r_left_width, self.r_right_width = lw, rw
 
   -- try to calc best size for left and right
-  if lw + rw + (style.padding.x * 4) > self.size.x then
+  if native_status_model then
+    local fit = native_status_model.fit_panels(
+      self.size.x,
+      self.r_left_width,
+      self.r_right_width,
+      style.padding.x,
+      self.left_xoffset,
+      self.right_xoffset
+    )
+    lw = fit.left_width
+    rw = fit.right_width
+    self.left_xoffset = fit.left_offset
+    self.right_xoffset = fit.right_offset
+  elseif lw + rw + (style.padding.x * 4) > self.size.x then
     if lw + (style.padding.x * 2) < self.size.x / 2 then
       rw = self.size.x - lw  - (style.padding.x * 3)
       if rw > self.r_right_width then
@@ -884,7 +905,6 @@ function StatusView:update_active_items()
       lw = self.size.x / 2 - (style.padding.x + style.padding.x / 2)
       rw = self.size.x / 2 - (style.padding.x + style.padding.x / 2)
     end
-    -- reposition left and right offsets when window is resized
     if rw >= self.r_right_width then
       self.right_xoffset = 0
     elseif rw > self.right_xoffset + self.r_right_width then

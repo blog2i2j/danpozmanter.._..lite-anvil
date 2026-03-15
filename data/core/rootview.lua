@@ -11,6 +11,20 @@ local ContextMenu = require "core.contextmenu"
 ---@field root_node core.node
 ---@field mouse core.view.position
 local RootView = View:extend()
+local root_split_type = {
+  left = "hsplit",
+  right = "hsplit",
+  top = "vsplit",
+  bottom = "vsplit",
+}
+
+local function get_edge_node(root, placement)
+  local target = (placement == "left" or placement == "top") and "a" or "b"
+  local split_type = root_split_type[placement]
+  if root.type == split_type and root[target] and root[target].type == "leaf" and not root[target].locked then
+    return root[target]
+  end
+end
 
 function RootView:__tostring() return "RootView" end
 
@@ -116,6 +130,45 @@ function RootView:open_doc(doc)
   node:add_view(view)
   self.root_node:update_layout()
   view:scroll_to_line(view.doc:get_selection(), true, true)
+  return view
+end
+
+
+function RootView:add_view(view, placement)
+  placement = placement or "tab"
+  if placement == "tab" then
+    self:get_active_node_default():add_view(view)
+    self.root_node:update_layout()
+    core.set_active_view(view)
+    return view
+  end
+
+  local edge = get_edge_node(self.root_node, placement)
+  if edge then
+    edge:add_view(view)
+    self.root_node:update_layout()
+    core.set_active_view(view)
+    return view
+  end
+
+  local split_type = assert(root_split_type[placement], "invalid root placement")
+  local existing = Node()
+  existing:consume(self.root_node)
+
+  local sibling = Node()
+  sibling.views = {}
+  sibling:add_view(view)
+
+  local new_root = Node(split_type)
+  new_root.a = existing
+  new_root.b = sibling
+  if placement == "left" or placement == "top" then
+    new_root.a, new_root.b = new_root.b, new_root.a
+  end
+
+  self.root_node:consume(new_root)
+  self.root_node:update_layout()
+  core.set_active_view(view)
   return view
 end
 

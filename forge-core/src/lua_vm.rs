@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use mlua::prelude::*;
 use mlua::StdLib;
+use mlua::prelude::*;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -198,4 +198,27 @@ fn arch_tuple() -> String {
         o => o,
     };
     format!("{cpu}-{os}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::install_debug_shim;
+    use mlua::{Lua, LuaOptions, StdLib};
+
+    #[test]
+    fn safe_vm_debug_shim_supports_traceback_and_getinfo() {
+        let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default()).expect("lua");
+        install_debug_shim(&lua).expect("debug shim");
+        lua.load(
+            r#"
+            local info = debug.getinfo(1, "Sl")
+            assert(type(info.short_src) == "string")
+            assert(type(info.currentline) == "number")
+            local tb = debug.traceback("", 1)
+            assert(type(tb) == "string")
+        "#,
+        )
+        .exec()
+        .expect("lua exec");
+    }
 }

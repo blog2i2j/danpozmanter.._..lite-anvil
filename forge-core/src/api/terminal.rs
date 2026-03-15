@@ -7,7 +7,11 @@ use std::ffi::NulError;
 const READ_BUF_SIZE: usize = 4096;
 const INVALID_FD: c_int = -1;
 
-fn push_env_pair(env_pairs: &mut Vec<(CString, CString)>, key: &str, value: &str) -> Result<(), NulError> {
+fn push_env_pair(
+    env_pairs: &mut Vec<(CString, CString)>,
+    key: &str,
+    value: &str,
+) -> Result<(), NulError> {
     env_pairs.push((CString::new(key)?, CString::new(value)?));
     Ok(())
 }
@@ -352,7 +356,17 @@ mod tests {
     fn adds_term_defaults_when_missing() {
         let mut env_pairs = Vec::<(CString, CString)>::new();
         ensure_terminal_env_with(&mut env_pairs, |_| false).expect("env");
-        assert!(env_pairs.iter().any(|(key, value)| key.as_bytes() == b"TERM" && value.as_bytes() == b"xterm-256color"));
-        assert!(env_pairs.iter().any(|(key, value)| key.as_bytes() == b"COLORTERM" && value.as_bytes() == b"truecolor"));
+        assert!(
+            env_pairs
+                .iter()
+                .any(|(key, value)| key.as_bytes() == b"TERM"
+                    && value.as_bytes() == b"xterm-256color")
+        );
+        assert!(
+            env_pairs
+                .iter()
+                .any(|(key, value)| key.as_bytes() == b"COLORTERM"
+                    && value.as_bytes() == b"truecolor")
+        );
     }
 }

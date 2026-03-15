@@ -24,10 +24,17 @@ struct DocState {
     pending_semantic_at: Option<f64>,
 }
 
+#[derive(Clone, Default)]
+struct DiagnosticMeta {
+    sorted: Vec<Value>,
+    line_severity: HashMap<i64, i64>,
+}
+
 #[derive(Default)]
 struct State {
     specs: Vec<Spec>,
     diagnostics: HashMap<String, Value>,
+    diagnostic_meta: HashMap<String, DiagnosticMeta>,
     docs: HashMap<String, DocState>,
 }
 
@@ -188,6 +195,139 @@ fn merge_specs(map: &mut HashMap<String, Value>, value: Value) {
     }
 }
 
+fn diagnostic_start_key(value: &Value) -> (i64, i64) {
+    let range = value.get("range").and_then(Value::as_object);
+    let start = range
+        .and_then(|range| range.get("start"))
+        .and_then(Value::as_object);
+    let line = start
+        .and_then(|start| start.get("line"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let character = start
+        .and_then(|start| start.get("character"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    (line, character)
+}
+
+fn build_diagnostic_meta(diagnostics: &Value) -> DiagnosticMeta {
+    let mut meta = DiagnosticMeta::default();
+    let Some(items) = diagnostics.as_array() else {
+        return meta;
+    };
+
+    meta.sorted = items.clone();
+    meta.sorted.sort_by_key(diagnostic_start_key);
+
+    for diagnostic in items {
+        let range = diagnostic.get("range").and_then(Value::as_object);
+        let start_line = range
+            .and_then(|range| range.get("start"))
+            .and_then(Value::as_object)
+            .and_then(|start| start.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            + 1;
+        let end_line = range
+            .and_then(|range| range.get("end"))
+            .and_then(Value::as_object)
+            .and_then(|end| end.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(start_line - 1)
+            + 1;
+        let severity = diagnostic
+            .get("severity")
+            .and_then(Value::as_i64)
+            .unwrap_or(3);
+        for line in start_line..=end_line.max(start_line) {
+            meta.line_severity
+                .entry(line)
+                .and_modify(|current| {
+                    if severity < *current {
+                        *current = severity;
+                    }
+                })
+                .or_insert(severity);
+        }
+    }
+
+    meta
+}
+
+fn semantic_type_name(name: &str) -> &str {
+    match name {
+        "namespace" => "keyword2",
+        "type" => "keyword2",
+        "class" => "keyword2",
+        "enum" => "keyword2",
+        "interface" => "keyword2",
+        "struct" => "keyword2",
+        "typeParameter" => "keyword2",
+        "parameter" => "symbol",
+        "variable" => "symbol",
+        "property" => "symbol",
+        "enumMember" => "keyword2",
+        "event" => "keyword2",
+        "function" => "function",
+        "method" => "function",
+        "macro" => "keyword2",
+        "keyword" => "keyword",
+        "modifier" => "keyword",
+        "comment" => "comment",
+        "string" => "string",
+        "number" => "number",
+        "regexp" => "number",
+        "operator" => "operator",
+        "decorator" => "literal",
+        _ => "normal",
+    }
+}
+
+fn semantic_lines_to_lua(lua: &Lua, token_types: &[String], data: &[i64]) -> LuaResult<LuaTable> {
+    let out = lua.create_table()?;
+    let mut current_line = 0i64;
+    let mut start_char = 0i64;
+
+    let mut idx = 0usize;
+    while idx + 4 < data.len() {
+        let delta_line = data[idx];
+        let delta_start = data[idx + 1];
+        let len = data[idx + 2];
+        let token_type_idx = data[idx + 3] as usize;
+
+        current_line += delta_line;
+        if delta_line == 0 {
+            start_char += delta_start;
+        } else {
+            start_char = delta_start;
+        }
+
+        let line_no = current_line + 1;
+        let line_table: LuaTable = match out.raw_get(line_no) {
+            Ok(line) => line,
+            Err(_) => {
+                let line = lua.create_table()?;
+                out.raw_set(line_no, line.clone())?;
+                line
+            }
+        };
+        let entry = lua.create_table()?;
+        let token_name = token_types
+            .get(token_type_idx)
+            .map(|name| semantic_type_name(name))
+            .unwrap_or("normal");
+        entry.set("type", token_name)?;
+        entry.set("pos", start_char)?;
+        entry.set("len", len)?;
+        line_table.raw_set((line_table.raw_len() + 1) as i64, entry)?;
+
+        idx += 5;
+    }
+
+    Ok(out)
+}
+
 fn dirname(path: &str) -> Option<PathBuf> {
     Path::new(path).parent().map(Path::to_path_buf)
 }
@@ -301,6 +441,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let mut state = STATE.lock();
             state.specs = specs;
             state.diagnostics.clear();
+            state.diagnostic_meta.clear();
             state.docs.clear();
             Ok(state.specs.len() as i64)
         })?,
@@ -359,6 +500,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let mut state = STATE.lock();
             state.docs.remove(&uri);
             state.diagnostics.remove(&uri);
+            state.diagnostic_meta.remove(&uri);
             Ok(true)
         })?,
     )?;
@@ -376,6 +518,9 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     }
                 }
                 doc_state.last_diagnostic_version = version.or(doc_state.version);
+                state
+                    .diagnostic_meta
+                    .insert(uri.clone(), build_diagnostic_meta(&diagnostics));
                 state.diagnostics.insert(uri, diagnostics);
                 Ok(true)
             },
@@ -391,6 +536,43 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             } else {
                 Ok(LuaValue::Table(lua.create_table()?))
             }
+        })?,
+    )?;
+
+    module.set(
+        "get_sorted_diagnostics",
+        lua.create_function(|lua, uri: String| {
+            let state = STATE.lock();
+            let value = state
+                .diagnostic_meta
+                .get(&uri)
+                .map(|meta| Value::Array(meta.sorted.clone()))
+                .unwrap_or_else(|| Value::Array(Vec::new()));
+            json_to_lua(lua, &value)
+        })?,
+    )?;
+
+    module.set(
+        "get_line_diagnostic_severity",
+        lua.create_function(|_, (uri, line): (String, i64)| {
+            let state = STATE.lock();
+            Ok(state
+                .diagnostic_meta
+                .get(&uri)
+                .and_then(|meta| meta.line_severity.get(&line).copied()))
+        })?,
+    )?;
+
+    module.set(
+        "publish_semantic",
+        lua.create_function(|lua, (token_types, data): (LuaTable, LuaTable)| {
+            let token_types = token_types
+                .sequence_values::<String>()
+                .collect::<LuaResult<Vec<_>>>()?;
+            let data = data
+                .sequence_values::<i64>()
+                .collect::<LuaResult<Vec<_>>>()?;
+            semantic_lines_to_lua(lua, &token_types, &data)
         })?,
     )?;
 
@@ -428,7 +610,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_root_for_doc, normalize_spec};
+    use super::{build_diagnostic_meta, find_root_for_doc, normalize_spec};
     use serde_json::json;
 
     #[test]
@@ -458,5 +640,20 @@ mod tests {
         .expect("spec");
         let root = find_root_for_doc("/tmp/project/src/main.rs", "/tmp/project", &spec);
         assert_eq!(root, "/tmp/project");
+    }
+
+    #[test]
+    fn caches_line_severity() {
+        let meta = build_diagnostic_meta(&json!([
+            {
+                "range": {
+                    "start": { "line": 1, "character": 0 },
+                    "end": { "line": 2, "character": 0 }
+                },
+                "severity": 2
+            }
+        ]));
+        assert_eq!(meta.line_severity.get(&2), Some(&2));
+        assert_eq!(meta.line_severity.get(&3), Some(&2));
     }
 }

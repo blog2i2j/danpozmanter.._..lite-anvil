@@ -1,9 +1,11 @@
 mod dirmonitor;
+mod doc_layout;
 mod doc_native;
 mod git_native;
 mod lsp_manager;
 mod lsp_transport;
 mod markdown;
+mod node_model;
 mod picker;
 #[cfg(unix)]
 mod process;
@@ -12,6 +14,7 @@ mod project_manifest;
 mod project_model;
 mod project_search;
 mod regex;
+mod status_model;
 mod symbol_index;
 #[cfg(unix)]
 mod terminal;
@@ -231,6 +234,9 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let doc_native = doc_native::make_module(lua)?;
     insert(&globals, &pkg_loaded, "doc_native", doc_native)?;
 
+    let doc_layout = doc_layout::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "doc_layout", doc_layout)?;
+
     let symbol_index = symbol_index::make_module(lua)?;
     insert(&globals, &pkg_loaded, "symbol_index", symbol_index)?;
 
@@ -239,6 +245,12 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
 
     let picker = picker::make_module(lua)?;
     insert(&globals, &pkg_loaded, "picker", picker)?;
+
+    let status_model = status_model::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "status_model", status_model)?;
+
+    let node_model = node_model::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "node_model", node_model)?;
 
     let lsp_manager = lsp_manager::make_module(lua)?;
     insert(&globals, &pkg_loaded, "lsp_manager", lsp_manager)?;

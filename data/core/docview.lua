@@ -7,6 +7,14 @@ local translate = require "core.doc.translate"
 local ime = require "core.ime"
 local View = require "core.view"
 local ContextMenu = require "core.contextmenu"
+local native_doc_layout = nil
+
+do
+  local ok, mod = pcall(require, "doc_layout")
+  if ok then
+    native_doc_layout = mod
+  end
+end
 
 ---@class core.docview : core.view
 ---@field super core.view
@@ -171,6 +179,16 @@ end
 
 
 function DocView:get_col_x_offset(line, col)
+  if native_doc_layout and not next(style.syntax_fonts) then
+    local _, indent_size = self.doc:get_indent_info()
+    return native_doc_layout.col_x_offset(
+      self.doc.lines[line] or "\n",
+      col,
+      indent_size,
+      self:get_font():get_width("M")
+    )
+  end
+
   local default_font = self:get_font()
   local _, indent_size = self.doc:get_indent_info()
   default_font:set_tab_size(indent_size)
@@ -203,6 +221,16 @@ end
 
 function DocView:get_x_offset_col(line, x)
   local line_text = self.doc.lines[line]
+
+  if native_doc_layout and not next(style.syntax_fonts) then
+    local _, indent_size = self.doc:get_indent_info()
+    return native_doc_layout.x_offset_col(
+      line_text or "\n",
+      x,
+      indent_size,
+      self:get_font():get_width("M")
+    )
+  end
 
   local default_font = self:get_font()
   local _, indent_size = self.doc:get_indent_info()

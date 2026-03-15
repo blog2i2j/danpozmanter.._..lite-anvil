@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.11.0] - 2026-03-15 — Terminal placement, native hot-path work.
+
+* New terminals now open in a bottom pane by default, with configurable tab/left/right/top/bottom placement.
+* Moved more hot-path layout and cache work into Rust for LSP overlays, monospaced doc hit-testing, status bar fitting, tab metrics, and Git status caching.
+
 ## [0.10.3] - 2026-03-15 — Terminal color output fix, removing more unsafe code.
 
 * Fixed terminal color output by ensuring terminal sessions get TERM and COLORTERM defaults when the app is launched without them.

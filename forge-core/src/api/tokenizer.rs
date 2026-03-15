@@ -447,7 +447,10 @@ fn find_text(
             } else {
                 code.clone()
             };
-            parse_results(ctx.ufind.call::<LuaMultiValue>((text, pattern_code, next))?)?
+            parse_results(
+                ctx.ufind
+                    .call::<LuaMultiValue>((text, pattern_code, next))?,
+            )?
         }
         MatcherKind::Regex { .. } => regex_find(matcher, text, next, anchored)?,
     };
@@ -680,7 +683,6 @@ fn tokens_to_lua(lua: &Lua, tokens: &[(String, String)]) -> LuaResult<LuaTable> 
     Ok(out)
 }
 
-
 fn tokenize_impl(
     lua: &Lua,
     ctx: &NativeTokenizerCtx,
@@ -753,8 +755,7 @@ fn tokenize_impl(
                 if let Some((subsyntax_syntax_id, sub_idx)) = syntax_state.subsyntax_info {
                     let subsyntax_syntax = get_syntax(subsyntax_syntax_id)?;
                     if let Some(subsyntax_pattern) = subsyntax_syntax.patterns.get(sub_idx) {
-                        let sub_find =
-                            find_text(ctx, text, subsyntax_pattern, i, false, true)?;
+                        let sub_find = find_text(ctx, text, subsyntax_pattern, i, false, true)?;
                         let ss = sub_find.first().copied();
                         if let Some(ss) = ss {
                             if s.is_none() || ss < s.unwrap_or(usize::MAX) {

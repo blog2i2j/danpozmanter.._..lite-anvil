@@ -324,16 +324,13 @@ function TerminalView:draw()
   self:draw_scrollbar()
 end
 
-function TerminalView.open(cwd, command_argv, title)
+function TerminalView.open(cwd, command_argv, title, placement)
   local view = TerminalView({
     cwd = cwd or default_cwd(),
     command = command_argv,
     title = title,
   })
-  core.root_view:get_active_node_default():add_view(view)
-  core.root_view.root_node:update_layout()
-  core.set_active_view(view)
-  return view
+  return core.root_view:add_view(view, placement or config.plugins.terminal.open_position or "bottom")
 end
 
 function TerminalView:rename()

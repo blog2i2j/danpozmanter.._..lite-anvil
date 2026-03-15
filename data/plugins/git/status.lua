@@ -218,7 +218,7 @@ function git.refresh(path, force)
   repo.refreshing = true
   if native_git then
     core.add_thread(function()
-      local ok, native_repo = pcall(native_git.status, root)
+      local ok, native_repo = pcall(native_git.status_cached or native_git.status, root)
       repo.refreshing = false
       repo.last_refresh = system.get_time()
       if ok and native_repo then
@@ -231,6 +231,8 @@ function git.refresh(path, force)
         repo.ordered = native_repo.ordered or {}
         repo.dirty = native_repo.dirty or false
         repo.error = native_repo.error
+        repo.signature = native_repo.signature
+        repo.changed = native_repo.changed
       else
         repo.error = tostring(native_repo or "git status failed")
       end

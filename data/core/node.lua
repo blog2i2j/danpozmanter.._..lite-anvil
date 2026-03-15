@@ -5,6 +5,14 @@ local style = require "core.style"
 local Object = require "core.object"
 local EmptyView = require "core.emptyview"
 local View = require "core.view"
+local native_node_model = nil
+
+do
+  local ok, mod = pcall(require, "node_model")
+  if ok then
+    native_node_model = mod
+  end
+end
 
 ---@class core.node : core.object
 local Node = Object:extend()
@@ -126,6 +134,12 @@ function Node:remove_view(root, view)
       self:set_active_view(self.views[idx] or self.views[#self.views])
     end
   else
+    if self == root then
+      self.views = {}
+      self:add_view(EmptyView())
+      core.last_active_view = nil
+      return
+    end
     local parent = self:get_parent_node(root)
     local is_a = (parent.a == self)
     local other = parent[is_a and "b" or "a"]
@@ -160,6 +174,7 @@ function Node:remove_view(root, view)
   end
   core.last_active_view = nil
 end
+
 
 function Node:close_view(root, view)
   local do_close = function()
@@ -265,6 +280,9 @@ end
 
 
 function Node:get_visible_tabs_number()
+  if native_node_model then
+    return native_node_model.visible_tabs(#self.views, self.tab_offset, config.max_tabs)
+  end
   return math.min(#self.views - self.tab_offset + 1, config.max_tabs)
 end
 
@@ -498,7 +516,11 @@ function Node:target_tab_width()
   local n = self:get_visible_tabs_number()
   local w = self.size.x
   if #self.views > n then
-    w = self.size.x - get_scroll_button_width() * 2
+    local scroll_w = select(1, get_scroll_button_width())
+    w = self.size.x - scroll_w * 2
+  end
+  if native_node_model then
+    return native_node_model.target_tab_width(w, #self.views, self.tab_offset, config.max_tabs, style.tab_width)
   end
   return common.clamp(style.tab_width, w / config.max_tabs, w / n)
 end

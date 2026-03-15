@@ -463,6 +463,19 @@ local function get_doc_diagnostics(doc)
   return manager.diagnostics[uri] or {}
 end
 
+local function get_sorted_doc_diagnostics(doc)
+  if not doc or not doc.abs_filename then
+    return {}
+  end
+  local uri = path_to_uri(doc.abs_filename)
+  if native_lsp and native_lsp.get_sorted_diagnostics then
+    return native_lsp.get_sorted_diagnostics(uri) or {}
+  end
+  local diagnostics = get_doc_diagnostics(doc)
+  table.sort(diagnostics, diagnostic_sorter)
+  return diagnostics
+end
+
 local function handle_server_notification(client, message)
   if message.method == "textDocument/publishDiagnostics" then
     publish_diagnostics(client, message.params or {})
@@ -711,30 +724,34 @@ local function apply_semantic_tokens(doc, client, semantic_result)
   local provider = client.capabilities and client.capabilities.semanticTokensProvider
   local token_types = provider and provider.legend and provider.legend.tokenTypes or {}
   local lines = {}
-  local current_line = 0
-  local start_char = 0
 
-  for i = 1, #data, 5 do
-    local delta_line = data[i] or 0
-    local delta_start = data[i + 1] or 0
-    local len = data[i + 2] or 0
-    local token_type_idx = (data[i + 3] or 0) + 1
+  if native_lsp and native_lsp.publish_semantic then
+    lines = native_lsp.publish_semantic(token_types, data) or {}
+  else
+    local current_line = 0
+    local start_char = 0
+    for i = 1, #data, 5 do
+      local delta_line = data[i] or 0
+      local delta_start = data[i + 1] or 0
+      local len = data[i + 2] or 0
+      local token_type_idx = (data[i + 3] or 0) + 1
 
-    current_line = current_line + delta_line
-    if delta_line == 0 then
-      start_char = start_char + delta_start
-    else
-      start_char = delta_start
+      current_line = current_line + delta_line
+      if delta_line == 0 then
+        start_char = start_char + delta_start
+      else
+        start_char = delta_start
+      end
+
+      local doc_line = current_line + 1
+      local positioned = lines[doc_line] or {}
+      positioned[#positioned + 1] = {
+        type = semantic_type_map[token_types[token_type_idx]] or "normal",
+        pos = start_char,
+        len = len,
+      }
+      lines[doc_line] = positioned
     end
-
-    local doc_line = current_line + 1
-    local positioned = lines[doc_line] or {}
-    positioned[#positioned + 1] = {
-      type = semantic_type_map[token_types[token_type_idx]] or "normal",
-      pos = start_char,
-      len = len,
-    }
-    lines[doc_line] = positioned
   end
 
   for line_no in pairs(state.semantic_lines or {}) do
@@ -1018,6 +1035,9 @@ function manager.show_diagnostics()
 end
 
 function manager.get_line_diagnostic_severity(doc, line)
+  if doc and doc.abs_filename and native_lsp and native_lsp.get_line_diagnostic_severity then
+    return native_lsp.get_line_diagnostic_severity(path_to_uri(doc.abs_filename), line)
+  end
   local diagnostics = get_doc_diagnostics(doc)
   local severity
   for i = 1, #diagnostics do
@@ -1378,8 +1398,8 @@ local function goto_diagnostic(forward)
   end
 
   local diagnostics = {}
-  for i = 1, #get_doc_diagnostics(view.doc) do
-    local diagnostic = get_doc_diagnostics(view.doc)[i]
+  for i = 1, #get_sorted_doc_diagnostics(view.doc) do
+    local diagnostic = get_sorted_doc_diagnostics(view.doc)[i]
     if diagnostic.range and diagnostic.range.start then
       diagnostics[#diagnostics + 1] = diagnostic
     end
@@ -1388,8 +1408,6 @@ local function goto_diagnostic(forward)
     core.warn("No LSP diagnostics for %s", view.doc:get_name())
     return
   end
-
-  table.sort(diagnostics, diagnostic_sorter)
 
   local line, col = view.doc:get_selection()
   local current_line = line - 1

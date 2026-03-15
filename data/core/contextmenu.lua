@@ -66,7 +66,7 @@ end
 local function update_items_size(items, update_binding)
   local width, height = 0, 0
   for _, item in ipairs(items) do
-    if update_binding and item ~= DIVIDER then
+    if update_binding and item ~= DIVIDER and type(item.command) == "string" then
       item.info = keymap.get_binding_display(item.command)
     end
     local lw, lh = get_item_size(item)
@@ -85,7 +85,11 @@ end
 function ContextMenu:show(x, y, items, ...)
   local items_list = { width = 0, height = 0, arguments = { ... } }
   for _, item in ipairs(items) do
-    if item and (not item.command or command.is_valid(item.command, ...)) then
+    if item and (
+      not item.command
+      or type(item.command) ~= "string"
+      or command.is_valid(item.command, ...)
+    ) then
       table.insert(items_list, item)
     end
   end

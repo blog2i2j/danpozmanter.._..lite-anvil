@@ -1,7 +1,14 @@
 use mlua::prelude::*;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+static STATUS_CACHE: Lazy<Mutex<std::collections::HashMap<String, u64>>> =
+    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 fn normalize(path: &str) -> String {
     path.replace('\\', "/")
@@ -159,6 +166,34 @@ fn status_table(lua: &Lua, root: &str) -> LuaResult<LuaTable> {
     Ok(repo)
 }
 
+fn status_signature(status: i32, stdout: &[u8], stderr: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    status.hash(&mut hasher);
+    stdout.hash(&mut hasher);
+    stderr.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn status_cached(lua: &Lua, root: &str) -> LuaResult<LuaTable> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["status", "--branch", "--porcelain=v1"])
+        .output()
+        .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    let signature = status_signature(out.status.code().unwrap_or(-1), &out.stdout, &out.stderr);
+    let changed = {
+        let mut cache = STATUS_CACHE.lock();
+        let changed = cache.get(root).copied() != Some(signature);
+        cache.insert(root.to_string(), signature);
+        changed
+    };
+    let repo = status_table(lua, root)?;
+    repo.set("changed", changed)?;
+    repo.set("signature", signature as i64)?;
+    Ok(repo)
+}
+
 fn list_branches(lua: &Lua, root: &str) -> LuaResult<LuaTable> {
     let out = Command::new("git")
         .arg("-C")
@@ -201,6 +236,14 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let root = discover_repo(&path)
                 .ok_or_else(|| LuaError::RuntimeError("Not inside a Git repository".to_string()))?;
             status_table(lua, &root)
+        })?,
+    )?;
+    module.set(
+        "status_cached",
+        lua.create_function(|lua, path: String| {
+            let root = discover_repo(&path)
+                .ok_or_else(|| LuaError::RuntimeError("Not inside a Git repository".to_string()))?;
+            status_cached(lua, &root)
         })?,
     )?;
     module.set(

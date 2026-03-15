@@ -44,7 +44,13 @@ enum EscapeState {
 }
 
 impl TerminalBufferInner {
-    fn new(cols: usize, rows: usize, scrollback: usize, palette: [[u8; 4]; 16], default_fg: [u8; 4]) -> Self {
+    fn new(
+        cols: usize,
+        rows: usize,
+        scrollback: usize,
+        palette: [[u8; 4]; 16],
+        default_fg: [u8; 4],
+    ) -> Self {
         let cols = cols.max(1);
         let rows = rows.max(1);
         let mut inner = Self {
@@ -68,7 +74,9 @@ impl TerminalBufferInner {
     }
 
     fn blank_row(&self) -> Vec<Cell> {
-        (0..self.cols).map(|_| Cell::blank(self.default_fg)).collect()
+        (0..self.cols)
+            .map(|_| Cell::blank(self.default_fg))
+            .collect()
     }
 
     fn reset_screen(&mut self) {
@@ -206,7 +214,11 @@ impl TerminalBufferInner {
     }
 
     fn apply_sgr(&mut self, params: &[i64]) {
-        let params = if params.is_empty() { vec![0] } else { params.to_vec() };
+        let params = if params.is_empty() {
+            vec![0]
+        } else {
+            params.to_vec()
+        };
         let mut i = 0usize;
         while i < params.len() {
             let code = params[i];
@@ -264,10 +276,20 @@ impl TerminalBufferInner {
         let p2 = *params.get(1).unwrap_or(&0);
 
         match final_char {
-            'A' => self.cursor_row = self.cursor_row.saturating_sub(p1.max(1) as usize).clamp(1, self.rows),
+            'A' => {
+                self.cursor_row = self
+                    .cursor_row
+                    .saturating_sub(p1.max(1) as usize)
+                    .clamp(1, self.rows)
+            }
             'B' => self.cursor_row = (self.cursor_row + p1.max(1) as usize).clamp(1, self.rows),
             'C' => self.cursor_col = (self.cursor_col + p1.max(1) as usize).clamp(1, self.cols),
-            'D' => self.cursor_col = self.cursor_col.saturating_sub(p1.max(1) as usize).clamp(1, self.cols),
+            'D' => {
+                self.cursor_col = self
+                    .cursor_col
+                    .saturating_sub(p1.max(1) as usize)
+                    .clamp(1, self.cols)
+            }
             'H' | 'f' => {
                 self.cursor_row = (if p1 <= 0 { 1 } else { p1 as usize }).clamp(1, self.rows);
                 self.cursor_col = (if p2 <= 0 { 1 } else { p2 as usize }).clamp(1, self.cols);
@@ -357,7 +379,8 @@ impl TerminalBufferInner {
                         i += 1;
                     }
                     b'\t' => {
-                        let next_tab = (self.cursor_col + (8 - ((self.cursor_col - 1) % 8))).min(self.cols + 1);
+                        let next_tab = (self.cursor_col + (8 - ((self.cursor_col - 1) % 8)))
+                            .min(self.cols + 1);
                         while self.cursor_col < next_tab {
                             self.put_char(" ");
                         }
@@ -387,7 +410,9 @@ impl TerminalBufferInner {
         if index <= self.history.len() {
             return self.history.get(index - 1).map(Vec::as_slice);
         }
-        self.screen.get(index - self.history.len() - 1).map(Vec::as_slice)
+        self.screen
+            .get(index - self.history.len() - 1)
+            .map(Vec::as_slice)
     }
 }
 
@@ -457,17 +482,22 @@ impl LuaUserData for TerminalBuffer {
             this.0.lock().process_output(text.as_bytes().as_ref());
             Ok(true)
         });
-        methods.add_method("set_palette", |_, this, (palette_table, default_fg): (LuaTable, LuaTable)| {
-            let mut palette = [[0u8; 4]; 16];
-            for i in 1..=16 {
-                palette[i - 1] = table_to_color(palette_table.raw_get::<LuaTable>(i as i64)?)?;
-            }
-            let mut inner = this.0.lock();
-            inner.palette = palette;
-            inner.default_fg = table_to_color(default_fg)?;
-            Ok(true)
+        methods.add_method(
+            "set_palette",
+            |_, this, (palette_table, default_fg): (LuaTable, LuaTable)| {
+                let mut palette = [[0u8; 4]; 16];
+                for i in 1..=16 {
+                    palette[i - 1] = table_to_color(palette_table.raw_get::<LuaTable>(i as i64)?)?;
+                }
+                let mut inner = this.0.lock();
+                inner.palette = palette;
+                inner.default_fg = table_to_color(default_fg)?;
+                Ok(true)
+            },
+        );
+        methods.add_method("total_rows", |_, this, ()| {
+            Ok(this.0.lock().total_rows() as i64)
         });
-        methods.add_method("total_rows", |_, this, ()| Ok(this.0.lock().total_rows() as i64));
         methods.add_method("cursor", |lua, this, ()| {
             let inner = this.0.lock();
             let table = lua.create_table()?;
@@ -498,20 +528,25 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     let module = lua.create_table()?;
     module.set(
         "new",
-        lua.create_function(|_, (cols, rows, scrollback, palette_table, default_fg): (usize, usize, usize, LuaTable, LuaTable)| {
-            let mut palette = [[0u8; 4]; 16];
-            for i in 1..=16 {
-                palette[i - 1] = table_to_color(palette_table.raw_get::<LuaTable>(i as i64)?)?;
-            }
-            let default_fg = table_to_color(default_fg)?;
-            Ok(TerminalBuffer(Mutex::new(TerminalBufferInner::new(
-                cols,
-                rows,
-                scrollback,
-                palette,
-                default_fg,
-            ))))
-        })?,
+        lua.create_function(
+            |_,
+             (cols, rows, scrollback, palette_table, default_fg): (
+                usize,
+                usize,
+                usize,
+                LuaTable,
+                LuaTable,
+            )| {
+                let mut palette = [[0u8; 4]; 16];
+                for i in 1..=16 {
+                    palette[i - 1] = table_to_color(palette_table.raw_get::<LuaTable>(i as i64)?)?;
+                }
+                let default_fg = table_to_color(default_fg)?;
+                Ok(TerminalBuffer(Mutex::new(TerminalBufferInner::new(
+                    cols, rows, scrollback, palette, default_fg,
+                ))))
+            },
+        )?,
     )?;
     Ok(module)
 }
