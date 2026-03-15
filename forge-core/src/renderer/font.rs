@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::Arc;
+use std::thread::{self, ThreadId};
 
 // ── FreeType library handle (main thread) ─────────────────────────────────────
 
@@ -18,18 +19,20 @@ thread_local! {
 }
 
 /// Return the thread-local FT_Library, initializing it on first call.
-pub(super) fn ft_lib() -> FT_Library {
+pub(super) fn ft_lib() -> Result<FT_Library, String> {
     FT_LIB_PTR.with(|c| {
         let ptr = c.get();
         if ptr != 0 {
-            return ptr as FT_Library;
+            return Ok(ptr as FT_Library);
         }
         let mut lib: FT_Library = std::ptr::null_mut();
         // SAFETY: single-threaded; called once per thread.
         let err = unsafe { FT_Init_FreeType(&mut lib) };
-        assert!(err == 0, "FreeType2 init failed: error {err}");
+        if err != 0 {
+            return Err(format!("FreeType2 init failed: error {err}"));
+        }
         c.set(lib as usize);
-        lib
+        Ok(lib)
     })
 }
 
@@ -90,6 +93,7 @@ pub struct GlyphBitmap {
 
 pub struct FontInner {
     face: FT_Library, // actually FT_Face — reuse the pointer-sized type alias
+    owner_thread: ThreadId,
     pub path: String,
     pub size: f32,
     pub tab_size: i32,
@@ -108,12 +112,19 @@ unsafe impl Sync for FontInner {}
 
 impl Drop for FontInner {
     fn drop(&mut self) {
-        // SAFETY: face is valid until drop; called on main thread.
+        if self.face.is_null() || !self.on_owner_thread() {
+            return;
+        }
+        // SAFETY: face is valid until drop; called on the owning thread.
         unsafe { FT_Done_Face(self.face as *mut _) };
     }
 }
 
 impl FontInner {
+    fn on_owner_thread(&self) -> bool {
+        thread::current().id() == self.owner_thread
+    }
+
     pub fn load(
         path: &str,
         size: f32,
@@ -123,12 +134,14 @@ impl FontInner {
         let c_path = CString::new(path).map_err(|e| e.to_string())?;
         let mut face: *mut freetype::freetype::FT_FaceRec_ = std::ptr::null_mut();
         // SAFETY: library is valid; path is a valid C string.
-        let err = unsafe { FT_New_Face(ft_lib(), c_path.as_ptr(), 0, &mut face) };
+        let lib = ft_lib()?;
+        let err = unsafe { FT_New_Face(lib, c_path.as_ptr(), 0, &mut face) };
         if err != 0 {
             return Err(format!("FT_New_Face failed ({path}): error {err}"));
         }
         let mut inner = FontInner {
             face: face as FT_Library,
+            owner_thread: thread::current().id(),
             path: path.to_string(),
             size,
             tab_size: 2,
@@ -148,6 +161,10 @@ impl FontInner {
     }
 
     pub fn recompute_metrics(&mut self) -> Result<(), String> {
+        if !self.on_owner_thread() {
+            self.glyphs.clear();
+            return Ok(());
+        }
         let face = self.raw_face();
         let err = unsafe { FT_Set_Pixel_Sizes(face, 0, self.size as FT_UInt) };
         if err != 0 {
@@ -200,6 +217,12 @@ impl FontInner {
     }
 
     fn load_glyph(&self, codepoint: u32) -> GlyphInfo {
+        if !self.on_owner_thread() {
+            return GlyphInfo {
+                xadvance: self.space_advance,
+                bitmap: None,
+            };
+        }
         let face = self.raw_face();
         let glyph_id: FT_UInt = unsafe { FT_Get_Char_Index(face, codepoint as FT_ULong) };
 

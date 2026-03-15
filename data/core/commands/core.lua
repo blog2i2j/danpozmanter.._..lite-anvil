@@ -162,6 +162,49 @@ local function add_project_directory(use_dialog)
   end)
 end
 
+local function recent_items(items, text)
+  if native_picker then
+    return native_picker.rank_strings(items, text)
+  end
+  return common.fuzzy_match(items, text)
+end
+
+local function open_recent_file()
+  core.command_view:enter("Recent File", {
+    suggest = function(text)
+      return common.home_encode_list(recent_items(core.recent_files or {}, common.home_expand(text)))
+    end,
+    submit = function(text)
+      core.root_view:open_doc(core.open_doc(common.home_expand(text)))
+    end,
+    validate = function(text)
+      local info = system.get_file_info(common.home_expand(text))
+      return info and info.type == "file"
+    end,
+  })
+end
+
+local function open_recent_folder()
+  core.command_view:enter("Recent Folder", {
+    suggest = function(text)
+      return common.home_encode_list(recent_items(core.recent_projects or {}, common.home_expand(text)))
+    end,
+    submit = function(text)
+      local path = common.home_expand(text)
+      local info = system.get_file_info(path)
+      if info and info.type == "dir" then
+        core.open_project(path)
+      else
+        core.error("Cannot open directory %q", path)
+      end
+    end,
+    validate = function(text)
+      local info = system.get_file_info(common.home_expand(text))
+      return info and info.type == "dir"
+    end,
+  })
+end
+
 local function shortcuts_help_message()
   local items = {}
   local commands = {}
@@ -290,6 +333,10 @@ command.add(nil, {
     open_file(false)
   end,
 
+  ["core:open-recent-file"] = function()
+    open_recent_file()
+  end,
+
   ["core:open-log"] = function()
     local node = core.root_view:get_active_node_default()
     node:add_view(LogView())
@@ -333,6 +380,10 @@ command.add(nil, {
 
   ["core:open-project-folder-commandview"] = function()
     open_project_directory(false)
+  end,
+
+  ["core:open-recent-folder"] = function()
+    open_recent_folder()
   end,
 
   ["core:add-directory"] = function()

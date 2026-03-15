@@ -1,4 +1,4 @@
--- mod-version:4.0.0
+-- mod-version:4
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -31,10 +31,18 @@ config.plugins.lsp = common.merge({
       type = "toggle",
       default = true,
     },
+    {
+      label = "Format On Save",
+      description = "Run document formatting before saving when the server supports it.",
+      path = "format_on_save",
+      type = "toggle",
+      default = true,
+    },
   },
   load_on_startup = config.lsp.load_on_startup ~= false,
   semantic_highlighting = config.lsp.semantic_highlighting ~= false,
   inline_diagnostics = config.lsp.inline_diagnostics ~= false,
+  format_on_save = config.lsp.format_on_save ~= false,
 }, config.plugins.lsp)
 
 local manager = require ".server-manager"
@@ -93,9 +101,29 @@ function DocView:draw_line_gutter(line, x, y, width)
     local marker_x = x + math.max(2, style.padding.x - marker_size - 2)
     local marker_y = y + math.floor((self:get_line_height() - marker_size) / 2)
     renderer.draw_rect(marker_x, marker_y, marker_size, marker_size, diagnostic_color(severity))
+    local current_line = select(1, self.doc:get_selection())
+    if line == current_line then
+      renderer.draw_rect(marker_x + marker_size + 2, marker_y, marker_size, marker_size, style.accent)
+    end
   end
 
   return lh
+end
+
+local old_docview_mouse_pressed = DocView.on_mouse_pressed
+function DocView:on_mouse_pressed(button, x, y, clicks)
+  if button == "left" and self.hovering_gutter and not self.doc.large_file_mode then
+    local line = self:resolve_screen_position(x, y)
+    if manager.get_line_diagnostic_severity(self.doc, line) then
+      local marker_size = math.max(4, math.floor(self:get_line_height() * 0.22))
+      local marker_x = self.position.x + math.max(2, style.padding.x - marker_size - 2)
+      if x >= marker_x and x <= marker_x + marker_size * 2 + 4 then
+        manager.code_action()
+        return true
+      end
+    end
+  end
+  return old_docview_mouse_pressed(self, button, x, y, clicks)
 end
 
 local old_draw_overlay = DocView.draw_overlay
@@ -142,9 +170,33 @@ end
 
 local old_save = Doc.save
 function Doc:save(...)
-  local result = table.pack(old_save(self, ...))
+  local args = table.pack(...)
+  if config.plugins.lsp.format_on_save ~= false
+     and not self.large_file_mode
+     and not self._formatting_before_save
+     and self.abs_filename then
+    self._formatting_before_save = true
+    manager.format_document_for(self, function()
+      local ok, err = pcall(function()
+        local result = table.pack(old_save(self, table.unpack(args, 1, args.n)))
+        if not self.large_file_mode then
+          manager.on_doc_save(self)
+        end
+        return table.unpack(result, 1, result.n)
+      end)
+      self._formatting_before_save = false
+      if not ok then
+        core.error(err)
+      end
+    end)
+    return
+  end
+  local result = table.pack(old_save(self, table.unpack(args, 1, args.n)))
   if not self.large_file_mode then
-    manager.on_doc_save(self)
+    local ok, err = pcall(manager.on_doc_save, self)
+    if not ok then
+      core.error("Post-save LSP hook failed for %s: %s", self:get_name(), err)
+    end
   end
   return table.unpack(result, 1, result.n)
 end
@@ -154,6 +206,29 @@ for _, doc in ipairs(core.docs) do
     manager.open_doc(doc)
   end
 end
+
+core.status_view:add_item({
+  predicate = function()
+    local view = core.active_view
+    return view and view:is(DocView) and view.doc and view.doc.abs_filename and not view.doc.large_file_mode
+  end,
+  name = "lsp:quick-fix",
+  alignment = core.status_view.Item.RIGHT,
+  get_item = function()
+    local view = core.active_view
+    local line = select(1, view.doc:get_selection())
+    local severity = manager.get_line_diagnostic_severity(view.doc, line)
+    if not severity then
+      return {}
+    end
+    return {
+      style.accent, style.icon_font, "!",
+      style.text, " Quick Fix"
+    }
+  end,
+  command = "lsp:code-action",
+  tooltip = "Show code actions for the current diagnostic line",
+})
 
 keymap.add {
   ["ctrl+space"] = "lsp:complete",

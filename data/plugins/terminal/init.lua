@@ -1,4 +1,4 @@
--- mod-version:4.0.0
+-- mod-version:4
 local common = require "core.common"
 local config = require "core.config"
 local keymap = require "core.keymap"

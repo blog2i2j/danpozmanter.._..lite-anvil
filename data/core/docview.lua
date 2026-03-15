@@ -504,6 +504,47 @@ function DocView:draw_caret(x, y)
   renderer.draw_rect(x, y, style.caret_width, lh, style.caret)
 end
 
+local function selection_match_text(doc)
+  if #doc.selections ~= 4 then
+    return nil
+  end
+  local line1, col1, line2, col2 = doc:get_selection(true)
+  if line1 ~= line2 or col1 == col2 then
+    return nil
+  end
+  local text = doc:get_text(line1, col1, line2, col2)
+  if not text or text == "" or text:find("%s") or #text > 128 then
+    return nil
+  end
+  return text, line1, col1, col2
+end
+
+function DocView:draw_selection_matches(line, x, y)
+  local text, sel_line, sel_col1, sel_col2 = selection_match_text(self.doc)
+  if not text then
+    return
+  end
+  local line_text = self.doc.lines[line]
+  local start = 1
+  local color = style.selection_match or style.line_highlight or style.selection
+  local lh = self:get_line_height()
+  while true do
+    local s, e = line_text:find(text, start, true)
+    if not s then
+      break
+    end
+    local skip = line == sel_line and s == sel_col1 and e + 1 == sel_col2
+    local left_ok = s == 1 or not line_text:sub(s - 1, s - 1):match("[%w_]")
+    local right_ok = e >= #line_text or not line_text:sub(e + 1, e + 1):match("[%w_]")
+    if not skip and left_ok and right_ok then
+      local x1 = x + self:get_col_x_offset(line, s)
+      local x2 = x + self:get_col_x_offset(line, e + 1)
+      renderer.draw_rect(x1, y, x2 - x1, lh, color)
+    end
+    start = e + 1
+  end
+end
+
 function DocView:draw_line_body(line, x, y)
   -- draw highlight if any selection ends on this line
   local draw_highlight = false
@@ -524,6 +565,10 @@ function DocView:draw_line_body(line, x, y)
   end
   if draw_highlight and core.active_view == self then
     self:draw_line_highlight(x + self.scroll.x, y)
+  end
+
+  if core.active_view == self then
+    self:draw_selection_matches(line, x, y)
   end
 
   -- draw selection if it overlaps this line

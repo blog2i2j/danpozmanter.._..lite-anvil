@@ -73,6 +73,7 @@ local function save_session()
       ", window_mode=", common.serialize(system.get_window_mode(core.window)),
       ", previous_find=", common.serialize(core.previous_find),
       ", previous_replace=", common.serialize(core.previous_replace),
+      ", recent_files=", common.serialize(core.recent_files or {}),
       ", treeview_size=", common.serialize(treeview_size),
       ", open_files=", common.serialize(open_files),
       ", plugin_data=", common.serialize(plugin_data),
@@ -95,6 +96,21 @@ local function update_recents_project(action, dir_path_abs)
   end
   if action == "add" then
     table.insert(recents, 1, dirname)
+  end
+end
+
+local function update_recent_file(path)
+  local filename = common.normalize_volume(path)
+  if not filename then return end
+  core.recent_files = core.recent_files or {}
+  for i = #core.recent_files, 1, -1 do
+    if core.recent_files[i] == filename then
+      table.remove(core.recent_files, i)
+    end
+  end
+  table.insert(core.recent_files, 1, filename)
+  while #core.recent_files > 100 do
+    table.remove(core.recent_files)
   end
 end
 
@@ -420,6 +436,7 @@ function core.init()
   local session = load_session()
   core.session = session
   core.recent_projects = session.recents or {}
+  core.recent_files = session.recent_files or {}
   core.previous_find = {}
   core.previous_replace = {}
 
@@ -1090,6 +1107,9 @@ function core.open_doc(filename)
   -- no existing doc for filename; create new
   local doc = Doc(filename, abs_filename, new_file, open_options)
   table.insert(core.docs, doc)
+  if doc.abs_filename then
+    update_recent_file(doc.abs_filename)
+  end
   if doc.large_file_mode then
     local size_mb = string.format("%.1f", (doc.large_file_size or 0) / 1e6)
     local mode = doc.hard_limited and "degraded" or "large-file"
@@ -1100,6 +1120,8 @@ function core.open_doc(filename)
   core.log_quiet(filename and "Opened doc \"%s\"" or "Opened new doc", filename)
   return doc
 end
+
+core.update_recent_file = update_recent_file
 
 
 function core.get_views_referencing_doc(doc)

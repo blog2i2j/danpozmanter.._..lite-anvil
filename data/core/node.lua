@@ -221,6 +221,18 @@ function Node:get_view_idx(view)
   end
 end
 
+function Node:get_views_to_right(view)
+  local idx = self:get_view_idx(view)
+  local views = {}
+  if not idx then
+    return views
+  end
+  for i = idx + 1, #self.views do
+    views[#views + 1] = self.views[i]
+  end
+  return views
+end
+
 
 function Node:get_node_for_view(view)
   for _, v in ipairs(self.views) do
@@ -544,8 +556,16 @@ end
 
 function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
   local text = view and view:get_name() or ""
+  local dirty = view and view.doc and view.doc:is_dirty()
   local dots_width = font:get_width("…")
   local align = "center"
+  if dirty then
+    local marker = "• "
+    local marker_w = font:get_width(marker)
+    common.draw_text(font, style.modified or style.accent, marker, "left", x, y, marker_w, h)
+    x = x + marker_w
+    w = math.max(0, w - marker_w)
+  end
   if font:get_width(text) > w then
     align = "left"
     for i = 1, #text do

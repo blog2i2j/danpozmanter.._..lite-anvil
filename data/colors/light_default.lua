@@ -10,6 +10,7 @@ style.register_theme("light_default", {
   dim             = "#7a7a7a",
   divider         = "#e5e5e5",
   selection       = "#add6ff",
+  selection_match = "rgba(0, 95, 184, 0.14)",
   line_number     = "#7a7a7a",
   line_number2    = "#1f1f1f",
   line_highlight  = "#f5f9ff",

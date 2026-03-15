@@ -22,7 +22,10 @@ fn main() {
         _ => return,
     };
 
-    let lib_dir = PathBuf::from(vcpkg_root).join("installed").join(triplet).join("lib");
+    let lib_dir = PathBuf::from(vcpkg_root)
+        .join("installed")
+        .join(triplet)
+        .join("lib");
     if lib_dir.exists() {
         println!("cargo::rustc-link-search=native={}", lib_dir.display());
     }

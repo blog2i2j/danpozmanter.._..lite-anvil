@@ -1,5 +1,17 @@
 # Change Log
 
+## [0.13.0] - 2026-03-15 — Stability fixes, tab menu, recent items, folding, editor polish.
+
+* Stability fixes - segfault fixes.
+* Add a tab right-click menu with Close, Close Right, Close Others, Close Saved, and Close All.
+* Add recent file and recent folder pickers.
+* Add visible sticky find toggles for case, regex, and whole-word search.
+* Add selection match highlighting and dirty-tab markers.
+* Add LSP format-on-save, enabled by default and configurable.
+* Add gutter and status quick-fix surfacing for diagnostics.
+* Add indentation-based code folding with gutter UI and persisted fold state.
+* Improve save and rename path previews while editing names.
+
 ## [0.12.0] - 2026-03-15 — Large-file mode, project cleanup, terminal reuse, more.
 
 * Close all open docs when changing the active project folder.

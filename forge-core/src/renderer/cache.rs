@@ -338,15 +338,32 @@ pub unsafe fn render_dirty_rects(
         return;
     }
 
-    let (fmt, pitch, pixels) = unsafe {
+    let (fmt, pitch, pixels, surface_bounds) = unsafe {
         let details = SDL_GetPixelFormatDetails((*surface).format);
         let fmt = PixFmt::from_sdl(details);
         let pitch = (*surface).pitch as usize;
         let pixels = (*surface).pixels as *mut u8;
-        (fmt, pitch, pixels)
+        if pixels.is_null() {
+            return;
+        }
+        // SDL_GetWindowSizeInPixels (used for screen.h in begin_frame) can
+        // differ from the actual surface dimensions when the window manager
+        // hasn't yet applied a resize request.  Clamp all pixel access to the
+        // real surface bounds so we never walk off the end of the buffer.
+        let bounds = RenRect {
+            x: 0,
+            y: 0,
+            w: (*surface).w,
+            h: (*surface).h,
+        };
+        (fmt, pitch, pixels, bounds)
     };
 
     for &dirty_rect in dirty {
+        let dirty_rect = dirty_rect.intersect(surface_bounds);
+        if dirty_rect.is_empty() {
+            continue;
+        }
         let sdl_clip = SDL_Rect {
             x: dirty_rect.x,
             y: dirty_rect.y,

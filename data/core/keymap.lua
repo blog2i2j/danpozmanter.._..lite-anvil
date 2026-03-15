@@ -380,6 +380,8 @@ keymap.add_direct {
   ["ctrl+p"] = "core:find-command",
   ["ctrl+q"] = "core:quit",
   ["ctrl+o"] = "core:open-file",
+  ["ctrl+shift+r"] = "core:open-recent-file",
+  ["ctrl+alt+shift+r"] = "core:open-recent-folder",
   ["ctrl+n"] = "core:new-doc",
   ["ctrl+shift+c"] = "core:change-project-folder",
   ["ctrl+alt+o"] = "core:open-project-folder",
@@ -417,6 +419,7 @@ keymap.add_direct {
   ["wheeldown"] = "root:scroll-hovered-tabs-forward",
 
   ["ctrl+f"] = "find-replace:find",
+  ["alt+w"] = "find-replace:toggle-whole-word",
   ["ctrl+r"] = "find-replace:replace",
   ["f3"] = "find-replace:repeat-find",
   ["shift+f3"] = "find-replace:previous-find",

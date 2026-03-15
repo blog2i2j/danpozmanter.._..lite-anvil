@@ -204,6 +204,7 @@ config.lsp = {
   semantic_highlighting = true,
   ---Whether to render diagnostics inline in the editor gutter/body.
   inline_diagnostics = true,
+  format_on_save = true,
 }
 
 ---Native tokenizer rollout settings.

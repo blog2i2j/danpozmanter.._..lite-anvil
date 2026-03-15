@@ -1298,29 +1298,41 @@ function manager.maybe_trigger_signature_help(text)
   end
 end
 
+function manager.format_document_for(doc, callback)
+  callback = callback or function() end
+  local target_doc = doc or (current_docview() and current_docview().doc)
+  if not target_doc or not target_doc.abs_filename then
+    callback(false)
+    return
+  end
+  local client = manager.open_doc(target_doc)
+  if not client then
+    callback(false)
+    return
+  end
+  client:request("textDocument/formatting", {
+    textDocument = { uri = path_to_uri(target_doc.abs_filename) },
+    options = {
+      tabSize = select(2, target_doc:get_indent_info()),
+      insertSpaces = select(1, target_doc:get_indent_info()) ~= "hard",
+    },
+  }, function(result, err)
+    if err then
+      core.warn("LSP format document failed: %s", err.message or tostring(err))
+      callback(false, err)
+      return
+    end
+    apply_text_edits_to_doc(target_doc, result or {})
+    callback(true)
+  end)
+end
+
 function manager.format_document()
   local view = current_docview()
   if not view or not view.doc.abs_filename then
     return
   end
-  local client = manager.open_doc(view.doc)
-  if not client then
-    core.warn("No LSP server configured for %s", view.doc:get_name())
-    return
-  end
-  client:request("textDocument/formatting", {
-    textDocument = { uri = path_to_uri(view.doc.abs_filename) },
-    options = {
-      tabSize = select(2, view.doc:get_indent_info()),
-      insertSpaces = select(1, view.doc:get_indent_info()) ~= "hard",
-    },
-  }, function(result, err)
-    if err then
-      core.warn("LSP format document failed: %s", err.message or tostring(err))
-      return
-    end
-    apply_text_edits_to_doc(view.doc, result or {})
-  end)
+  manager.format_document_for(view.doc)
 end
 
 function manager.format_selection()
@@ -1543,8 +1555,17 @@ function manager.rename_symbol()
     return
   end
 
+  local line1, col1, line2, col2 = view.doc:get_selection(true)
+  local current_name = view.doc:get_text(line1, col1, line2, col2)
   core.command_view:enter("Rename symbol to", {
+    text = current_name,
+    select_text = true,
+    suggest = function(text)
+      core.status_view:show_tooltip(string.format("%s -> %s", current_name, text))
+      return {}
+    end,
     submit = function(text)
+      core.status_view:remove_tooltip()
       if text == "" then
         return
       end
@@ -1557,7 +1578,10 @@ function manager.rename_symbol()
         end
         apply_workspace_edit(result)
       end)
-    end
+    end,
+    cancel = function()
+      core.status_view:remove_tooltip()
+    end,
   })
 end
 

@@ -66,6 +66,7 @@ fn get_selections(selections: LuaTable) -> LuaResult<Vec<usize>> {
     for value in selections.sequence_values::<usize>() {
         out.push(value?);
     }
+    validate_selection_shape(&out)?;
     Ok(out)
 }
 
@@ -121,18 +122,45 @@ fn sort_positions(
     }
 }
 
+fn validate_selection_shape(selections: &[usize]) -> LuaResult<()> {
+    if selections.is_empty() || selections.len() % 4 != 0 {
+        return Err(LuaError::RuntimeError(
+            "selections must contain one or more 4-value ranges".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn clamp_column_to_boundary(line: &str, col: usize) -> usize {
+    let mut byte = col.clamp(1, line.len().max(1)).saturating_sub(1);
+    while byte > 0 && !line.is_char_boundary(byte) {
+        byte -= 1;
+    }
+    byte + 1
+}
+
 fn sanitize_position(lines: &[String], line: usize, col: usize) -> (usize, usize) {
     if lines.is_empty() {
         return (1, 1);
     }
-    if line < 1 {
-        return (1, 1);
-    }
-    if line > lines.len() {
-        let last = lines.len();
-        return (last, lines[last - 1].len().max(1));
-    }
-    (line, col.clamp(1, lines[line - 1].len().max(1)))
+    let line = line.clamp(1, lines.len());
+    (line, clamp_column_to_boundary(&lines[line - 1], col))
+}
+
+fn normalize_position(lines: &[String], line: usize, col: usize) -> (usize, usize) {
+    sanitize_position(lines, line, col)
+}
+
+fn normalize_range(
+    lines: &[String],
+    line1: usize,
+    col1: usize,
+    line2: usize,
+    col2: usize,
+) -> (usize, usize, usize, usize) {
+    let (line1, col1) = normalize_position(lines, line1, col1);
+    let (line2, col2) = normalize_position(lines, line2, col2);
+    sort_positions(line1, col1, line2, col2)
 }
 
 fn position_offset(
@@ -541,6 +569,8 @@ fn make_insert_result(
     col: usize,
     text: String,
 ) -> LuaResult<LuaTable> {
+    validate_selection_shape(&selections)?;
+    let (line, col) = normalize_position(&lines, line, col);
     let selection_restore = selections.clone();
     let before_len = lines.len() as isize;
     apply_insert_internal(&mut lines, &mut selections, line, col, &text);
@@ -575,6 +605,8 @@ fn make_remove_result(
     line2: usize,
     col2: usize,
 ) -> LuaResult<LuaTable> {
+    validate_selection_shape(&selections)?;
+    let (line1, col1, line2, col2) = normalize_range(&lines, line1, col1, line2, col2);
     let selection_restore = selections.clone();
     let before_len = lines.len() as isize;
     let removed = get_text(&lines, line1, col1, line2, col2, false);
@@ -606,15 +638,19 @@ fn make_bulk_result(
     mut selections: Vec<usize>,
     edits: LuaTable,
 ) -> LuaResult<LuaTable> {
+    validate_selection_shape(&selections)?;
     let selection_restore = selections.clone();
     let before_len = lines.len() as isize;
     let mut inverse = Vec::new();
     for value in edits.sequence_values::<LuaTable>() {
         let edit = value?;
-        let line1 = edit.get::<usize>("line1")?;
-        let col1 = edit.get::<usize>("col1")?;
-        let line2 = edit.get::<usize>("line2")?;
-        let col2 = edit.get::<usize>("col2")?;
+        let (line1, col1, line2, col2) = normalize_range(
+            &lines,
+            edit.get::<usize>("line1")?,
+            edit.get::<usize>("col1")?,
+            edit.get::<usize>("line2")?,
+            edit.get::<usize>("col2")?,
+        );
         let text = edit.get::<Option<String>>("text")?.unwrap_or_default();
         if line1 != line2 || col1 != col2 {
             let removed = get_text(&lines, line1, col1, line2, col2, false);
@@ -660,6 +696,8 @@ fn apply_packed_result(
     packed: LuaString,
 ) -> LuaResult<LuaTable> {
     let (selection_restore, edits) = unpack_record(packed.as_bytes().as_ref())?;
+    validate_selection_shape(&selections)?;
+    validate_selection_shape(&selection_restore)?;
     let before_len = lines.len() as isize;
     let mut working_selections = selections.clone();
     let mut inverse = Vec::new();
@@ -689,6 +727,7 @@ fn clamp_history(history: &mut Vec<Vec<u8>>) {
 
 fn apply_record_to_state(state: &mut BufferState, packed: &[u8], push_redo: bool) -> LuaResult<()> {
     let (selection_restore, edits) = unpack_record(packed)?;
+    validate_selection_shape(&selection_restore)?;
     let current_selection = state.selections.clone();
     let mut inverse = Vec::new();
     for edit in &edits {
@@ -715,6 +754,7 @@ fn apply_record_to_state(state: &mut BufferState, packed: &[u8], push_redo: bool
 }
 
 fn apply_insert_to_buffer(state: &mut BufferState, line: usize, col: usize, text: &str) -> isize {
+    let (line, col) = normalize_position(&state.lines, line, col);
     let selection_restore = state.selections.clone();
     let before_len = state.lines.len() as isize;
     apply_insert_internal(&mut state.lines, &mut state.selections, line, col, text);
@@ -744,6 +784,7 @@ fn apply_remove_to_buffer(
     line2: usize,
     col2: usize,
 ) -> isize {
+    let (line1, col1, line2, col2) = normalize_range(&state.lines, line1, col1, line2, col2);
     let selection_restore = state.selections.clone();
     let before_len = state.lines.len() as isize;
     let removed = get_text(&state.lines, line1, col1, line2, col2, false);
@@ -779,10 +820,13 @@ fn apply_edits_to_buffer(state: &mut BufferState, edits: LuaTable) -> LuaResult<
     let mut inverse = Vec::new();
     for value in edits.sequence_values::<LuaTable>() {
         let edit = value?;
-        let line1 = edit.get::<usize>("line1")?;
-        let col1 = edit.get::<usize>("col1")?;
-        let line2 = edit.get::<usize>("line2")?;
-        let col2 = edit.get::<usize>("col2")?;
+        let (line1, col1, line2, col2) = normalize_range(
+            &state.lines,
+            edit.get::<usize>("line1")?,
+            edit.get::<usize>("col1")?,
+            edit.get::<usize>("line2")?,
+            edit.get::<usize>("col2")?,
+        );
         let text = edit.get::<Option<String>>("text")?.unwrap_or_default();
         if line1 != line2 || col1 != col2 {
             let removed = get_text(&state.lines, line1, col1, line2, col2, false);
@@ -1121,6 +1165,12 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(
             |lua, (buffer_id, line, col, text): (u64, usize, usize, String)| {
                 with_buffer_mut(buffer_id, |state| {
+                    if line == 0 || line > state.lines.len() {
+                        return Err(LuaError::runtime(format!(
+                            "insert at line {line} but buffer has {} lines (buffer out of sync)",
+                            state.lines.len()
+                        )));
+                    }
                     let line_delta = apply_insert_to_buffer(state, line, col, &text);
                     let out = buffer_snapshot(lua, state)?;
                     out.set("line_delta", line_delta)?;
@@ -1135,6 +1185,12 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(
             |lua, (buffer_id, line1, col1, line2, col2): (u64, usize, usize, usize, usize)| {
                 with_buffer_mut(buffer_id, |state| {
+                    if line1 == 0 || line2 > state.lines.len() {
+                        return Err(LuaError::runtime(format!(
+                            "remove lines {line1}–{line2} but buffer has {} lines (buffer out of sync)",
+                            state.lines.len()
+                        )));
+                    }
                     let line_delta = apply_remove_to_buffer(state, line1, col1, line2, col2);
                     let out = buffer_snapshot(lua, state)?;
                     out.set("line_delta", line_delta)?;
@@ -1186,6 +1242,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mlua::{Lua, LuaOptions, StdLib};
 
     #[test]
     fn insert_and_remove_adjust_selections() {
@@ -1264,5 +1321,36 @@ mod tests {
         assert_eq!(saved, "one\r\ntwo\r\n");
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_invalid_selection_shape() {
+        let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default()).unwrap();
+        let selections = lua.create_table().unwrap();
+        selections.raw_set(1, 1).unwrap();
+        selections.raw_set(2, 2).unwrap();
+        let err = get_selections(selections).unwrap_err();
+        assert!(err.to_string().contains("4-value ranges"));
+    }
+
+    #[test]
+    fn insert_clamps_out_of_range_and_utf8_misaligned_coordinates() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["aé\n".to_string()];
+
+        apply_insert_to_buffer(&mut state, 0, 999, "Z");
+        assert_eq!(state.lines, vec!["aéZ\n".to_string()]);
+
+        apply_insert_to_buffer(&mut state, 1, 3, "Q");
+        assert_eq!(state.lines, vec!["aQéZ\n".to_string()]);
+    }
+
+    #[test]
+    fn remove_clamps_reversed_out_of_range_coordinates() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["abc\n".to_string(), "def\n".to_string()];
+
+        apply_remove_to_buffer(&mut state, 99, 99, 0, 0);
+        assert_eq!(state.lines, vec!["\n".to_string()]);
     }
 }

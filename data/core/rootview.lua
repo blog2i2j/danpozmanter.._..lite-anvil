@@ -4,6 +4,7 @@ local style = require "core.style"
 local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
+local EmptyView = require "core.emptyview"
 local ContextMenu = require "core.contextmenu"
 
 ---@class core.rootview : core.view
@@ -172,6 +173,96 @@ function RootView:add_view(view, placement)
   return view
 end
 
+local function is_session_view(view)
+  return view and view.context == "session"
+end
+
+function RootView:get_session_views()
+  local views = {}
+  local function walk(node)
+    if node.type == "leaf" then
+      for _, view in ipairs(node.views or {}) do
+        if is_session_view(view) and not view:is(EmptyView) then
+          views[#views + 1] = { node = node, view = view }
+        end
+      end
+    else
+      walk(node.a)
+      walk(node.b)
+    end
+  end
+  walk(self.root_node)
+  return views
+end
+
+function RootView:close_views(entries)
+  for i = #entries, 1, -1 do
+    local entry = entries[i]
+    if entry.node and entry.view and entry.node:get_view_idx(entry.view) then
+      if entry.view.doc then
+        entry.node:remove_view(self.root_node, entry.view)
+      else
+        entry.view:try_close(function()
+          if entry.node:get_view_idx(entry.view) then
+            entry.node:remove_view(self.root_node, entry.view)
+          end
+        end)
+      end
+    end
+  end
+  self.root_node:update_layout()
+end
+
+function RootView:confirm_close_views(entries)
+  local docs = {}
+  local seen = {}
+  for _, entry in ipairs(entries) do
+    local doc = entry.view and entry.view.doc
+    if doc and doc:is_dirty() and not seen[doc] then
+      seen[doc] = true
+      docs[#docs + 1] = doc
+    end
+  end
+  local function do_close()
+    self:close_views(entries)
+  end
+  if #docs > 0 then
+    core.confirm_close_docs(docs, do_close)
+  else
+    do_close()
+  end
+end
+
+function RootView:show_tab_context_menu(node, idx, x, y)
+  local view = node.views[idx]
+  if not view then
+    return false
+  end
+  local right = {}
+  for _, entry in ipairs(node:get_views_to_right(view)) do
+    right[#right + 1] = { node = node, view = entry }
+  end
+  local all = self:get_session_views()
+  local others = {}
+  local saved = {}
+  for _, entry in ipairs(all) do
+    if entry.view ~= view then
+      others[#others + 1] = entry
+    end
+    if entry.view.doc and not entry.view.doc:is_dirty() then
+      saved[#saved + 1] = entry
+    end
+  end
+  local items = {
+    { text = "Close", command = function() self:confirm_close_views({ { node = node, view = view } }) end },
+    { text = "Close Right", command = function() self:confirm_close_views(right) end },
+    { text = "Close Others", command = function() self:confirm_close_views(others) end },
+    { text = "Close Saved", command = function() self:confirm_close_views(saved) end },
+    { text = "Close All", command = function() self:confirm_close_views(all) end },
+  }
+  return self.context_menu:show(x, y, items)
+end
+
 
 ---@param keep_active boolean
 function RootView:close_all_docviews(keep_active)
@@ -239,6 +330,10 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   end
   local idx = node:get_tab_overlapping_point(x, y)
   if idx then
+    if button == "right" then
+      node:set_active_view(node.views[idx])
+      return self:show_tab_context_menu(node, idx, x, y)
+    end
     if button == "middle" or node.hovered_close == idx then
       node:close_view(self.root_node, node.views[idx])
       return true

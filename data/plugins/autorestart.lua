@@ -12,10 +12,17 @@ config.plugins.autorestart = common.merge({
 local save = Doc.save
 Doc.save = function(self, ...)
   local res = save(self, ...)
-  if self.abs_filename == USERDIR .. PATHSEP .. "init.lua"
-  or self.abs_filename == USERDIR .. PATHSEP .. "config.lua"
-  or self.abs_filename == core.root_project().path .. PATHSEP .. ".lite_project" then
-    command.perform("core:restart")
+  local ok, err = pcall(function()
+    local project = core.root_project and core.root_project()
+    local project_file = project and (project.path .. PATHSEP .. ".lite_project")
+    if self.abs_filename == USERDIR .. PATHSEP .. "init.lua"
+    or self.abs_filename == USERDIR .. PATHSEP .. "config.lua"
+    or (project_file and self.abs_filename == project_file) then
+      command.perform("core:restart")
+    end
+  end)
+  if not ok then
+    core.error("Post-save autorestart hook failed for %s: %s", self:get_name(), err)
   end
   return res
 end

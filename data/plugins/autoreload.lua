@@ -180,8 +180,13 @@ end
 
 Doc.save = function(self, ...)
   local res = save(self, ...)
-  -- if starting with an unsaved document with a filename.
-  if not times[self] then watch:watch(self.abs_filename, true) end
-  update_time(self)
+  local ok, err = pcall(function()
+    -- if starting with an unsaved document with a filename.
+    if not times[self] then watch:watch(self.abs_filename, true) end
+    update_time(self)
+  end)
+  if not ok then
+    core.error("Post-save autoreload hook failed for %s: %s", self:get_name(), err)
+  end
   return res
 end

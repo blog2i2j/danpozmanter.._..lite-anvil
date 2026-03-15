@@ -41,6 +41,9 @@ local function save(filename)
   local ok, err = pcall(doc().save, doc(), filename, abs_filename)
   if ok then
     local saved_filename = doc().filename
+    if doc().abs_filename and core.update_recent_file then
+      core.update_recent_file(doc().abs_filename)
+    end
     core.log("Saved \"%s\"", saved_filename)
   else
     core.error(err)
@@ -588,11 +591,19 @@ local commands = {
     end
     core.command_view:enter("Save As", {
       text = text,
+      suggest = function (input)
+        local project = core.root_project()
+        local filename = common.home_expand(input)
+        local abs = project and project:absolute_path(project:normalize_path(filename)) or system.absolute_path(filename)
+        core.status_view:show_tooltip(string.format("%s -> %s", dv.doc:get_name(), common.home_encode(abs or filename)))
+        return common.home_encode_list(common.path_suggest(common.home_expand(input)))
+      end,
       submit = function(filename)
+        core.status_view:remove_tooltip()
         save(common.home_expand(filename))
       end,
-      suggest = function (text)
-        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
+      cancel = function()
+        core.status_view:remove_tooltip()
       end
     })
   end,
@@ -617,15 +628,23 @@ local commands = {
     end
     core.command_view:enter("Rename", {
       text = old_filename,
+      suggest = function (input)
+        local target = common.home_expand(input)
+        local project = core.root_project()
+        local abs = project and project:absolute_path(project:normalize_path(target)) or system.absolute_path(target)
+        core.status_view:show_tooltip(string.format("%s -> %s", old_filename, common.home_encode(abs or target)))
+        return common.home_encode_list(common.path_suggest(common.home_expand(input)))
+      end,
       submit = function(filename)
+        core.status_view:remove_tooltip()
         save(common.home_expand(filename))
         core.log("Renamed \"%s\" to \"%s\"", old_filename, filename)
         if filename ~= old_filename then
           os.remove(old_filename)
         end
       end,
-      suggest = function (text)
-        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
+      cancel = function()
+        core.status_view:remove_tooltip()
       end
     })
   end,

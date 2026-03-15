@@ -2,6 +2,8 @@ local function keymap_macos(keymap)
   keymap.add_direct {
     ["cmd+p"] = "core:find-command",
     ["cmd+o"] = "core:open-file",
+    ["cmd+shift+r"] = "core:open-recent-file",
+    ["cmd+option+shift+r"] = "core:open-recent-folder",
     ["cmd+n"] = "core:new-doc",
     ["cmd+shift+c"] = "core:change-project-folder",
     ["cmd+option+o"] = "core:open-project-folder",
@@ -39,6 +41,7 @@ local function keymap_macos(keymap)
     ["wheeldown"] = "root:scroll-hovered-tabs-forward",
 
     ["cmd+f"] = "find-replace:find",
+    ["option+w"] = "find-replace:toggle-whole-word",
     ["cmd+r"] = "find-replace:replace",
     ["f3"] = "find-replace:repeat-find",
     ["shift+f3"] = "find-replace:previous-find",
@@ -83,6 +86,7 @@ local function keymap_macos(keymap)
     ["option+down"] = "doc:move-lines-down",
     ["cmd+shift+d"] = "doc:duplicate-lines",
     ["cmd+shift+k"] = "doc:delete-lines",
+    ["cmd+option+["] = "fold:toggle",
 
     ["left"] = { "doc:move-to-previous-char", "dialog:previous-entry" },
     ["right"] = { "doc:move-to-next-char", "dialog:next-entry"},

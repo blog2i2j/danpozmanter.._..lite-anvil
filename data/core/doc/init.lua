@@ -56,7 +56,7 @@ local function apply_native_snapshot(self, snapshot)
   self.selections = snapshot.selections
   self.undo_stack.idx = snapshot.change_id
   self.redo_stack.idx = snapshot.change_id
-  self.crlf = snapshot.crlf or self.crlf
+  self.crlf = snapshot.crlf
 end
 
 
@@ -130,13 +130,13 @@ end
 function Doc:load(filename)
   ensure_native_buffer(self)
   if doc_native and self.buffer_id then
+    self:reset()
     local ok, snapshot = pcall(doc_native.buffer_load, self.buffer_id, filename)
     if not ok or not snapshot then
       self:reset()
       core.error("Cannot open file %s: %s", filename, snapshot or "unknown error")
       return nil, snapshot
     end
-    self:reset()
     apply_native_snapshot(self, snapshot)
     for i = 1, #self.lines do
       self.highlighter.lines[i] = false
@@ -194,9 +194,13 @@ function Doc:save(filename, abs_filename)
     error("calling save on unnamed doc without absolute path")
   end
 
+  local filename_changed = filename ~= self.filename or abs_filename ~= self.abs_filename
+
   if doc_native and self.buffer_id then
     doc_native.buffer_save(self.buffer_id, abs_filename, self.crlf)
-    self:set_filename(filename, abs_filename)
+    if filename_changed then
+      self:set_filename(filename, abs_filename)
+    end
     self.new_file = false
     self:clean()
     return
@@ -227,7 +231,9 @@ function Doc:save(filename, abs_filename)
     fp:write(line)
   end
   fp:close()
-  self:set_filename(filename, abs_filename)
+  if filename_changed then
+    self:set_filename(filename, abs_filename)
+  end
   self.new_file = false
   self:clean()
 end

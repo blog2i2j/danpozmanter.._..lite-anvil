@@ -20,7 +20,9 @@ local last_view, last_fn, last_text, last_sel
 
 local case_sensitive = config.find_case_sensitive or false
 local find_regex = config.find_regex or false
+local whole_word = config.find_whole_word or false
 local found_expression
+local find_ui_active = false
 
 local function doc()
   local is_DocView = core.active_view:is(DocView) and not core.active_view:is(CommandView)
@@ -32,17 +34,20 @@ local function get_find_tooltip()
   local sa = keymap.get_binding("find-replace:select-all-found")
   local ti = keymap.get_binding("find-replace:toggle-sensitivity")
   local tr = keymap.get_binding("find-replace:toggle-regex")
+  local tw = keymap.get_binding("find-replace:toggle-whole-word")
   return (find_regex and "[Regex] " or "") ..
     (case_sensitive and "[Sensitive] " or "") ..
+    (whole_word and "[Whole Word] " or "") ..
     (rf and ("Press " .. rf .. " to select the next match.") or "") ..
     (sa and (" " .. sa .. " selects all matches as multi-cursors.") or "") ..
     (ti and (" " .. ti .. " toggles case sensitivity.") or "") ..
-    (tr and (" " .. tr .. " toggles regex find.") or "")
+    (tr and (" " .. tr .. " toggles regex find.") or "") ..
+    (tw and (" " .. tw .. " toggles whole word.") or "")
 end
 
 local function update_preview(sel, search_fn, text)
   local ok, line1, col1, line2, col2 = pcall(search_fn, last_view.doc,
-    sel[1], sel[2], text, case_sensitive, find_regex)
+    sel[1], sel[2], text, case_sensitive, find_regex, false, whole_word)
   if ok and line1 and text ~= "" then
     last_view.doc:set_selection(line2, col2, line1, col1)
     last_view:scroll_to_line(line2, true)
@@ -71,6 +76,7 @@ local function find(label, search_fn)
     { core.active_view.doc:get_selection() }
   local text = last_view.doc:get_text(table.unpack(last_sel))
   found_expression = false
+  find_ui_active = true
 
   core.status_view:show_tooltip(get_find_tooltip())
 
@@ -81,6 +87,7 @@ local function find(label, search_fn)
     submit = function(text, item)
       insert_unique(core.previous_find, text)
       core.status_view:remove_tooltip()
+      find_ui_active = false
       if found_expression then
         last_fn, last_text = search_fn, text
       else
@@ -96,6 +103,7 @@ local function find(label, search_fn)
     end,
     cancel = function(explicit)
       core.status_view:remove_tooltip()
+      find_ui_active = false
       if explicit then
         last_view.doc:set_selection(table.unpack(last_sel))
         last_view:scroll_to_make_visible(table.unpack(last_sel))
@@ -107,6 +115,7 @@ end
 
 local function replace(kind, default, fn)
   core.status_view:show_tooltip(get_find_tooltip())
+  find_ui_active = true
   core.command_view:enter("Find To Replace " .. kind, {
     text = default,
     select_text = true,
@@ -121,6 +130,7 @@ local function replace(kind, default, fn)
         show_suggestions = false,
         submit = function(new)
           core.status_view:remove_tooltip()
+          find_ui_active = false
           insert_unique(core.previous_replace, new)
           local results = doc():replace(function(text)
             return fn(text, old, new)
@@ -134,12 +144,14 @@ local function replace(kind, default, fn)
         suggest = function() return core.previous_replace end,
         cancel = function()
           core.status_view:remove_tooltip()
+          find_ui_active = false
         end
       })
     end,
     suggest = function() return core.previous_find end,
     cancel = function()
       core.status_view:remove_tooltip()
+      find_ui_active = false
     end
   })
 end
@@ -210,9 +222,9 @@ local function select_next(reverse)
   local l1, c1, l2, c2 = doc():get_selection(true)
   local text = doc():get_text(l1, c1, l2, c2)
   if reverse then
-    l1, c1, l2, c2 = search.find(doc(), l1, c1, text, { wrap = true, reverse = true })
+    l1, c1, l2, c2 = search.find(doc(), l1, c1, text, { wrap = true, reverse = true, whole_word = whole_word })
   else
-    l1, c1, l2, c2 = search.find(doc(), l2, c2, text, { wrap = true })
+    l1, c1, l2, c2 = search.find(doc(), l2, c2, text, { wrap = true, whole_word = whole_word })
   end
   if l2 then doc():set_selection(l2, c2, l1, c1) end
 end
@@ -229,6 +241,7 @@ local function select_all_found(dv)
   local opt = {
     no_case = not case_sensitive,
     regex = find_regex,
+    whole_word = whole_word,
   }
 
   while true do
@@ -295,7 +308,7 @@ command.add(has_unique_selection, {
 command.add("core.docview!", {
   ["find-replace:find"] = function()
     find("Find Text", function(doc, line, col, text, case_sensitive, find_regex, find_reverse)
-      local opt = { wrap = true, no_case = not case_sensitive, regex = find_regex, reverse = find_reverse }
+      local opt = { wrap = true, no_case = not case_sensitive, regex = find_regex, reverse = find_reverse, whole_word = whole_word }
       return search.find(doc, line, col, text, opt)
     end)
   end,
@@ -341,7 +354,7 @@ command.add(valid_for_finding, {
       core.error("No find to continue from")
     else
       local sl1, sc1, sl2, sc2 = dv.doc:get_selection(true)
-      local line1, col1, line2, col2 = last_fn(dv.doc, sl2, sc2, last_text, case_sensitive, find_regex, false)
+      local line1, col1, line2, col2 = last_fn(dv.doc, sl2, sc2, last_text, case_sensitive, find_regex, false, whole_word)
       if line1 then
         dv.doc:set_selection(line2, col2, line1, col1)
         dv:scroll_to_line(line2, true)
@@ -356,7 +369,7 @@ command.add(valid_for_finding, {
       core.error("No find to continue from")
     else
       local sl1, sc1, sl2, sc2 = dv.doc:get_selection(true)
-      local line1, col1, line2, col2 = last_fn(dv.doc, sl1, sc1, last_text, case_sensitive, find_regex, true)
+      local line1, col1, line2, col2 = last_fn(dv.doc, sl1, sc1, last_text, case_sensitive, find_regex, true, whole_word)
       if line1 then
         dv.doc:set_selection(line2, col2, line1, col1)
         dv:scroll_to_line(line2, true)
@@ -382,5 +395,29 @@ command.add("core.commandview", {
     find_regex = not find_regex
     core.status_view:show_tooltip(get_find_tooltip())
     if last_sel then update_preview(last_sel, last_fn, last_text) end
+  end,
+
+  ["find-replace:toggle-whole-word"] = function()
+    whole_word = not whole_word
+    core.status_view:show_tooltip(get_find_tooltip())
+    if last_sel then update_preview(last_sel, last_fn, last_text) end
   end
+})
+
+core.status_view:add_item({
+  predicate = function()
+    return find_ui_active and core.active_view and core.active_view:is(CommandView)
+  end,
+  name = "find:state",
+  alignment = StatusView.Item.RIGHT,
+  get_item = function()
+    return {
+      case_sensitive and style.accent or style.dim, "Aa",
+      style.dim, " ",
+      find_regex and style.accent or style.dim, ".*",
+      style.dim, " ",
+      whole_word and style.accent or style.dim, "W",
+    }
+  end,
+  tooltip = "Search toggles: case, regex, whole word"
 })
