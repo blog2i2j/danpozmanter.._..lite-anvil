@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use mlua::prelude::*;
+use mlua::StdLib;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -30,10 +31,47 @@ end)
 return core and core.restart_request
 "#;
 
+fn install_debug_shim(lua: &Lua) -> LuaResult<()> {
+    let debug = lua.create_table()?;
+
+    debug.set(
+        "traceback",
+        lua.create_function(|lua, (msg, level): (Option<String>, Option<usize>)| {
+            lua.traceback(msg.as_deref(), level.unwrap_or(1))
+        })?,
+    )?;
+
+    debug.set(
+        "getinfo",
+        lua.create_function(|lua, (level, _what): (usize, Option<String>)| {
+            let info = lua.create_table()?;
+            if let Some((short_src, currentline)) = lua.inspect_stack(level, |debug| {
+                let short_src = debug
+                    .source()
+                    .short_src
+                    .map(|src| src.into_owned())
+                    .unwrap_or_else(|| "[C]".to_string());
+                let currentline = debug.current_line().unwrap_or(0);
+                (short_src, currentline)
+            }) {
+                info.set("short_src", short_src)?;
+                info.set("currentline", currentline)?;
+            } else {
+                info.set("short_src", "[C]")?;
+                info.set("currentline", 0)?;
+            }
+            Ok(info)
+        })?,
+    )?;
+
+    lua.globals().set("debug", debug)
+}
+
 /// Initialise one Lua VM lifecycle. Returns true if the editor requested a restart.
 pub fn run(args: &[String]) -> Result<bool> {
-    // SAFETY: the debug library is required for debug.traceback in error handlers.
-    let lua = unsafe { Lua::unsafe_new() };
+    let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())
+        .map_err(anyhow::Error::from)
+        .context("could not create safe Lua VM")?;
 
     let exe_file = std::env::current_exe().context("could not resolve executable path")?;
     let exe_dir = exe_file
@@ -43,6 +81,7 @@ pub fn run(args: &[String]) -> Result<bool> {
     let start_lua = data_dir.join("core").join("start.lua");
 
     set_globals(&lua, args, &exe_file, &data_dir)?;
+    install_debug_shim(&lua)?;
     crate::api::register_stubs(&lua)?;
 
     let source = std::fs::read_to_string(&start_lua)

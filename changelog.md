@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.10.3] - 2026-03-15 — Terminal color output fix, removing more unsafe code.
+
+* Fixed terminal color output by ensuring terminal sessions get TERM and COLORTERM defaults when the app is launched without them.
+* Stability fix + removing more unsafe code with Lua VM.
+
 ## [0.10.2] - 2026-03-15 — Terminal ANSI color fix & further fixes.
 
 * Fixed terminal ANSI color parsing by switching the native terminal parser back to byte-oriented processing.

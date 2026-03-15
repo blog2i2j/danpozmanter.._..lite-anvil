@@ -2,9 +2,41 @@ use libc::{self, c_int, pid_t};
 use mlua::prelude::*;
 use parking_lot::Mutex;
 use std::ffi::CString;
+use std::ffi::NulError;
 
 const READ_BUF_SIZE: usize = 4096;
 const INVALID_FD: c_int = -1;
+
+fn push_env_pair(env_pairs: &mut Vec<(CString, CString)>, key: &str, value: &str) -> Result<(), NulError> {
+    env_pairs.push((CString::new(key)?, CString::new(value)?));
+    Ok(())
+}
+
+fn ensure_terminal_env_with<F>(
+    env_pairs: &mut Vec<(CString, CString)>,
+    mut inherited_has: F,
+) -> Result<(), NulError>
+where
+    F: FnMut(&str) -> bool,
+{
+    let has_term = env_pairs.iter().any(|(key, _)| key.as_bytes() == b"TERM");
+    if !has_term && !inherited_has("TERM") {
+        push_env_pair(env_pairs, "TERM", "xterm-256color")?;
+    }
+
+    let has_colorterm = env_pairs
+        .iter()
+        .any(|(key, _)| key.as_bytes() == b"COLORTERM");
+    if !has_colorterm && !inherited_has("COLORTERM") {
+        push_env_pair(env_pairs, "COLORTERM", "truecolor")?;
+    }
+
+    Ok(())
+}
+
+fn ensure_terminal_env(env_pairs: &mut Vec<(CString, CString)>) -> Result<(), NulError> {
+    ensure_terminal_env_with(env_pairs, |key| std::env::var_os(key).is_some())
+}
 
 #[cfg(target_os = "linux")]
 #[link(name = "util")]
@@ -246,13 +278,12 @@ fn terminal_spawn(
         if let Ok(Some(env_t)) = t.get::<Option<LuaTable>>("env") {
             for pair in env_t.pairs::<String, String>() {
                 let (k, v) = pair?;
-                env_pairs.push((
-                    CString::new(k).map_err(|e| LuaError::RuntimeError(e.to_string()))?,
-                    CString::new(v).map_err(|e| LuaError::RuntimeError(e.to_string()))?,
-                ));
+                push_env_pair(&mut env_pairs, &k, &v)
+                    .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             }
         }
     }
+    ensure_terminal_env(&mut env_pairs).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
 
     let winsz = libc::winsize {
         ws_row: rows,
@@ -310,4 +341,18 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     let t = lua.create_table()?;
     t.set("spawn", lua.create_function(terminal_spawn)?)?;
     Ok(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_terminal_env_with;
+    use std::ffi::CString;
+
+    #[test]
+    fn adds_term_defaults_when_missing() {
+        let mut env_pairs = Vec::<(CString, CString)>::new();
+        ensure_terminal_env_with(&mut env_pairs, |_| false).expect("env");
+        assert!(env_pairs.iter().any(|(key, value)| key.as_bytes() == b"TERM" && value.as_bytes() == b"xterm-256color"));
+        assert!(env_pairs.iter().any(|(key, value)| key.as_bytes() == b"COLORTERM" && value.as_bytes() == b"truecolor"));
+    }
 }
