@@ -98,11 +98,6 @@ impl ProcessInner {
 
 pub struct ProcessHandle(Mutex<ProcessInner>);
 
-// SAFETY: c_int / pid_t are plain integers (i32 on Linux).
-// File descriptors are per-process resources safe to access from any thread.
-unsafe impl Send for ProcessHandle {}
-unsafe impl Sync for ProcessHandle {}
-
 impl Drop for ProcessHandle {
     fn drop(&mut self) {
         let inner = self.0.get_mut();

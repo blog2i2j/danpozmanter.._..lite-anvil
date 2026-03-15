@@ -16,10 +16,6 @@ pub(crate) const NOTEMPTY_ATSTART: u32 = 0x00000008;
 
 pub struct RegexHandle(Arc<Regex>);
 
-// SAFETY: pcre2::bytes::Regex uses internal thread-safe pools for match data.
-unsafe impl Send for RegexHandle {}
-unsafe impl Sync for RegexHandle {}
-
 impl LuaUserData for RegexHandle {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(LuaMetaMethod::ToString, |_, _, ()| Ok("regex"));

@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.10.1] - 2026-03-14 — macOS terminal build fix & unsafe reduction.
+
+* Fixed the native terminal PTY build on macOS.
+* Removed unnecessary unsafe Send/Sync impls from native terminal, picker, regex, and process wrappers.
+
 ## [0.10.0] - 2026-03-14 — Native LSP, project, command palette picker, terminal emulation.
 
 * Moved LSP config/spec resolution, diagnostics state, and semantic refresh scheduling into Rust.

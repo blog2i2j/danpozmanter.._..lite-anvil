@@ -359,9 +359,6 @@ impl TerminalBufferInner {
 
 pub struct TerminalBuffer(Mutex<TerminalBufferInner>);
 
-unsafe impl Send for TerminalBuffer {}
-unsafe impl Sync for TerminalBuffer {}
-
 fn table_to_color(table: LuaTable) -> LuaResult<[u8; 4]> {
     Ok([
         table.raw_get::<u8>(1)?,

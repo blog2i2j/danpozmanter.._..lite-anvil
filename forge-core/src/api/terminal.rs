@@ -8,14 +8,7 @@ const INVALID_FD: c_int = -1;
 
 #[cfg(target_os = "linux")]
 #[link(name = "util")]
-unsafe extern "C" {
-    fn forkpty(
-        amaster: *mut c_int,
-        name: *mut libc::c_char,
-        termp: *const libc::termios,
-        winp: *const libc::winsize,
-    ) -> pid_t;
-}
+unsafe extern "C" {}
 
 struct TerminalInner {
     pid: pid_t,
@@ -60,9 +53,6 @@ impl TerminalInner {
 }
 
 pub struct TerminalHandle(Mutex<TerminalInner>);
-
-unsafe impl Send for TerminalHandle {}
-unsafe impl Sync for TerminalHandle {}
 
 impl Drop for TerminalHandle {
     fn drop(&mut self) {
@@ -272,14 +262,7 @@ fn terminal_spawn(
     };
 
     let mut master_fd = INVALID_FD;
-    let pid = unsafe {
-        forkpty(
-            &mut master_fd,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            &winsz,
-        )
-    };
+    let pid = unsafe { libc::forkpty(&mut master_fd, std::ptr::null_mut(), std::ptr::null(), &winsz) };
     if pid < 0 {
         return Err(LuaError::RuntimeError(format!(
             "cannot create terminal pty: {}",
