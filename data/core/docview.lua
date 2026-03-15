@@ -204,9 +204,9 @@ end
 function DocView:get_x_offset_col(line, x)
   local line_text = self.doc.lines[line]
 
-  local xoffset, i = 0, 1
   local default_font = self:get_font()
   local _, indent_size = self.doc:get_indent_info()
+  local xoffset, i = 0, 1
   default_font:set_tab_size(indent_size)
   for _, type, text in self.doc.highlighter:each_token(line) do
     local font = style.syntax_fonts[type] or default_font

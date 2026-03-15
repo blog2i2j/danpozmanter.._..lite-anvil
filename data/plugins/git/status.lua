@@ -3,6 +3,14 @@ local common = require "core.common"
 local config = require "core.config"
 local gitignore = require "core.gitignore"
 local process = require "process"
+local native_git = nil
+
+do
+  local ok, mod = pcall(require, "git_native")
+  if ok then
+    native_git = mod
+  end
+end
 
 config.plugins.git = common.merge({
   refresh_interval = 5,
@@ -26,6 +34,12 @@ local function path_to_repo(path)
   if not path then
     local project = core.root_project and core.root_project()
     path = project and project.path or nil
+  end
+  if native_git and path then
+    local ok, root = pcall(native_git.discover, path)
+    if ok then
+      return root
+    end
   end
   return path and gitignore.find_root(path) or nil
 end
@@ -202,6 +216,28 @@ function git.refresh(path, force)
   end
 
   repo.refreshing = true
+  if native_git then
+    core.add_thread(function()
+      local ok, native_repo = pcall(native_git.status, root)
+      repo.refreshing = false
+      repo.last_refresh = system.get_time()
+      if ok and native_repo then
+        repo.root = normalize(native_repo.root or root)
+        repo.branch = native_repo.branch or ""
+        repo.ahead = native_repo.ahead or 0
+        repo.behind = native_repo.behind or 0
+        repo.detached = native_repo.detached or false
+        repo.files = native_repo.files or {}
+        repo.ordered = native_repo.ordered or {}
+        repo.dirty = native_repo.dirty or false
+        repo.error = native_repo.error
+      else
+        repo.error = tostring(native_repo or "git status failed")
+      end
+      core.redraw = true
+    end)
+    return repo
+  end
   run_git(root, { "status", "--branch", "--porcelain=v1" }, function(ok, stdout, stderr)
     repo.refreshing = false
     repo.last_refresh = system.get_time()
@@ -234,6 +270,17 @@ function git.run(path, args, on_complete)
 end
 
 function git.list_branches(path, on_complete)
+  if native_git then
+    core.add_thread(function()
+      local ok, branches = pcall(native_git.list_branches, path)
+      if ok then
+        on_complete(branches)
+      else
+        on_complete(nil, tostring(branches))
+      end
+    end)
+    return
+  end
   git.run(path, { "branch", "--all", "--format=%(refname:short)" }, function(ok, stdout, stderr)
     if not ok then
       on_complete(nil, stderr)

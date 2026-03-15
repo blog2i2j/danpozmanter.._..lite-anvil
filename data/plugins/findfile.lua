@@ -5,6 +5,14 @@ local command = require "core.command"
 local common = require "core.common"
 local config = require "core.config"
 local keymap = require "core.keymap"
+local native_manifest = nil
+
+do
+  local ok, mod = pcall(require, "project_manifest")
+  if ok then
+    native_manifest = mod
+  end
+end
 
 config.plugins.findfile = common.merge({
   -- how many files from the project we store in a list before we stop
@@ -21,7 +29,26 @@ config.plugins.findfile = common.merge({
 command.add(nil, {
   ["core:find-file"] = function()
     local files, complete = {}, false
+    if native_manifest then
+      for i, project in ipairs(core.projects) do
+        local cached = native_manifest.get_files(project.path, {
+          max_size_bytes = config.file_size_limit * 1e6
+        })
+        for _, filename in ipairs(cached) do
+          if #files > config.plugins.findfile.file_limit then
+            break
+          end
+          local info = project:get_file_info(filename)
+          if info and info.type == "file" then
+            files[#files + 1] = i == 1 and filename:sub(#project.path + 2) or common.home_encode(filename)
+          end
+        end
+      end
+    end
     local refresh = coroutine.wrap(function()
+      if native_manifest then
+        return
+      end
       local start, total = system.get_time(), 0
       for i, project in ipairs(core.projects) do
         for project, item in project:files() do

@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.8.0] - 2026-03-14 — Native edit, autocomplete, and watch paths.
+
+* Moved document edits and packed undo records into the Rust core.
+* Added a native autocomplete symbol index and project manifest cache.
+* Added native Git status/branch plumbing and native LSP transport/framing/JSON.
+* Switched dirwatch polling to the native watcher backend.
+
 ## [0.7.0] - 2026-03-14 — Native search, tree, and document/buffer functionality.
 
 * Moved tree directory listing into the Rust core.

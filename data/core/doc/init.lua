@@ -394,6 +394,26 @@ local function push_undo(undo_stack, time, type, ...)
   undo_stack.idx = undo_stack.idx + 1
 end
 
+local function apply_native_edit_result(self, result, undo_stack, time, line_hint)
+  if not result then
+    return false
+  end
+  local old_lines = #self.lines
+  self.lines = result.lines
+  self.selections = result.selections
+  push_undo(undo_stack, time, "packed", result.undo)
+  local line_delta = result.line_delta or (#self.lines - old_lines)
+  if line_delta > 0 then
+    self.highlighter:insert_notify(line_hint, line_delta)
+  elseif line_delta < 0 then
+    self.highlighter:remove_notify(line_hint, -line_delta)
+  else
+    self.highlighter:invalidate(line_hint)
+  end
+  self:sanitize_selection()
+  return true
+end
+
 
 local function pop_undo(self, undo_stack, redo_stack, modified)
   -- pop command
@@ -411,6 +431,12 @@ local function pop_undo(self, undo_stack, redo_stack, modified)
   elseif cmd.type == "selection" then
     self.selections = { table.unpack(cmd) }
     self:sanitize_selection()
+  elseif cmd.type == "packed" and doc_native then
+    local result = doc_native.apply_packed_undo(self.lines, self.selections, cmd[1])
+    self.lines = result.lines
+    self.selections = result.selections
+    push_undo(redo_stack, cmd.time, "packed", result.undo)
+    self.highlighter:soft_reset()
   end
 
   modified = modified or (cmd.type ~= "selection")
@@ -429,6 +455,13 @@ end
 
 
 function Doc:raw_insert(line, col, text, undo_stack, time)
+  if doc_native then
+    local result = doc_native.apply_insert(self.lines, self.selections, line, col, text)
+    if apply_native_edit_result(self, result, undo_stack, time, line) then
+      return
+    end
+  end
+
   -- split text into lines and merge with line at insertion point
   local lines = split_lines(text)
   local len = #lines[#lines]
@@ -463,6 +496,13 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
 end
 
 function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
+  if doc_native then
+    local result = doc_native.apply_remove(self.lines, self.selections, line1, col1, line2, col2)
+    if apply_native_edit_result(self, result, undo_stack, time, line1) then
+      return
+    end
+  end
+
   -- push undo
   local text = self:get_text(line1, col1, line2, col2)
   push_undo(undo_stack, time, "selection", table.unpack(self.selections))
@@ -546,6 +586,22 @@ end
 
 function Doc:redo()
   pop_undo(self, self.redo_stack, self.undo_stack, false)
+end
+
+function Doc:apply_edits(edits)
+  if not doc_native or not edits or #edits == 0 then
+    return false
+  end
+  self.redo_stack = { idx = 1 }
+  if self:get_change_id() < self.clean_change_id then
+    self.clean_change_id = -1
+  end
+  local result = doc_native.apply_edits(self.lines, self.selections, edits)
+  if not apply_native_edit_result(self, result, self.undo_stack, system.get_time(), edits[1].line1 or 1) then
+    return false
+  end
+  self:on_text_change("insert")
+  return true
 end
 
 function Doc:text_input(text, idx)

@@ -1,6 +1,14 @@
 local common = require "core.common"
 local config = require "core.config"
 local dirwatch = {}
+local native_project_fs = nil
+
+do
+  local ok, mod = pcall(require, "project_fs")
+  if ok then
+    native_project_fs = mod
+  end
+end
 
 function dirwatch:__index(idx)
   local value = rawget(self, idx)
@@ -28,6 +36,7 @@ function dirwatch.new()
     scanned = {},
     watched = {},
     reverse_watched = {},
+    native_watches = {},
     monitor = dirmonitor.new(),
     single_watch_top = nil,
     single_watch_count = 0
@@ -44,6 +53,9 @@ end
 ---@param  unwatch? boolean If true, remove this directory from the watch list.
 function dirwatch:scan(path, unwatch)
   if unwatch == false then return self:unwatch(path) end
+  if native_project_fs then
+    return self:watch(path)
+  end
   self.scanned[path] = system.get_file_info(path).modified
 end
 
@@ -62,6 +74,17 @@ function dirwatch:watch(path, unwatch)
   if unwatch == false then return self:unwatch(path) end
   local info = system.get_file_info(path)
   if not info then return end
+  if native_project_fs then
+    if not self.native_watches[path] then
+      local ok, watch_id = pcall(native_project_fs.watch_project, path)
+      if ok and watch_id then
+        self.native_watches[path] = { id = watch_id, type = info.type }
+      else
+        self.scanned[path] = info.modified
+      end
+    end
+    return
+  end
   if not self.watched[path] and not self.scanned[path] then
     if self.monitor:mode() == "single" then
       if info.type ~= "dir" then return self:scan(path) end
@@ -97,6 +120,12 @@ end
 ---Removes a path from the watch list.
 ---@param directory string The path to remove. This should be an absolute path.
 function dirwatch:unwatch(directory)
+  if native_project_fs and self.native_watches[directory] then
+    native_project_fs.cancel_watch(self.native_watches[directory].id)
+    self.native_watches[directory] = nil
+    self.scanned[directory] = nil
+    return
+  end
   if self.watched[directory] then
     if self.monitor:mode() == "multiple" then
       self.monitor:unwatch(self.watched[directory])
@@ -122,28 +151,52 @@ end
 ---@return boolean # If true, a path had changed.
 function dirwatch:check(change_callback, scan_time, wait_time)
   local had_change = false
-  local last_error
-  self.monitor:check(function(id)
-    had_change = true
-    if self.monitor:mode() == "single" then
-      local path = common.dirname(id)
-      if not string.match(id, "^/") and not string.match(id, "^%a:[/\\]") then
-        path = common.dirname(self.single_watch_top .. PATHSEP .. id)
-      end
-      change_callback(path)
-    elseif self.reverse_watched[id] then
-      local path = self.reverse_watched[id]
-      change_callback(path)
-      local info = system.get_file_info(path)
-      if info and info.type == "file" then
-        self:unwatch(path)
-        self:watch(path)
+  if native_project_fs then
+    local delivered = {}
+    for path, watch in pairs(self.native_watches) do
+      local ok, changes = pcall(native_project_fs.poll_changes, watch.id)
+      if ok and changes then
+        for _, changed in ipairs(changes) do
+          local target = watch.type == "dir" and path or path
+          if watch.type == "file" then
+            if changed == path and not delivered[target] then
+              delivered[target] = true
+              change_callback(target)
+              had_change = true
+            end
+          elseif not delivered[target] then
+            delivered[target] = true
+            change_callback(target)
+            had_change = true
+          end
+        end
       end
     end
-  end, function(err)
-    last_error = err
-  end)
-  if last_error ~= nil then error(last_error) end
+  end
+  local last_error
+  if not native_project_fs then
+    self.monitor:check(function(id)
+      had_change = true
+      if self.monitor:mode() == "single" then
+        local path = common.dirname(id)
+        if not string.match(id, "^/") and not string.match(id, "^%a:[/\\]") then
+          path = common.dirname(self.single_watch_top .. PATHSEP .. id)
+        end
+        change_callback(path)
+      elseif self.reverse_watched[id] then
+        local path = self.reverse_watched[id]
+        change_callback(path)
+        local info = system.get_file_info(path)
+        if info and info.type == "file" then
+          self:unwatch(path)
+          self:watch(path)
+        end
+      end
+    end, function(err)
+      last_error = err
+    end)
+    if last_error ~= nil then error(last_error) end
+  end
   local start_time = system.get_time()
   for directory, old_modified in pairs(self.scanned) do
     if old_modified then

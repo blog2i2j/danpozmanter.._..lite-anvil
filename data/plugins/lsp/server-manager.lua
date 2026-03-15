@@ -335,8 +335,22 @@ local function apply_workspace_edit(edit)
     if abs_path then
       local doc = core.open_doc(abs_path)
       table.sort(edits, range_sort_desc)
+      local native_edits = {}
       for _, item in ipairs(edits) do
-        apply_text_edit(doc, item)
+        local start_line, start_col = doc_position_from_lsp(doc, item.range.start)
+        local end_line, end_col = doc_position_from_lsp(doc, item.range["end"])
+        native_edits[#native_edits + 1] = {
+          line1 = start_line,
+          col1 = start_col,
+          line2 = end_line,
+          col2 = end_col,
+          text = item.newText or "",
+        }
+      end
+      if not doc:apply_edits(native_edits) then
+        for _, item in ipairs(edits) do
+          apply_text_edit(doc, item)
+        end
       end
       core.root_view:open_doc(doc)
     end

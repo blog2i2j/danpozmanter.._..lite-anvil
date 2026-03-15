@@ -10,10 +10,31 @@ local RootView  = require "core.rootview"
 local DocView   = require "core.docview"
 local Doc       = require "core.doc"
 local drawing   = require "plugins.autocomplete.drawing"
+local symbol_index = nil
+
+do
+  local ok, mod = pcall(require, "symbol_index")
+  if ok then
+    symbol_index = mod
+  end
+end
 
 ---Symbols cache of all open documents
 ---@type table<core.doc, table>
 local cache = setmetatable({}, { __mode = "k" })
+local next_doc_id = 1
+
+local function get_doc_id(doc)
+  local c = cache[doc]
+  if c and c.doc_id then
+    return c.doc_id
+  end
+  c = c or {}
+  c.doc_id = next_doc_id
+  next_doc_id = next_doc_id + 1
+  cache[doc] = c
+  return c.doc_id
+end
 
 config.plugins.autocomplete = common.merge({
   -- Amount of characters that need to be written for autocomplete
@@ -199,6 +220,27 @@ core.add_thread(function()
   end
 
   local function get_symbols(doc)
+    if symbol_index and config.symbol_pattern == "[%a_][%w_]*" then
+      local state = symbol_index.set_doc_symbols(
+        get_doc_id(doc),
+        doc.lines,
+        config.plugins.autocomplete.max_symbols,
+        load_syntax_symbols(doc)
+      )
+      if state.exceeded then
+        doc.disable_symbols = true
+        local filename_message = doc.filename and ("document " .. doc.filename) or "unnamed document"
+        core.status_view:show_message("!", style.accent,
+          "Too many symbols in " .. filename_message ..
+          ": stopping auto-complete for this document according to " ..
+          "config.plugins.autocomplete.max_symbols."
+        )
+        collectgarbage("collect")
+        return {}
+      end
+      return true
+    end
+
     local s = {}
     local syntax_symbols = load_syntax_symbols(doc)
     local max_symbols = config.plugins.autocomplete.max_symbols
@@ -248,14 +290,21 @@ core.add_thread(function()
       -- update the cache if the doc has changed since the last iteration
       if not cache_is_valid(doc) then
         cache[doc] = {
+          doc_id = get_doc_id(doc),
           last_change_id = doc:get_change_id(),
           symbols = get_symbols(doc)
         }
       end
       -- update symbol set with doc's symbol set
       if config.plugins.autocomplete.suggestions_scope == "global" then
-        for sym in pairs(cache[doc].symbols) do
-          symbols[sym] = true
+        if symbol_index and cache[doc].symbols == true then
+          for _, sym in ipairs(symbol_index.get_doc_symbols(cache[doc].doc_id)) do
+            symbols[sym] = true
+          end
+        else
+          for sym in pairs(cache[doc].symbols) do
+            symbols[sym] = true
+          end
         end
       end
       coroutine.yield()
@@ -328,16 +377,38 @@ local function update_suggestions()
     local text_symbols = nil
 
     if scope == "global" then
-      text_symbols = global_symbols
+      if symbol_index then
+        local doc_ids = {}
+        for _, d in ipairs(core.docs) do
+          if cache[d] and cache[d].symbols == true then
+            doc_ids[#doc_ids + 1] = cache[d].doc_id
+          end
+        end
+        text_symbols = symbol_index.collect(doc_ids)
+      else
+        text_symbols = global_symbols
+      end
     elseif scope == "local" and cache[doc] and cache[doc].symbols then
-      text_symbols = cache[doc].symbols
+      if symbol_index and cache[doc].symbols == true then
+        text_symbols = symbol_index.get_doc_symbols(cache[doc].doc_id)
+      else
+        text_symbols = cache[doc].symbols
+      end
     elseif scope == "related" then
       for _, d in ipairs(core.docs) do
         if doc.syntax == d.syntax then
-          if cache[d].symbols then
-            for name in pairs(cache[d].symbols) do
-              if not assigned_sym[name] then
-                table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
+          if cache[d] and cache[d].symbols then
+            if symbol_index and cache[d].symbols == true then
+              for _, name in ipairs(symbol_index.get_doc_symbols(cache[d].doc_id)) do
+                if not assigned_sym[name] then
+                  table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
+                end
+              end
+            else
+              for name in pairs(cache[d].symbols) do
+                if not assigned_sym[name] then
+                  table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
+                end
               end
             end
           end
@@ -346,9 +417,17 @@ local function update_suggestions()
     end
 
     if text_symbols then
-      for name in pairs(text_symbols) do
-        if not assigned_sym[name] then
-          table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
+      if symbol_index and type(text_symbols[1]) ~= "nil" then
+        for _, name in ipairs(text_symbols) do
+          if not assigned_sym[name] then
+            table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
+          end
+        end
+      else
+        for name in pairs(text_symbols) do
+          if not assigned_sym[name] then
+            table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
+          end
         end
       end
     end
@@ -430,6 +509,7 @@ local on_text_input = RootView.on_text_input
 local on_text_remove = Doc.remove
 local update = RootView.update
 local draw = RootView.draw
+local old_on_close = Doc.on_close
 
 RootView.on_text_input = function(...)
   on_text_input(...)
@@ -476,6 +556,13 @@ RootView.draw = function(...)
     -- draw suggestions box after everything else
     core.root_view:defer_draw(drawing.draw_suggestions_box, make_ctx(), av)
   end
+end
+
+Doc.on_close = function(self, ...)
+  if symbol_index and cache[self] and cache[self].doc_id then
+    symbol_index.remove_doc(cache[self].doc_id)
+  end
+  return old_on_close(self, ...)
 end
 
 --

@@ -1,13 +1,17 @@
 mod dirmonitor;
 mod doc_native;
+mod git_native;
+mod lsp_transport;
 mod markdown;
 #[cfg(unix)]
 mod process;
 mod project_fs;
+mod project_manifest;
 mod project_search;
+mod regex;
+mod symbol_index;
 #[cfg(unix)]
 mod terminal;
-mod regex;
 mod tokenizer;
 mod utf8extra;
 
@@ -211,8 +215,20 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let project_search = project_search::make_module(lua)?;
     insert(&globals, &pkg_loaded, "project_search", project_search)?;
 
+    let project_manifest = project_manifest::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "project_manifest", project_manifest)?;
+
     let doc_native = doc_native::make_module(lua)?;
     insert(&globals, &pkg_loaded, "doc_native", doc_native)?;
+
+    let symbol_index = symbol_index::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "symbol_index", symbol_index)?;
+
+    let git_native = git_native::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "git_native", git_native)?;
+
+    let lsp_transport = lsp_transport::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "lsp_transport", lsp_transport)?;
 
     Ok(())
 }

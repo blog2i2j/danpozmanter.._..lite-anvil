@@ -6,6 +6,14 @@ local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local gitignore = require "core.gitignore"
+local native_manifest = nil
+
+do
+  local ok, mod = pcall(require, "project_manifest")
+  if ok then
+    native_manifest = mod
+  end
+end
 
 -- inspect config.ignore_files patterns and prepare ready to use entries.
 local function compile_ignore_files()
@@ -139,6 +147,19 @@ end
 
 function Project:files()
   return coroutine.wrap(function()
+    if native_manifest then
+      local cached = native_manifest.get_files(self.path, {
+        max_size_bytes = config.file_size_limit * 1e6
+      })
+      for _, filename in ipairs(cached) do
+        local info = self:get_file_info(filename)
+        if info and info.type == "file" then
+          info.filename = filename
+          coroutine.yield(self, info)
+        end
+      end
+      return
+    end
     find_files_rec(self, self.path)
   end)
 end

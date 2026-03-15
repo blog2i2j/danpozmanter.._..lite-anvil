@@ -2,7 +2,7 @@ use mlua::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -251,10 +251,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let out = lua.create_table()?;
             if let Some(handle) = WATCHERS.lock().get(&watch_id) {
                 let mut queue = handle.queue.lock();
+                let mut seen = HashSet::new();
                 let mut idx = 1i64;
                 while let Some(path) = queue.pop_front() {
-                    out.raw_set(idx, path)?;
-                    idx += 1;
+                    if seen.insert(path.clone()) {
+                        out.raw_set(idx, path)?;
+                        idx += 1;
+                    }
                 }
             }
             Ok(out)
