@@ -302,3 +302,92 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 
     Ok(module)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempTree {
+        path: PathBuf,
+    }
+
+    impl TempTree {
+        fn new() -> Self {
+            let unique = format!(
+                "lite-anvil-project-fs-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn path_str(&self) -> String {
+            self.path.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_file(path: &Path, contents: &[u8]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn glob_matches_supports_single_and_double_star() {
+        assert!(glob_matches("src/lib.rs", "*.rs") == false);
+        assert!(glob_matches("src/lib.rs", "src/*.rs"));
+        assert!(glob_matches("src/nested/lib.rs", "src/**/*.rs"));
+        assert!(glob_matches("src/lib.rs", "**/*.rs"));
+        assert!(!glob_matches("src/lib.rs", "**/*.toml"));
+    }
+
+    #[test]
+    fn read_dir_entries_sorts_directories_before_files() {
+        let tree = TempTree::new();
+        fs::create_dir(tree.path.join("b-dir")).unwrap();
+        write_file(&tree.path.join("a-file.txt"), b"a");
+        write_file(&tree.path.join("z-file.txt"), b"z");
+
+        let entries = read_dir_entries(&tree.path, false, None);
+        let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(names, vec!["b-dir", "a-file.txt", "z-file.txt"]);
+    }
+
+    #[test]
+    fn walk_files_applies_hidden_glob_size_and_count_limits() {
+        let tree = TempTree::new();
+        write_file(&tree.path.join("visible.txt"), b"ok");
+        write_file(&tree.path.join(".hidden.txt"), b"hidden");
+        write_file(&tree.path.join("nested").join("keep.md"), b"keep");
+        write_file(&tree.path.join("nested").join("skip.bin"), b"0123456789");
+
+        let files = walk_files(
+            &[tree.path_str()],
+            &WalkOptions {
+                show_hidden: false,
+                max_size_bytes: Some(10),
+                path_glob: Some("**/*.md".to_string()),
+                max_files: Some(1),
+                max_entries: None,
+            },
+        );
+
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("nested/keep.md"));
+    }
+}

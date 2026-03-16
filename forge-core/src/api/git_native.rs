@@ -42,19 +42,28 @@ fn discover_repo(path: &str) -> Option<String> {
 }
 
 fn parse_branch(header: &str) -> (String, i64, i64, bool) {
+    fn parse_counter(header: &str, label: &str) -> i64 {
+        header
+            .split(label)
+            .nth(1)
+            .and_then(|tail| {
+                let digits: String = tail
+                    .chars()
+                    .skip_while(|ch| !ch.is_ascii_digit())
+                    .take_while(|ch| ch.is_ascii_digit())
+                    .collect();
+                if digits.is_empty() {
+                    None
+                } else {
+                    digits.parse::<i64>().ok()
+                }
+            })
+            .unwrap_or(0)
+    }
+
     let mut branch = header.to_string();
-    let ahead = header
-        .split("ahead ")
-        .nth(1)
-        .and_then(|s| s.split(']').next())
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0);
-    let behind = header
-        .split("behind ")
-        .nth(1)
-        .and_then(|s| s.split(']').next())
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0);
+    let ahead = parse_counter(header, "ahead");
+    let behind = parse_counter(header, "behind");
     let detached = header.starts_with("HEAD");
     branch = branch
         .split(" [")
@@ -255,4 +264,37 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         })?,
     )?;
     Ok(module)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify, parse_branch};
+
+    #[test]
+    fn parse_branch_handles_tracking_counters() {
+        let (branch, ahead, behind, detached) =
+            parse_branch("main...origin/main [ahead 2, behind 1]");
+        assert_eq!(branch, "main");
+        assert_eq!(ahead, 2);
+        assert_eq!(behind, 1);
+        assert!(!detached);
+    }
+
+    #[test]
+    fn parse_branch_handles_detached_head() {
+        let (branch, ahead, behind, detached) = parse_branch("HEAD (detached at 1234567)");
+        assert_eq!(branch, "detached");
+        assert_eq!(ahead, 0);
+        assert_eq!(behind, 0);
+        assert!(detached);
+    }
+
+    #[test]
+    fn classify_distinguishes_untracked_conflict_staged_and_changed() {
+        assert_eq!(classify("??", '?', '?'), "untracked");
+        assert_eq!(classify("UU", 'U', 'U'), "conflict");
+        assert_eq!(classify("M ", 'M', ' '), "staged");
+        assert_eq!(classify(" M", ' ', 'M'), "changed");
+        assert_eq!(classify("  ", ' ', ' '), "unknown");
+    }
 }

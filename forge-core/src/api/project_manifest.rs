@@ -130,7 +130,10 @@ fn ensure_manifest(root: &str, max_size_bytes: Option<u64>) -> LuaResult<()> {
     match work {
         Work::None => {}
 
-        Work::Rebuild { files: files_arc, rebuilding: rebuilding_arc } => {
+        Work::Rebuild {
+            files: files_arc,
+            rebuilding: rebuilding_arc,
+        } => {
             let root_clone = root;
             std::thread::spawn(move || {
                 let new_files = build_files(&root_clone, max_size_bytes);
@@ -141,7 +144,13 @@ fn ensure_manifest(root: &str, max_size_bytes: Option<u64>) -> LuaResult<()> {
             });
         }
 
-        Work::NewManifest { files, dirty, rebuilding, last_event, watcher: watcher_holder } => {
+        Work::NewManifest {
+            files,
+            dirty,
+            rebuilding,
+            last_event,
+            watcher: watcher_holder,
+        } => {
             let dirty_for_cb = Arc::clone(&dirty);
             let last_event_for_cb = Arc::clone(&last_event);
             let root_clone = root;

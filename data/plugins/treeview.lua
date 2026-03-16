@@ -74,6 +74,8 @@ function TreeView:new()
   self.expanded = {}
   self.tooltip = { x = 0, y = 0, begin = 0, alpha = 0 }
   self.last_scroll_y = 0
+  self.selected_path = nil
+  self.hovered_path = nil
 
   self.item_icon_width = 0
   self.item_text_spacing = 0
@@ -206,8 +208,47 @@ function TreeView:each_item()
 end
 
 
+function TreeView:resolve_path(path)
+  if not path then return nil end
+  for item, x, y, w, h in self:each_item() do
+    if item.abs_filename == path then
+      return item, x, y, w, h
+    end
+  end
+end
+
+
+function TreeView:get_selected_item()
+  if self.selected_path then
+    local item = self:resolve_path(self.selected_path)
+    if item then
+      self.selected_item = item
+      return item
+    end
+    self.selected_item = nil
+    self.selected_path = nil
+  end
+  return self.selected_item
+end
+
+
+function TreeView:get_hovered_item()
+  if self.hovered_path then
+    local item = self:resolve_path(self.hovered_path)
+    if item then
+      self.hovered_item = item
+      return item
+    end
+    self.hovered_item = nil
+    self.hovered_path = nil
+  end
+  return self.hovered_item
+end
+
+
 function TreeView:set_selection(selection, selection_y, center, instant)
   self.selected_item = selection
+  self.selected_path = selection and selection.abs_filename or nil
   if selection and selection_y
       and (selection_y <= 0 or selection_y >= self.size.y) then
     local lh = self:get_item_height()
@@ -289,6 +330,7 @@ function TreeView:on_mouse_moved(px, py, ...)
   if TreeView.super.on_mouse_moved(self, px, py, ...) then
     -- mouse movement handled by the View (scrollbar)
     self.hovered_item = nil
+    self.hovered_path = nil
     return
   end
 
@@ -296,18 +338,25 @@ function TreeView:on_mouse_moved(px, py, ...)
   for item, x,y,w,h in self:each_item() do
     if px > x and py > y and px <= x + w and py <= y + h then
       item_changed = true
+      local same_hover = self.hovered_path == item.abs_filename
       self.hovered_item = item
+      self.hovered_path = item.abs_filename
 
       x,y,w,h = self:get_text_bounding_box(item, x,y,w,h)
       if px > x and py > y and px <= x + w and py <= y + h then
         tooltip_changed = true
         self.tooltip.x, self.tooltip.y = px, py
-        self.tooltip.begin = system.get_time()
+        if not same_hover then
+          self.tooltip.begin = system.get_time()
+        end
       end
       break
     end
   end
-  if not item_changed then self.hovered_item = nil end
+  if not item_changed then
+    self.hovered_item = nil
+    self.hovered_path = nil
+  end
   if not tooltip_changed then self.tooltip.x, self.tooltip.y = nil, nil end
 end
 
@@ -315,6 +364,7 @@ end
 function TreeView:on_mouse_left()
   TreeView.super.on_mouse_left(self)
   self.hovered_item = nil
+  self.hovered_path = nil
 end
 
 
@@ -331,7 +381,7 @@ function TreeView:update()
   if self.size.x == 0 or self.size.y == 0 or not self.visible then return end
 
   local duration = system.get_time() - self.tooltip.begin
-  if self.hovered_item and self.tooltip.x and duration > tooltip_delay then
+  if self.hovered_path and self.tooltip.x and duration > tooltip_delay then
     self:move_towards(self.tooltip, "alpha", tooltip_alpha, tooltip_alpha_rate, "treeview")
   else
     self.tooltip.alpha = 0
@@ -354,7 +404,6 @@ function TreeView:update()
     local current_active_view = core.active_view
     if current_node and not current_node.locked
      and current_active_view ~= self and current_active_view ~= self.last_active_view then
-      self.selected_item = nil
       self.last_active_view = current_active_view
       if DocView:is_extended_by(current_active_view) then
         local abs_filename = current_active_view.doc
@@ -363,6 +412,8 @@ function TreeView:update()
                                    config.expand_dirs_to_focused_file,
                                    config.scroll_to_focused_file,
                                    not config.animate_scroll_to_focused_file)
+      else
+        self:set_selection(nil)
       end
     end
   end
@@ -377,7 +428,9 @@ end
 
 
 function TreeView:draw_tooltip()
-  local text = common.home_encode(self.hovered_item.abs_filename)
+  local hovered = self:get_hovered_item()
+  if not hovered then return end
+  local text = common.home_encode(hovered.abs_filename)
   local w, h = style.font:get_width(text), style.font:get_height(text)
 
   local x, y = self.tooltip.x + tooltip_offset, self.tooltip.y + tooltip_offset
@@ -453,12 +506,13 @@ end
 
 
 function TreeView:draw_item_background(item, active, hovered, x, y, w, h)
-  if hovered then
+  if active then
+    renderer.draw_rect(x, y, w, h, style.line_highlight)
+  end
+  if hovered and not active then
     local hover_color = { table.unpack(style.line_highlight) }
     hover_color[4] = 160
     renderer.draw_rect(x, y, w, h, hover_color)
-  elseif active then
-    renderer.draw_rect(x, y, w, h, style.line_highlight)
   end
 end
 
@@ -481,20 +535,22 @@ function TreeView:draw()
   for item, x,y,w,h in self:each_item() do
     if y + h >= _y and y < _y + _h then
       self:draw_item(item,
-        item == self.selected_item,
-        item == self.hovered_item,
+        item.abs_filename == self.selected_path,
+        item.abs_filename == self.hovered_path,
         x, y, w, h)
     end
   end
 
   self:draw_scrollbar()
-  if self.hovered_item and self.tooltip.x and self.tooltip.alpha > 0 then
+  if self.hovered_path and self.tooltip.x and self.tooltip.alpha > 0 then
     core.root_view:defer_draw(self.draw_tooltip, self)
   end
 end
 
 
 function TreeView:get_parent(item)
+  item = item or self:get_selected_item()
+  if not item then return end
   local parent_path = common.dirname(item.abs_filename)
   if not parent_path then return end
   for it, _, y in self:each_item() do
@@ -539,7 +595,7 @@ end
 
 
 function TreeView:toggle_expand(toggle, item)
-  item = item or self.selected_item
+  item = item or self:get_selected_item()
 
   if not item then return end
 
@@ -622,7 +678,9 @@ local function is_primary_project_folder(path)
 end
 
 
-local function treeitem() return view.hovered_item or view.selected_item end
+local function treeitem()
+  return view:get_hovered_item() or view:get_selected_item()
+end
 
 function TreeView:on_context_menu()
   return { items = {
@@ -639,11 +697,15 @@ end
 
 if config.plugins.projectsearch ~= false then
   command.add(function(active_view)
-    return view.hovered_item and view.hovered_item.type == "dir"
+    local hovered = view:get_hovered_item()
+    return hovered and hovered.type == "dir"
       and (active_view or core.active_view) == view
   end, {
     ["treeview:search-in-directory"] = function(item)
-      command.perform("project-search:find", view.hovered_item.abs_filename)
+      local hovered = view:get_hovered_item()
+      if hovered then
+        command.perform("project-search:find", hovered.abs_filename)
+      end
     end
   })
 end
@@ -753,7 +815,7 @@ command.add(nil, {
         previous_view = core.root_view:get_primary_node().active_view
       end
       core.set_active_view(view)
-      if not view.selected_item then
+      if not view:get_selected_item() then
         for it, _, y in view:each_item() do
           view:set_selection(it, y)
           break
@@ -770,17 +832,17 @@ command.add(nil, {
 
 command.add(TreeView, {
   ["treeview:next"] = function()
-    local item, _, item_y = view:get_next(view.selected_item)
+    local item, _, item_y = view:get_next(view:get_selected_item())
     view:set_selection(item, item_y)
   end,
 
   ["treeview:previous"] = function()
-    local item, _, item_y = view:get_previous(view.selected_item)
+    local item, _, item_y = view:get_previous(view:get_selected_item())
     view:set_selection(item, item_y)
   end,
 
   ["treeview:open"] = function()
-    local item = view.selected_item
+    local item = view:get_selected_item()
     if not item then return end
     if item.type == "dir" then
       view:toggle_expand()
@@ -795,26 +857,28 @@ command.add(TreeView, {
   end,
 
   ["treeview:deselect"] = function()
-    view.selected_item = nil
+    view:set_selection(nil)
   end,
 
   ["treeview:select"] = function()
-    view:set_selection(view.hovered_item)
+    view:set_selection(view:get_hovered_item())
   end,
 
   ["treeview:select-and-open"] = function()
-    if view.hovered_item then
-      view:set_selection(view.hovered_item)
+    local hovered = view:get_hovered_item()
+    if hovered then
+      view:set_selection(hovered)
       command.perform "treeview:open"
     end
   end,
 
   ["treeview:collapse"] = function()
-    if view.selected_item then
-      if view.selected_item.type == "dir" and view.selected_item.expanded then
+    local item = view:get_selected_item()
+    if item then
+      if item.type == "dir" and item.expanded then
         view:toggle_expand(false)
       else
-        local parent_item, y = view:get_parent(view.selected_item)
+        local parent_item, y = view:get_parent(item)
         if parent_item then
           view:set_selection(parent_item, y)
         end
@@ -823,7 +887,7 @@ command.add(TreeView, {
   end,
 
   ["treeview:expand"] = function()
-    local item = view.selected_item
+    local item = view:get_selected_item()
     if not item or item.type ~= "dir" then return end
 
     if item.expanded then
@@ -885,7 +949,11 @@ command.add(
       text = text,
       submit = function(filename)
         local dir_path = item.project:absolute_path(filename)
-        common.mkdirp(dir_path)
+        local created, err, err_path = common.mkdirp(dir_path)
+        if not created then
+          core.error("Error: unable to create folder \"%s\": %s (%s)", dir_path, err or "unknown error", err_path or dir_path)
+          return
+        end
         core.log("Created %s", dir_path)
       end,
       suggest = function(text)

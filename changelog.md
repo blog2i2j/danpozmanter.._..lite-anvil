@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.13.5] - 2026-03-16 — Tree highlight stability and tests.
+
+* Sidebar tree's blue focused-row highlight flicker fix.
+* Fix Git branch parsing for statuses that report both ahead and behind counts.
+* Improve TreeView folder-creation error reporting and add regression tests for Git status parsing and native project file walking.
+
 ## [0.13.4] - 2026-03-16 — Large-project responsiveness: deeper dive.
 
 * Move project file-tree walks and filesystem-watcher setup entirely off the Lua main thread into background threads; callers always get the current (possibly stale) list immediately and the UI wakes when fresh results arrive.

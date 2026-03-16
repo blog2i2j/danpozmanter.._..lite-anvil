@@ -74,7 +74,11 @@ fn build_files(root: &str, max_size_bytes: Option<u64>, max_files: Option<usize>
 /// Returns immediately in all cases. If a rebuild is needed it is dispatched
 /// to a background thread so the Lua main thread is never blocked by I/O.
 /// Callers receive the current (possibly stale) list via `get_files`.
-fn ensure_project(root: &str, max_size_bytes: Option<u64>, max_files: Option<usize>) -> LuaResult<()> {
+fn ensure_project(
+    root: &str,
+    max_size_bytes: Option<u64>,
+    max_files: Option<usize>,
+) -> LuaResult<()> {
     let root = normalize_path(root);
 
     enum Work {
@@ -163,7 +167,10 @@ fn ensure_project(root: &str, max_size_bytes: Option<u64>, max_files: Option<usi
     match work {
         Work::None => {}
 
-        Work::Rebuild { files: files_arc, rebuilding: rebuilding_arc } => {
+        Work::Rebuild {
+            files: files_arc,
+            rebuilding: rebuilding_arc,
+        } => {
             let root_clone = root;
             std::thread::spawn(move || {
                 let new_files = build_files(&root_clone, max_size_bytes, max_files);
@@ -174,7 +181,13 @@ fn ensure_project(root: &str, max_size_bytes: Option<u64>, max_files: Option<usi
             });
         }
 
-        Work::NewProject { files, dirty, rebuilding, last_event, watcher: watcher_holder } => {
+        Work::NewProject {
+            files,
+            dirty,
+            rebuilding,
+            last_event,
+            watcher: watcher_holder,
+        } => {
             let dirty_for_cb = Arc::clone(&dirty);
             let last_event_for_cb = Arc::clone(&last_event);
             let root_clone = root;
