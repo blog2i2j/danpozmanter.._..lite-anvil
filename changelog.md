@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.13.2] - 2026-03-16 — Additional syntax highlighting.
+
+* Add syntax highlighting for env, ini, and zsh files.
+
 ## [0.13.1] - 2026-03-15 — Autocomplete mode cleanup and LSP-first completions.
 
 * Replace autocomplete source toggles with explicit modes: off, in-document, via LSP, and totally on.
