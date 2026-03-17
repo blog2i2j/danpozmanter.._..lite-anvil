@@ -14,7 +14,11 @@ ICON_SRC="$SCRIPT_DIR/resources/icons/lite-anvil.png"
 DESKTOP_SRC="$SCRIPT_DIR/resources/linux/com.lite_anvil.LiteAnvil.desktop"
 
 app_version() {
-    sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' "$SCRIPT_DIR/Cargo.toml" | head -n 1
+    awk -F'"' '
+        /^\[workspace\.package\]$/ { in_section = 1; next }
+        /^\[/ { in_section = 0 }
+        in_section && $1 ~ /^version = / { print $2; exit }
+    ' "$SCRIPT_DIR/Cargo.toml"
 }
 
 SYSTEM=0
