@@ -146,8 +146,8 @@ local function load_doc_folds(doc)
 end
 
 local old_open_doc = core.open_doc
-function core.open_doc(filename)
-  local doc = old_open_doc(filename)
+function core.open_doc(filename, ...)
+  local doc = old_open_doc(filename, ...)
   if doc then
     load_doc_folds(doc)
   end

@@ -1,12 +1,26 @@
 # Change Log
 
-## [0.14.5] - 2026-03-17 — Versioning, macOS release fix, inline diagnostics, and find/replace polish.
+## [0.14.6] - 2026-03-17 — macOS release fix and lower-memory restore.
+
+* Fix macOS release builds by replacing the non-portable BSD-`sed` version lookup in the release workflow with a portable parser.
+* Persist the “no active project open” state so closing a project folder stays closed across restart.
+* Release native project file-list and manifest caches immediately when a project closes instead of retaining them until restart.
+* Restore session and workspace documents lazily so inactive tabs do not eagerly load every file into memory on startup.
+
+## [0.14.5] - 2026-03-17 — Versioning and packaging consistency.
+
+* Centralize the app version in the workspace Cargo manifest so Cargo, `about:version`, installers, and release packaging all report the same version.
+* Include the app version in generated release archive names such as `lite-anvil-0.14.5-macos-aarch64.zip`.
+
+## [0.14.4] - 2026-03-17 — Find/replace and command palette polish.
+
+* Fix a command palette suggestion-index crash that could trigger while opening search prompts.
+* Make in-file find/replace easier to reach with `Ctrl+F` / `Ctrl+H`.
+* Point the toolbar search button at in-file find and label search commands in the palette as `Find`, `Replace`, or `Swap`.
+
+## [0.14.3] - 2026-03-17 — Inline diagnostics.
 
 * Render LSP diagnostics inline at the error line in addition to the existing hover popup.
-* Fix a command palette suggestion-index crash that could trigger while opening search prompts.
-* Make in-file find/replace easier to reach with `Ctrl+F` / `Ctrl+H`, point the toolbar search button at in-file find, and label search commands in the palette as `Find`, `Replace`, or `Swap`.
-* Centralize the app version in the workspace Cargo manifest so Cargo, `about:version`, installers, and release packaging all report the same version, and include that version in generated release archive names.
-* Fix macOS release builds by replacing the non-portable BSD-`sed` version lookup in the release workflow with a portable parser.
 
 ## [0.14.2] - 2026-03-17 — About:version and highlight-open fix.
 

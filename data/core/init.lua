@@ -68,7 +68,9 @@ local function save_session()
         plugin_data[name] = result
       end
     end
+    local active_project = core.root_project() and core.root_project().path or false
     fp:write("return {recents=", common.serialize(core.recent_projects),
+      ", active_project=", common.serialize(active_project),
       ", window=", common.serialize(table.pack(system.get_window_size(core.window))),
       ", window_mode=", common.serialize(system.get_window_mode(core.window)),
       ", previous_find=", common.serialize(core.previous_find),
@@ -114,6 +116,20 @@ local function update_recent_file(path)
   end
 end
 
+local function release_project_resources(project)
+  if not (project and project.path) then
+    return
+  end
+  local ok, native_project_model = pcall(require, "project_model")
+  if ok and native_project_model and native_project_model.invalidate then
+    pcall(native_project_model.invalidate, project.path)
+  end
+  local manifest_ok, native_manifest = pcall(require, "project_manifest")
+  if manifest_ok and native_manifest and native_manifest.invalidate then
+    pcall(native_manifest.invalidate, project.path)
+  end
+end
+
 
 function core.add_project(project)
   project = type(project) == "string" and Project(common.normalize_volume(project)) or project
@@ -141,7 +157,10 @@ function core.set_project(project)
     core.root_view:close_all_docviews()
     close_unreferenced_docs()
   end
-  while #core.projects > 0 do core.remove_project(core.projects[#core.projects], true) end
+  while #core.projects > 0 do
+    local removed = core.remove_project(core.projects[#core.projects], true)
+    release_project_resources(removed)
+  end
   if not project then
     core.redraw = true
     return nil
@@ -156,7 +175,8 @@ function core.close_project()
     close_unreferenced_docs()
   end
   while #core.projects > 0 do
-    core.remove_project(core.projects[#core.projects], true)
+    local removed = core.remove_project(core.projects[#core.projects], true)
+    release_project_resources(removed)
   end
   core.redraw = true
 end
@@ -455,7 +475,7 @@ function core.init()
   core.previous_find = {}
   core.previous_replace = {}
 
-  local project_dir = core.recent_projects[1] or "."
+  local project_dir = session.active_project
   local project_dir_explicit = false
   local files = {}
   if not RESTARTED then
@@ -472,6 +492,7 @@ function core.init()
           if file_abs then
             table.insert(files, file_abs)
             project_dir = file_abs:match("^(.+)[/\\].+$")
+            project_dir_explicit = true
           end
         end
       end
@@ -521,19 +542,20 @@ function core.init()
   -- Load default commands first so plugins can override them
   command.add_defaults()
 
-  local project_dir_abs = system.absolute_path(project_dir)
-  -- We prevent set_project below to effectively add and scan the directory because the
-  -- project module and its ignore files is not yet loaded.
-  if project_dir_abs and pcall(core.set_project, project_dir_abs) then
-    if project_dir_explicit then
-      update_recents_project("add", project_dir_abs)
+  local project_dir_abs = project_dir and system.absolute_path(project_dir) or nil
+  if project_dir_abs then
+    -- We prevent set_project below to effectively add and scan the directory because the
+    -- project module and its ignore files is not yet loaded.
+    if pcall(core.set_project, project_dir_abs) then
+      if project_dir_explicit then
+        update_recents_project("add", project_dir_abs)
+      end
+    else
+      if not project_dir_explicit then
+        update_recents_project("remove", project_dir)
+      end
+      project_dir_abs = nil
     end
-  else
-    if not project_dir_explicit then
-      update_recents_project("remove", project_dir)
-    end
-    project_dir_abs = system.absolute_path(".")
-    local status, err = pcall(core.set_project, project_dir_abs)
   end
 
   core.session_save_hooks = {}
@@ -551,7 +573,7 @@ function core.init()
   end
 
 
-  do
+  if project_dir_abs then
     local pdir, pname = project_dir_abs:match("(.*)[/\\\\](.*)")
     core.log_quiet("Opening project %q from directory %s", pname, pdir)
   end
@@ -570,7 +592,7 @@ function core.init()
       end
       if not core.skip_session_restore_open_files and session.open_files then
         for _, path in ipairs(session.open_files) do
-          local ok, doc = pcall(core.open_doc, path)
+          local ok, doc = pcall(core.open_doc, path, { lazy_restore = true })
           if ok and doc then
             local already_open = false
             for _, v in ipairs(primary.views) do
@@ -923,8 +945,17 @@ function core.load_plugins()
   local files, ordered = {}, {
     { priority = -3, load = load_user_config_if_exists, version_match = true, file = get_user_config_filename(), name = "User Config" },
     { priority = -2, load = load_lua_plugin_if_exists, version_match = true, file = get_user_init_filename(), name = "User Module" },
-    { priority = -1, load = load_lua_plugin_if_exists, version_match = true, file = core.root_project().path .. PATHSEP .. ".lite_project.lua", name = "Project Module" }
   }
+  local root_project = core.root_project()
+  if root_project and root_project.path then
+    ordered[#ordered + 1] = {
+      priority = -1,
+      load = load_lua_plugin_if_exists,
+      version_match = true,
+      file = root_project.path .. PATHSEP .. ".lite_project.lua",
+      name = "Project Module"
+    }
+  end
   for _, root_dir in ipairs {DATADIR, USERDIR} do
     local plugin_dir = root_dir .. PATHSEP .. "plugins"
     for _, filename in ipairs(system.list_dir(plugin_dir) or {}) do
@@ -1095,10 +1126,11 @@ function core.normalize_to_project_dir(path)
 end
 function core.project_absolute_path(path) core.deprecation_log("core.project_absolute_path") return core.root_project() and core.root_project():absolute_path(path) or system.absolute_path(path) end
 
-function core.open_doc(filename)
+function core.open_doc(filename, options)
   local new_file = true
   local abs_filename
   local open_options = nil
+  options = options or {}
   if filename then
     -- normalize filename and set absolute filename then
     -- try to find existing doc for filename
@@ -1127,7 +1159,7 @@ function core.open_doc(filename)
 
     if not (open_options and open_options.plain_text) then
       local header = ""
-      if not new_file then
+      if not new_file and not options.lazy_restore then
         local fp = io.open(abs_filename, "rb")
         if fp then
           header = fp:read(256) or ""
@@ -1136,6 +1168,9 @@ function core.open_doc(filename)
       end
       require("core.syntax").get(abs_filename, header)
     end
+  end
+  if options.lazy_restore then
+    open_options = common.merge(open_options or {}, { lazy_restore = true })
   end
   -- no existing doc for filename; create new
   local doc = Doc(filename, abs_filename, new_file, open_options)

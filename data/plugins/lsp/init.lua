@@ -63,8 +63,8 @@ manager.reload_config()
 manager.start_semantic_refresh_loop()
 
 local old_open_doc = core.open_doc
-function core.open_doc(filename)
-  local doc = old_open_doc(filename)
+function core.open_doc(filename, ...)
+  local doc = old_open_doc(filename, ...)
   if doc and doc.abs_filename and not doc.large_file_mode then
     manager.open_doc(doc)
   end

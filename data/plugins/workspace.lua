@@ -100,7 +100,8 @@ local function load_view(t)
       dv = DocView(core.open_doc())
     else
       -- we have a filename, try to read the file
-      local ok, doc = pcall(core.open_doc, t.filename)
+      local open_opts = t.active and nil or { lazy_restore = true }
+      local ok, doc = pcall(core.open_doc, t.filename, open_opts)
       if ok then
         dv = DocView(doc)
       end

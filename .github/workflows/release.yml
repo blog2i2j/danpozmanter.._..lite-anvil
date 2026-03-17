@@ -16,7 +16,11 @@ jobs:
       - name: Read app version
         shell: bash
         run: |
-          APP_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' Cargo.toml | head -n 1)"
+          APP_VERSION="$(awk -F'"' '
+            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[/ { in_section = 0 }
+            in_section && $1 ~ /^version = / { print $2; exit }
+          ' Cargo.toml)"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
       - name: Install system dependencies
@@ -75,7 +79,11 @@ jobs:
       - name: Read app version
         shell: bash
         run: |
-          APP_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' Cargo.toml | head -n 1)"
+          APP_VERSION="$(awk -F'"' '
+            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[/ { in_section = 0 }
+            in_section && $1 ~ /^version = / { print $2; exit }
+          ' Cargo.toml)"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
       - name: Install system dependencies
@@ -123,7 +131,11 @@ jobs:
       - name: Read app version
         shell: bash
         run: |
-          APP_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' Cargo.toml | head -n 1)"
+          APP_VERSION="$(awk -F'"' '
+            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[/ { in_section = 0 }
+            in_section && $1 ~ /^version = / { print $2; exit }
+          ' Cargo.toml)"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
       - name: Build x86_64 system dependencies from source
@@ -359,7 +371,11 @@ jobs:
       - name: Read app version
         shell: bash
         run: |
-          APP_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' Cargo.toml | head -n 1)"
+          APP_VERSION="$(awk -F'"' '
+            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[/ { in_section = 0 }
+            in_section && $1 ~ /^version = / { print $2; exit }
+          ' Cargo.toml)"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
       - name: Install system dependencies

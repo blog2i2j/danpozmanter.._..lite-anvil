@@ -82,13 +82,30 @@ function Doc:new(filename, abs_filename, new_file, options)
   self:reset()
   if filename then
     self:set_filename(filename, abs_filename)
-    if not new_file then
+    if not new_file and not options.lazy_restore then
       self:load(abs_filename)
+    elseif not new_file and options.lazy_restore then
+      self.deferred_load = abs_filename
     end
   end
   if new_file then
     self.crlf = config.line_endings == "crlf"
   end
+end
+
+function Doc:ensure_loaded()
+  if not self.deferred_load then
+    return true
+  end
+  local filename = self.deferred_load
+  self.deferred_load = nil
+  local ok, err = self:load(filename)
+  if ok then
+    self.new_file = false
+    self:clean()
+    return true
+  end
+  return nil, err
 end
 
 function Doc:reset()
@@ -184,6 +201,7 @@ function Doc:load(filename)
 end
 
 function Doc:reload()
+  self:ensure_loaded()
   if self.filename then
     local sel = { self:get_selection() }
     self:load(self.abs_filename)
@@ -193,6 +211,7 @@ function Doc:reload()
 end
 
 function Doc:save(filename, abs_filename)
+  self:ensure_loaded()
   if self.read_only then
     show_read_only_message(self)
     return
@@ -478,6 +497,7 @@ end
 
 
 function Doc:position_offset(line, col, ...)
+  self:ensure_loaded()
   if type(...) ~= "number" then
     return position_offset_func(self, line, col, ...)
   elseif select("#", ...) == 1 then
@@ -500,6 +520,7 @@ end
 ---@param inclusive boolean? Whether or not to return the character at the last position
 ---@return string
 function Doc:get_text(line1, col1, line2, col2, inclusive)
+  self:ensure_loaded()
   if doc_native and self.buffer_id then
     line1, col1 = self:sanitize_position(line1, col1)
     line2, col2 = self:sanitize_position(line2, col2)
@@ -522,6 +543,7 @@ function Doc:get_text(line1, col1, line2, col2, inclusive)
 end
 
 function Doc:get_char(line, col)
+  self:ensure_loaded()
   line, col = self:sanitize_position(line, col)
   return self.lines[line]:sub(col, col)
 end
@@ -702,6 +724,7 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
 end
 
 function Doc:insert(line, col, text)
+  self:ensure_loaded()
   if self.read_only then
     show_read_only_message(self)
     return
@@ -717,6 +740,7 @@ function Doc:insert(line, col, text)
 end
 
 function Doc:remove(line1, col1, line2, col2)
+  self:ensure_loaded()
   if self.read_only then
     show_read_only_message(self)
     return
@@ -730,6 +754,7 @@ function Doc:remove(line1, col1, line2, col2)
 end
 
 function Doc:undo()
+  self:ensure_loaded()
   if self.read_only then
     show_read_only_message(self)
     return
@@ -744,6 +769,7 @@ function Doc:undo()
 end
 
 function Doc:redo()
+  self:ensure_loaded()
   if self.read_only then
     show_read_only_message(self)
     return
@@ -758,6 +784,7 @@ function Doc:redo()
 end
 
 function Doc:apply_edits(edits)
+  self:ensure_loaded()
   if self.read_only then
     show_read_only_message(self)
     return false
@@ -779,6 +806,7 @@ function Doc:apply_edits(edits)
 end
 
 function Doc:text_input(text, idx)
+  self:ensure_loaded()
   for sidx, line1, col1, line2, col2 in self:get_selections(true, idx or true) do
     local had_selection = false
     if line1 ~= line2 or col1 ~= col2 then
@@ -799,6 +827,7 @@ function Doc:text_input(text, idx)
 end
 
 function Doc:ime_text_editing(text, start, length, idx)
+  self:ensure_loaded()
   for sidx, line1, col1, line2, col2 in self:get_selections(true, idx or true) do
     if line1 ~= line2 or col1 ~= col2 then
       self:delete_to_cursor(sidx)
@@ -823,6 +852,7 @@ function Doc:replace_cursor(idx, line1, col1, line2, col2, fn)
 end
 
 function Doc:replace(fn)
+  self:ensure_loaded()
   local has_selection, results = false, {}
   for idx, line1, col1, line2, col2 in self:get_selections(true) do
     if line1 ~= line2 or col1 ~= col2 then
