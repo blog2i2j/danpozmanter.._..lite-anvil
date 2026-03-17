@@ -51,6 +51,9 @@ local diagnostic_tooltip_offset = style.font:get_height()
 local diagnostic_tooltip_border = 1
 local diagnostic_tooltip_max_width = math.floor(420 * SCALE)
 local diagnostic_tooltip_delay = 0.18
+local inline_diagnostic_gap = math.floor(style.font:get_width("  "))
+local inline_diagnostic_side_padding = math.max(style.padding.x, math.floor(style.font:get_width(" ")))
+local draw_inline_diagnostic
 
 local function trim_text(text)
   return (tostring(text):gsub("^%s+", ""):gsub("%s+$", ""))
@@ -167,6 +170,7 @@ function DocView:draw_overlay()
         )
       end
     end
+    draw_inline_diagnostic(self, line)
   end
 
   local tooltip = self.lsp_diagnostic_tooltip
@@ -238,6 +242,68 @@ local function wrap_tooltip_lines(font, text, max_width)
     end
   end
   return lines
+end
+
+local function inline_diagnostic_text(diagnostic)
+  if not diagnostic then
+    return nil
+  end
+  local message = tostring(diagnostic.message or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  local first_line = trim_text((message:match("([^\n]+)") or ""))
+  if first_line == "" then
+    return nil
+  end
+  return first_line:gsub("%s+", " ")
+end
+
+draw_inline_diagnostic = function(view, line)
+  local diagnostic, end_col = manager.get_inline_diagnostic(view.doc, line)
+  local text = inline_diagnostic_text(diagnostic)
+  if not text then
+    return
+  end
+
+  local font = view:get_font()
+  local text_w = font:get_width(text)
+  if text_w <= 0 then
+    return
+  end
+
+  local x, y = view:get_line_screen_position(line)
+  local lh = view:get_line_height()
+  local _, _, scroll_w = view.v_scrollbar:get_track_rect()
+  local clip_left = view.position.x + view:get_gutter_width()
+  local clip_right = view.position.x + view.size.x - scroll_w
+  local max_x = clip_right - inline_diagnostic_side_padding - text_w
+  if max_x <= clip_left then
+    return
+  end
+
+  local line_text = view.doc.lines[line] or "\n"
+  local anchor_col = common.clamp((end_col or (#line_text + 1)) + 1, 1, #line_text + 1)
+  local anchor_x = x + view:get_col_x_offset(line, anchor_col) + inline_diagnostic_gap
+  local text_x = math.max(anchor_x, max_x)
+  if text_x + text_w > clip_right - inline_diagnostic_side_padding then
+    return
+  end
+
+  renderer.draw_rect(
+    text_x - inline_diagnostic_side_padding,
+    y,
+    text_w + inline_diagnostic_side_padding * 2,
+    lh,
+    style.background
+  )
+  common.draw_text(
+    font,
+    diagnostic_color(diagnostic.severity or 3),
+    text,
+    nil,
+    text_x,
+    y + view:get_line_text_y_offset(),
+    text_w,
+    font:get_height()
+  )
 end
 
 function DocView:update_lsp_diagnostic_tooltip(x, y)

@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.14.3] - 2026-03-17 — Inline diagnostics and find/replace polish.
+
+* Render LSP diagnostics inline at the error line in addition to the existing hover popup.
+* Fix a command palette suggestion-index crash that could trigger while opening search prompts.
+* Make in-file find/replace easier to reach with `Ctrl+F` / `Ctrl+H`, point the toolbar search button at in-file find, and label search commands in the palette as `Find`, `Replace`, or `Swap`.
+
 ## [0.14.2] - 2026-03-17 — About:version and highlight-open fix.
 
 * Preload the matching language plugin before opening a file so syntax-highlighted files render once, immediately, without a plain-text flash.

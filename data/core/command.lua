@@ -97,6 +97,36 @@ local function capitalize_first(str)
   return str:sub(1, 1):upper() .. str:sub(2)
 end
 
+local function prettify_words(text)
+  return text:gsub("-", " "):gsub("%S+", capitalize_first)
+end
+
+local function prettify_search_command(name)
+  local category, action = name:match("^([^:]+):(.+)$")
+  if category ~= "find-replace" and category ~= "project-search" then
+    return nil
+  end
+
+  local label = "Find"
+  local remainder = action
+  if action:find("swap", 1, true) then
+    label = "Swap"
+    remainder = action:gsub("^swap%-?", "")
+  elseif action:find("replace", 1, true) then
+    label = "Replace"
+    remainder = action:gsub("^replace%-?", "")
+  elseif action:find("find", 1, true) then
+    label = "Find"
+    remainder = action:gsub("^find%-?", "")
+  end
+
+  remainder = remainder:gsub("^%-+", "")
+  if remainder == "" then
+    return label
+  end
+  return label .. ": " .. prettify_words(remainder)
+end
+
 ---Prettifies the command name.
 ---
 ---This function adds a space between the colon and the command name,
@@ -105,6 +135,10 @@ end
 ---@param name core.command.command_name
 ---@return string
 function command.prettify_name(name)
+  local special = prettify_search_command(name)
+  if special then
+    return special
+  end
   ---@diagnostic disable-next-line: redundant-return-value
   return name:gsub(":", ": "):gsub("-", " "):gsub("%S+", capitalize_first)
 end

@@ -153,13 +153,15 @@ function CommandView:move_suggestion_idx(dir)
   end
 
   self.last_change = "suggestion"
+  self.suggestion_idx = self.suggestion_idx or 1
   if self.state.show_suggestions then
     local n = self.suggestion_idx + dir
     self.suggestion_idx = overflow_suggestion_idx(n, #self.suggestions)
     self:complete()
     self.last_change_id = self.doc:get_change_id()
   else
-    local current_suggestion = #self.suggestions > 0 and self.suggestions[self.suggestion_idx].text
+    local current_item = self.suggestions[self.suggestion_idx]
+    local current_suggestion = current_item and current_item.text or nil
     local text = self:get_text()
     if text == current_suggestion then
       local n = self.suggestion_idx + dir
@@ -285,16 +287,17 @@ function CommandView:update_suggestions()
   if self.suggestions and self.last_change == "suggestion" then
     local new_suggestion_idx
     for i, v in ipairs(res) do
-      if v.text == self.suggestions[self.suggestion_idx].text then
+      local current_item = self.suggestions[self.suggestion_idx or 1]
+      if current_item and v.text == current_item.text then
         new_suggestion_idx = i
         break
       end
     end
-    self.suggestion_idx = new_suggestion_idx
+    self.suggestion_idx = new_suggestion_idx or (#res > 0 and 1 or 0)
     -- This preserves the suggestion_offset and realigns it with the new table.
     self:move_suggestion_idx(0)
   else
-    self.suggestion_idx = 1
+    self.suggestion_idx = #res > 0 and 1 or 0
     self.suggestions_offset = 1
   end
   self.suggestions = res

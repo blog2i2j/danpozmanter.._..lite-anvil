@@ -1410,6 +1410,42 @@ function manager.get_hover_diagnostic(doc, line, col)
   return best
 end
 
+function manager.get_inline_diagnostic(doc, line)
+  local diagnostics = get_doc_diagnostics(doc)
+  if #diagnostics == 0 then
+    return nil
+  end
+
+  local best = nil
+  local best_end_col = nil
+  for i = 1, #diagnostics do
+    local diagnostic = diagnostics[i]
+    local range = diagnostic.range
+    local start_line, end_line = diagnostic_line_range(diagnostic)
+    if range and start_line and start_line == line then
+      local severity = diagnostic.severity or 3
+      local end_col = 1
+      if line == end_line then
+        end_col = select(2, doc_position_from_lsp(doc, range["end"]))
+      else
+        end_col = select(2, doc_position_from_lsp(doc, range.start))
+      end
+      if not best
+          or severity < (best.severity or 3)
+          or ((severity == (best.severity or 3)) and #tostring(diagnostic.message or "") > #tostring(best.message or "")) then
+        best = diagnostic
+        best_end_col = end_col
+      end
+    end
+  end
+
+  if not best then
+    return nil
+  end
+
+  return best, best_end_col
+end
+
 make_location_items = function(locations)
   local items = {}
   for i = 1, #locations do

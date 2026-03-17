@@ -20,7 +20,7 @@ function ToolbarView:new()
     {symbol = "f", command = "core:new-doc"},
     {symbol = "D", command = "core:open-file"},
     {symbol = "S", command = "doc:save"},
-    {symbol = "L", command = "core:find-file"},
+    {symbol = "L", command = "find-replace:find"},
     {symbol = "B", command = "core:find-command"},
     {symbol = "P", command = "core:open-user-module"},
   }

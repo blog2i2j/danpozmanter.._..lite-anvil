@@ -427,6 +427,7 @@ keymap.add_direct {
   ["wheeldown"] = "root:scroll-hovered-tabs-forward",
 
   ["ctrl+f"] = "find-replace:find",
+  ["ctrl+h"] = "find-replace:replace",
   ["alt+w"] = "find-replace:toggle-whole-word",
   ["ctrl+r"] = "find-replace:replace",
   ["f3"] = "find-replace:repeat-find",

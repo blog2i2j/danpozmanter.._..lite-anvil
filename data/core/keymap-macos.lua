@@ -49,6 +49,7 @@ local function keymap_macos(keymap)
     ["wheeldown"] = "root:scroll-hovered-tabs-forward",
 
     ["cmd+f"] = "find-replace:find",
+    ["cmd+h"] = "find-replace:replace",
     ["option+w"] = "find-replace:toggle-whole-word",
     ["cmd+r"] = "find-replace:replace",
     ["f3"] = "find-replace:repeat-find",
