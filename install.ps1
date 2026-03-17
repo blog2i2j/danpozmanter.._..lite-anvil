@@ -9,6 +9,25 @@ cargo build --release
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Binary    = Join-Path $ScriptDir 'target\release\lite-anvil.exe'
 $DataSrc   = Join-Path $ScriptDir 'data'
+$RootCargo = Join-Path $ScriptDir 'Cargo.toml'
+$Version   = ''
+
+if (Test-Path $RootCargo) {
+    $inWorkspacePackage = $false
+    foreach ($line in Get-Content $RootCargo) {
+        if ($line -match '^\[workspace\.package\]') {
+            $inWorkspacePackage = $true
+            continue
+        }
+        if ($line -match '^\[') {
+            $inWorkspacePackage = $false
+        }
+        if ($inWorkspacePackage -and $line -match '^version = "([^"]+)"$') {
+            $Version = $Matches[1]
+            break
+        }
+    }
+}
 
 if (-not (Test-Path $Binary)) {
     Write-Error "Binary not found at $Binary — run 'cargo build --release' first"
@@ -39,4 +58,8 @@ if ($UserPath -notlike "*$InstallDir*") {
     Write-Host "Added $InstallDir to user PATH. Restart your terminal to use 'lite-anvil'."
 }
 
-Write-Host "Installed to $InstallDir\lite-anvil.exe"
+if ($Version) {
+    Write-Host "Installed Lite-Anvil $Version to $InstallDir\lite-anvil.exe"
+} else {
+    Write-Host "Installed to $InstallDir\lite-anvil.exe"
+}

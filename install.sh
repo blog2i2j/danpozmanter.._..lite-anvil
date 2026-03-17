@@ -14,7 +14,7 @@ ICON_SRC="$SCRIPT_DIR/resources/icons/lite-anvil.png"
 DESKTOP_SRC="$SCRIPT_DIR/resources/linux/com.lite_anvil.LiteAnvil.desktop"
 
 app_version() {
-    sed -n 's/^version = "\(.*\)"$/\1/p' "$SCRIPT_DIR/forge-core/Cargo.toml" | head -n 1
+    sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"$/\1/p}' "$SCRIPT_DIR/Cargo.toml" | head -n 1
 }
 
 SYSTEM=0
@@ -276,7 +276,7 @@ install_linux() {
 
 install_macos() {
     APP_VERSION="$(app_version)"
-    [ -n "$APP_VERSION" ] || die "could not determine version from forge-core/Cargo.toml"
+    [ -n "$APP_VERSION" ] || die "could not determine version from Cargo.toml"
 
     APP=/Applications/LiteAnvil.app
     MACOS_DIR="$APP/Contents/MacOS"
@@ -327,7 +327,7 @@ PLIST
     sudo mkdir -p /usr/local/bin
     sudo ln -sf "$MACOS_DIR/lite-anvil" "$CLI_LINK"
 
-    echo "Installed to $APP"
+    echo "Installed Lite-Anvil $APP_VERSION to $APP"
     echo "CLI symlink: $CLI_LINK"
 }
 

@@ -1,10 +1,11 @@
 # Change Log
 
-## [0.14.3] - 2026-03-17 — Inline diagnostics and find/replace polish.
+## [0.14.4] - 2026-03-17 — Versioning, inline diagnostics, and find/replace polish.
 
 * Render LSP diagnostics inline at the error line in addition to the existing hover popup.
 * Fix a command palette suggestion-index crash that could trigger while opening search prompts.
 * Make in-file find/replace easier to reach with `Ctrl+F` / `Ctrl+H`, point the toolbar search button at in-file find, and label search commands in the palette as `Find`, `Replace`, or `Swap`.
+* Centralize the app version in the workspace Cargo manifest so Cargo, `about:version`, installers, and release packaging all report the same version, and include that version in generated release archive names.
 
 ## [0.14.2] - 2026-03-17 — About:version and highlight-open fix.
 
