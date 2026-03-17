@@ -18,11 +18,16 @@ end
 local fullscreen = false
 local restore_title_view = false
 
+local function current_project_path()
+  local project = core.root_project and core.root_project()
+  return project and project.path or system.absolute_path(".")
+end
+
 local function suggest_directory(text)
   text = common.home_expand(text)
-  local basedir = common.dirname(core.root_project().path)
+  local basedir = common.dirname(current_project_path())
   return common.home_encode_list((basedir and text == basedir .. PATHSEP or text == "") and
-    core.recent_projects or common.dir_path_suggest(text, core.root_project().path))
+    core.recent_projects or common.dir_path_suggest(text, current_project_path()))
 end
 
 local function check_directory_path(path)
@@ -43,8 +48,9 @@ local function open_file(use_dialog)
       if use_dialog then
         default_text = dirname
       else
-        dirname = core.root_project():normalize_path(dirname)
-        default_text = dirname == core.root_project().path and "" or common.home_encode(dirname) .. PATHSEP
+        local project = core.root_project and core.root_project()
+        dirname = project and project:normalize_path(dirname) or common.normalize_path(dirname)
+        default_text = project and dirname == project.path and "" or common.home_encode(dirname) .. PATHSEP
       end
     end
   end
@@ -68,14 +74,18 @@ local function open_file(use_dialog)
   core.command_view:enter("Open File", {
     text = default_text,
     submit = function(text)
-      local filename = core.root_project():absolute_path(common.home_expand(text))
+      local project = core.root_project and core.root_project()
+      local filename = project and project:absolute_path(common.home_expand(text))
+        or system.absolute_path(common.home_expand(text))
       core.root_view:open_doc(core.open_doc(filename))
     end,
     suggest = function (text)
-      return common.home_encode_list(common.path_suggest(common.home_expand(text), core.root_project() and core.root_project().path))
+      return common.home_encode_list(common.path_suggest(common.home_expand(text), current_project_path()))
     end,
     validate = function(text)
-        local filename = core.root_project():absolute_path(common.home_expand(text))
+        local project = core.root_project and core.root_project()
+        local filename = project and project:absolute_path(common.home_expand(text))
+          or system.absolute_path(common.home_expand(text))
         local path_stat, err = system.get_file_info(filename)
         if err then
           if err:find("No such file", 1, true) then
@@ -98,7 +108,7 @@ local function open_file(use_dialog)
 end
 
 local function open_directory(label, use_dialog, allow_many, callback)
-  local dirname = common.dirname(core.root_project().path)
+  local dirname = common.dirname(current_project_path())
   local text
   if dirname then
     text = use_dialog and dirname or common.home_encode(dirname) .. PATHSEP
@@ -136,7 +146,8 @@ end
 
 local function change_project_directory(use_dialog)
   open_directory("Change Project Folder", use_dialog, false, function(abs_path)
-    if abs_path[1] == core.root_project().path then return end
+    local project = core.root_project and core.root_project()
+    if project and abs_path[1] == project.path then return end
     core.confirm_close_docs(core.docs, function(dirpath)
       core.open_project(dirpath)
     end, abs_path[1])
@@ -145,7 +156,8 @@ end
 
 local function open_project_directory(use_dialog)
   open_directory("Open Project", use_dialog, false, function(abs_path)
-    if abs_path[1] == core.root_project().path then
+    local project = core.root_project and core.root_project()
+    if project and abs_path[1] == project.path then
       core.error("Directory %q is currently opened", abs_path[1])
       return
     end
@@ -380,6 +392,14 @@ command.add(nil, {
 
   ["core:open-project-folder-commandview"] = function()
     open_project_directory(false)
+  end,
+
+  ["core:close-project-folder"] = function()
+    core.confirm_close_docs(core.docs, function()
+      core.close_project()
+      local doc = core.open_doc()
+      core.root_view:open_doc(doc)
+    end)
   end,
 
   ["core:open-recent-folder"] = function()

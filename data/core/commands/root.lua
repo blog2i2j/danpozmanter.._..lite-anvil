@@ -73,6 +73,10 @@ end
 
 for _, dir in ipairs { "left", "right", "up", "down" } do
   t["root:split-" .. dir] = function(node)
+    if core.root_view:is_focus_mode_active() then
+      core.root_view:exit_focus_mode()
+      node = core.root_view:get_active_node()
+    end
     local av = node.active_view
     node:split(dir)
     if av:is(DocView) then
@@ -121,6 +125,9 @@ command.add(nil, {
     return false
   end,
   ["root:reset-layout"] = function()
+    if core.root_view:is_focus_mode_active() then
+      core.root_view:exit_focus_mode()
+    end
     local prev_active = core.active_view
     -- Collect all session views from non-locked leaf nodes before collapsing.
     local views = {}
@@ -149,6 +156,15 @@ command.add(nil, {
     if prev_active and prev_active.context == "session" then
       core.set_active_view(prev_active)
     end
+  end,
+  ["root:enter-focus-mode"] = function()
+    return core.root_view:enter_focus_mode()
+  end,
+  ["root:exit-focus-mode"] = function()
+    return core.root_view:exit_focus_mode()
+  end,
+  ["root:toggle-focus-mode"] = function()
+    return core.root_view:toggle_focus_mode()
   end
 })
 

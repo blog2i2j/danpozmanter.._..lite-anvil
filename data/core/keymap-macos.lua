@@ -1,5 +1,9 @@
 local function keymap_macos(keymap)
   keymap.add_direct {
+    ["y"] = { "dialog:select-yes", function() return require("core.command").perform("dialog:select-initial", "y") end },
+    ["n"] = { "dialog:select-no", function() return require("core.command").perform("dialog:select-initial", "n") end },
+    ["t"] = function() return require("core.command").perform("dialog:select-initial", "t") end,
+    ["c"] = function() return require("core.command").perform("dialog:select-initial", "c") end,
     ["cmd+p"] = "core:find-command",
     ["cmd+o"] = "core:open-file",
     ["cmd+shift+r"] = "core:open-recent-file",
@@ -7,6 +11,7 @@ local function keymap_macos(keymap)
     ["cmd+n"] = "core:new-doc",
     ["cmd+shift+c"] = "core:change-project-folder",
     ["cmd+option+o"] = "core:open-project-folder",
+    ["cmd+option+w"] = "core:close-project-folder",
     ["cmd+option+r"] = "core:restart",
     ["cmd+ctrl+return"] = "core:toggle-fullscreen",
 
@@ -23,6 +28,9 @@ local function keymap_macos(keymap)
     ["cmd+w"] = "root:close-or-quit",
     ["ctrl+tab"] = "root:switch-to-next-tab",
     ["ctrl+shift+tab"] = "root:switch-to-previous-tab",
+    ["option+tab"] = "root:switch-to-next-tab",
+    ["option+shift+tab"] = "root:switch-to-previous-tab",
+    ["cmd+shift+f"] = "root:toggle-focus-mode",
     ["cmd+pageup"] = "root:move-tab-left",
     ["cmd+pagedown"] = "root:move-tab-right",
     ["cmd+1"] = "root:switch-to-tab-1",
@@ -57,7 +65,7 @@ local function keymap_macos(keymap)
     ["cmd+v"] = "doc:paste",
     ["ctrl+insert"] = "doc:copy",
     ["shift+insert"] = "doc:paste",
-    ["escape"] = { "command:escape", "doc:select-none", "dialog:select-no" },
+    ["escape"] = { "root:exit-focus-mode", "command:escape", "doc:select-none", "dialog:select-no" },
     ["tab"] = { "command:complete", "doc:indent" },
     ["shift+tab"] = "doc:unindent",
     ["backspace"] = "doc:backspace",

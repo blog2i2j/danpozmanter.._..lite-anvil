@@ -165,10 +165,27 @@ end
 
 function NagView:on_text_input(text)
   if not self.visible then return end
-  if text:lower() == "y" then
+  local lower = text:lower()
+  if lower == "y" then
     command.perform "dialog:select-yes"
-  elseif text:lower() == "n" then
+  elseif lower == "n" then
     command.perform "dialog:select-no"
+  elseif self.options and #lower == 1 then
+    local matched = nil
+    for i, option in ipairs(self.options) do
+      local initial = tostring(option.text or ""):sub(1, 1):lower()
+      if initial == lower then
+        if matched then
+          matched = nil
+          break
+        end
+        matched = i
+      end
+    end
+    if matched then
+      self:change_hovered(matched)
+      command.perform "dialog:select"
+    end
   end
 end
 

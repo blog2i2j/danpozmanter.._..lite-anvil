@@ -377,6 +377,10 @@ if macos then
 end
 
 keymap.add_direct {
+  ["y"] = { "dialog:select-yes", function() return command.perform("dialog:select-initial", "y") end },
+  ["n"] = { "dialog:select-no", function() return command.perform("dialog:select-initial", "n") end },
+  ["t"] = function() return command.perform("dialog:select-initial", "t") end,
+  ["c"] = function() return command.perform("dialog:select-initial", "c") end,
   ["ctrl+p"] = "core:find-command",
   ["ctrl+q"] = "core:quit",
   ["ctrl+o"] = "core:open-file",
@@ -385,6 +389,7 @@ keymap.add_direct {
   ["ctrl+n"] = "core:new-doc",
   ["ctrl+shift+c"] = "core:change-project-folder",
   ["ctrl+alt+o"] = "core:open-project-folder",
+  ["ctrl+alt+w"] = "core:close-project-folder",
   ["ctrl+alt+r"] = "core:restart",
   ["alt+return"] = "core:toggle-fullscreen",
   ["f11"] = "core:toggle-fullscreen",
@@ -401,6 +406,9 @@ keymap.add_direct {
   ["ctrl+w"] = "root:close",
   ["ctrl+tab"] = "root:switch-to-next-tab",
   ["ctrl+shift+tab"] = "root:switch-to-previous-tab",
+  ["alt+tab"] = "root:switch-to-next-tab",
+  ["alt+shift+tab"] = "root:switch-to-previous-tab",
+  ["ctrl+shift+f"] = "root:toggle-focus-mode",
   ["ctrl+pageup"] = "root:move-tab-left",
   ["ctrl+pagedown"] = "root:move-tab-right",
   ["alt+1"] = "root:switch-to-tab-1",
@@ -438,7 +446,7 @@ keymap.add_direct {
   ["insert"] = "doc:toggle-overwrite",
   ["ctrl+insert"] = "doc:copy",
   ["shift+insert"] = "doc:paste",
-  ["escape"] = { "command:escape", "doc:select-none", "context-menu:hide", "dialog:select-no" },
+  ["escape"] = { "root:exit-focus-mode", "command:escape", "doc:select-none", "context-menu:hide", "dialog:select-no" },
   ["tab"] = { "command:complete", "doc:indent" },
   ["shift+tab"] = "doc:unindent",
   ["backspace"] = "doc:backspace",

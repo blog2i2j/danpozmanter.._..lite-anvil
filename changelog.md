@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.14.0] - 2026-03-16 — Focus mode, LSP navigation, unsaved files ergonomics, terminal improvements.
+
+* Add closing the current project folder so Lite-Anvil can stay open with no folder attached and just unsaved files, plus a reversible focus mode for the active file.
+* Harden LSP-driven navigation and diagnostics with jump-back, inline error surfacing, hover popups for diagnostic messages, and LSP quick fixes.
+* Improve terminal/TUI support by handling alternate-screen, charset, cursor, and scroll-region escape sequences natively, draining PTY output more aggressively, and adding first-letter nag dialog shortcuts like Terminate/Cancel.
+* Terminal UI bugfixes.
+
 ## [0.13.9] - 2026-03-16 — UI polish.
 
 * Fix cross-platform tree spacing and truncation so icons, chevrons, labels, tooltips, and resize behavior stay clean on macOS and Linux.

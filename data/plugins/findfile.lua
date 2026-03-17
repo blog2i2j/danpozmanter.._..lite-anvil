@@ -38,6 +38,10 @@ config.plugins.findfile = common.merge({
 
 command.add(nil, {
   ["core:find-file"] = function()
+    if #core.projects == 0 then
+      command.perform("core:open-file")
+      return
+    end
     local files, complete = {}, false
     local file_limit = config.plugins.findfile.file_limit
 

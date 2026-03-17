@@ -3,6 +3,7 @@ local command = require "core.command"
 local common = require "core.common"
 local config = require "core.config"
 local keymap = require "core.keymap"
+local Node = require "core.node"
 local style = require "core.style"
 local View = require "core.view"
 local terminal = require "terminal"
@@ -10,6 +11,12 @@ local terminal_buffer = require "terminal_buffer"
 local color_schemes = require "..colors"
 
 local TerminalView = View:extend()
+local split_type_for_placement = {
+  left = "hsplit",
+  right = "hsplit",
+  top = "vsplit",
+  bottom = "vsplit",
+}
 
 function TerminalView:__tostring() return "TerminalView" end
 
@@ -61,6 +68,73 @@ local function walk_nodes(node, fn)
   walk_nodes(node.b, fn)
 end
 
+local function has_no_locked_children(node)
+  if node.locked then
+    return false
+  end
+  if node.type == "leaf" then
+    return true
+  end
+  return has_no_locked_children(node.a) and has_no_locked_children(node.b)
+end
+
+local function get_unlocked_root(node)
+  if node.type == "leaf" then
+    return not node.locked and node or nil
+  end
+  if has_no_locked_children(node) then
+    return node
+  end
+  return get_unlocked_root(node.a) or get_unlocked_root(node.b)
+end
+
+local function get_edge_node(root, placement)
+  local target = (placement == "left" or placement == "top") and "a" or "b"
+  local split_type = split_type_for_placement[placement]
+  if root
+      and root.type == split_type
+      and root[target]
+      and root[target].type == "leaf"
+      and not root[target].locked then
+    return root[target]
+  end
+end
+
+local function add_view_in_workspace(view, placement)
+  local workspace_root = get_unlocked_root(core.root_view.root_node)
+  if not workspace_root then
+    return core.root_view:add_view(view, placement)
+  end
+
+  local edge = get_edge_node(workspace_root, placement)
+  if edge then
+    edge:add_view(view)
+    core.root_view.root_node:update_layout()
+    core.set_active_view(view)
+    return view
+  end
+
+  local split_type = assert(split_type_for_placement[placement], "invalid terminal placement")
+  local existing = Node()
+  existing:consume(workspace_root)
+
+  local sibling = Node()
+  sibling.views = {}
+  sibling:add_view(view)
+
+  local new_root = Node(split_type)
+  new_root.a = existing
+  new_root.b = sibling
+  if placement == "left" or placement == "top" then
+    new_root.a, new_root.b = new_root.b, new_root.a
+  end
+
+  workspace_root:consume(new_root)
+  core.root_view.root_node:update_layout()
+  core.set_active_view(view)
+  return view
+end
+
 local function normalize_project_path(path)
   local project = core.project_for_path and core.project_for_path(path)
   return project and project.path or nil
@@ -106,6 +180,7 @@ local function find_reuse_target(placement, cwd, reuse_mode)
 end
 
 function TerminalView:new(options)
+  options = options or {}
   TerminalView.super.new(self)
   self.cursor = "ibeam"
   self.scrollable = true
@@ -118,12 +193,16 @@ function TerminalView:new(options)
   self.scrollback = config.plugins.terminal.scrollback or 5000
   self.open_placement = options.placement or config.plugins.terminal.open_position or "bottom"
   self.exit_notified = false
+  self.spawned_at = system.get_time()
+  self.allow_close_on_exit = options.restored ~= true
+  self.suppress_startup_exit_notice = options.restored == true
+  self.seen_output = false
   self.last_blink = false
   self.last_dimensions = ""
+  self.pending_command = options.command or self:default_command()
   self:apply_color_scheme(self.color_scheme)
   self.buffer = terminal_buffer.new(80, 24, self.scrollback, self:palette_table(), self.default_fg)
   self:resize_screen(80, 24)
-  self:spawn(options.command or self:default_command())
 end
 
 function TerminalView:get_name()
@@ -269,6 +348,12 @@ function TerminalView:update()
 
   local cols, rows = self:get_dimensions()
   local dim_key = cols .. "x" .. rows
+  if not self.handle and self.pending_command and self.size.x > 0 and self.size.y > 0 then
+    self.last_dimensions = dim_key
+    self:resize_screen(cols, rows)
+    self:spawn(self.pending_command)
+    self.pending_command = nil
+  end
   if dim_key ~= self.last_dimensions then
     self.last_dimensions = dim_key
     self:resize_screen(cols, rows)
@@ -279,28 +364,40 @@ function TerminalView:update()
 
   local at_bottom = self.scroll.to.y >= math.max(0, self:get_scrollable_size() - self.size.y - self:get_line_height())
   if self.handle then
-    for _ = 1, 64 do
+    for _ = 1, 256 do
       local chunk = self.handle:read(4096)
       if not chunk or chunk == "" then
         break
       end
-      self.buffer:process_output(chunk)
+      self.allow_close_on_exit = true
+      self.seen_output = true
+      self.suppress_startup_exit_notice = false
+      local replies = self.buffer:process_output_replies(chunk)
+      if replies and replies ~= "" and self.handle and self.handle:running() then
+        pcall(function() self.handle:write(replies) end)
+      end
       core.redraw = true
+    end
+    if not self.allow_close_on_exit and self.handle:running()
+        and system.get_time() - self.spawned_at > 1.0 then
+      self.allow_close_on_exit = true
     end
 
     if not self.handle:running() and not self.exit_notified then
       self.exit_notified = true
-      if config.plugins.terminal.close_on_exit then
+      if config.plugins.terminal.close_on_exit and self.allow_close_on_exit then
         local node = core.root_view.root_node:get_node_for_view(self)
         if node then
           node:close_view(core.root_view.root_node, self)
           return
         end
       end
-      core.status_view:show_message("i", style.text, string.format(
-        "Terminal exited with code %s",
-        tostring(self.handle:returncode() or "?")
-      ))
+      if not self.suppress_startup_exit_notice then
+        core.status_view:show_message("i", style.text, string.format(
+          "Terminal exited with code %s",
+          tostring(self.handle:returncode() or "?")
+        ))
+      end
       core.redraw = true
     end
   end
@@ -352,6 +449,9 @@ function TerminalView:draw_cursor()
   end
 
   local cursor = self.buffer:cursor()
+  if cursor.visible == false then
+    return
+  end
   local row_index = cursor.history + cursor.row
   local y = self.position.y + style.padding.y + (row_index - 1) * self:get_line_height() - self.scroll.y
   if y + self:get_line_height() < self.position.y or y > self.position.y + self.size.y then
@@ -410,7 +510,7 @@ function TerminalView.open(cwd, command_argv, title, placement)
     title = title,
     placement = placement,
   })
-  return core.root_view:add_view(view, placement)
+  return add_view_in_workspace(view, placement)
 end
 
 function TerminalView:rename()

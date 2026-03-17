@@ -35,6 +35,7 @@ local tooltip_border = 1
 local tooltip_delay = 0.5
 local tooltip_alpha = 255
 local tooltip_alpha_rate = 1
+local icon_vertical_nudge = common.round(1 * SCALE)
 local separator_inset = 10
 
 
@@ -538,7 +539,8 @@ end
 
 function TreeView:draw_item_icon(item, active, hovered, x, y, w, h)
   local icon_char, icon_font, icon_color = self:get_item_icon(item, active, hovered)
-  local iy = y + common.round((h - self.icon_font_height) / 2)
+  local text_top = y + common.round((h - style.font:get_height()) / 2)
+  local iy = text_top + common.round((style.font:get_height() - self.icon_font_height) / 2) - icon_vertical_nudge
   renderer.draw_text(icon_font, icon_char, x, iy, icon_color)
   return self.item_icon_width + self.item_text_spacing
 end
@@ -554,7 +556,8 @@ function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
   if item.type == "dir" then
     local chevron_icon = item.expanded and "-" or "+"
     local chevron_color = hovered and style.accent or style.text
-    local iy = y + common.round((h - self.icon_font_height) / 2)
+    local text_top = y + common.round((h - style.font:get_height()) / 2)
+    local iy = text_top + common.round((style.font:get_height() - self.icon_font_height) / 2) - icon_vertical_nudge
     renderer.draw_text(style.icon_font, chevron_icon, x, iy, chevron_color)
   end
   return self.item_chevron_width

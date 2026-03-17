@@ -335,7 +335,12 @@ function Scrollbar:draw_track()
   local color = { table.unpack(style.scrollbar_track) }
   color[4] = color[4] * self.expand_percent
   local x, y, w, h = self:get_track_rect()
-  renderer.draw_rect(x, y, w, h, color)
+  if x == x and y == y and w == w and h == h
+      and math.abs(x) < 2147480000 and math.abs(y) < 2147480000
+      and math.abs(w) < 2147480000 and math.abs(h) < 2147480000
+      and w > 0 and h > 0 then
+    renderer.draw_rect(x, y, w, h, color)
+  end
 end
 
 ---Draw the scrollbar thumb
@@ -343,7 +348,12 @@ function Scrollbar:draw_thumb()
   local highlight = self.hovering.thumb or self.dragging
   local color = highlight and style.scrollbar2 or style.scrollbar
   local x, y, w, h = self:get_thumb_rect()
-  renderer.draw_rect(x, y, w, h, color)
+  if x == x and y == y and w == w and h == h
+      and math.abs(x) < 2147480000 and math.abs(y) < 2147480000
+      and math.abs(w) < 2147480000 and math.abs(h) < 2147480000
+      and w > 0 and h > 0 then
+    renderer.draw_rect(x, y, w, h, color)
+  end
 end
 
 ---Draw both the scrollbar track and thumb

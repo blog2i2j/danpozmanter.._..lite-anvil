@@ -47,6 +47,15 @@ config.plugins.lsp = common.merge({
 
 local manager = require ".server-manager"
 
+local diagnostic_tooltip_offset = style.font:get_height()
+local diagnostic_tooltip_border = 1
+local diagnostic_tooltip_max_width = math.floor(420 * SCALE)
+local diagnostic_tooltip_delay = 0.18
+
+local function trim_text(text)
+  return (tostring(text):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 manager.reload_config()
 manager.start_semantic_refresh_loop()
 
@@ -119,7 +128,7 @@ function DocView:on_mouse_pressed(button, x, y, clicks)
       local marker_size = math.max(4, math.floor(self:get_line_height() * 0.22))
       local marker_x = self.position.x + math.max(2, style.padding.x - marker_size - 2)
       if x >= marker_x and x <= marker_x + marker_size * 2 + 4 then
-        manager.code_action()
+        manager.quick_fix_for_line(line)
         return true
       end
     end
@@ -159,6 +168,186 @@ function DocView:draw_overlay()
       end
     end
   end
+
+  local tooltip = self.lsp_diagnostic_tooltip
+  if tooltip and tooltip.text and tooltip.alpha > 0 then
+    core.root_view:defer_draw(function(view)
+      view:draw_lsp_diagnostic_tooltip()
+    end, self)
+  end
+end
+
+local function diagnostic_tooltip_text(diagnostic)
+  if not diagnostic then
+    return nil
+  end
+  local parts = {}
+  local severity = diagnostic.severity or 3
+  local labels = {
+    [1] = "Error",
+    [2] = "Warning",
+    [3] = "Info",
+    [4] = "Hint",
+  }
+  parts[#parts + 1] = labels[severity] or "Diagnostic"
+  if diagnostic.source and diagnostic.source ~= "" then
+    parts[#parts + 1] = tostring(diagnostic.source)
+  end
+  if diagnostic.code ~= nil and tostring(diagnostic.code) ~= "" then
+    parts[#parts + 1] = tostring(diagnostic.code)
+  end
+
+  local prefix = table.concat(parts, " · ")
+  local message = tostring(diagnostic.message or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  if prefix ~= "" then
+    return prefix .. "\n" .. message
+  end
+  return message
+end
+
+local function wrap_tooltip_lines(font, text, max_width)
+  local lines = {}
+  for raw_line in tostring(text or ""):gmatch("([^\n]*)\n?") do
+    if raw_line == "" and #lines > 0 and lines[#lines] == "" then
+      break
+    end
+    local remaining = raw_line
+    if remaining == "" then
+      lines[#lines + 1] = ""
+    end
+    while remaining ~= "" do
+      local candidate = remaining
+      if font:get_width(candidate) <= max_width then
+        lines[#lines + 1] = candidate
+        break
+      end
+      local cut = #candidate
+      while cut > 1 and font:get_width(candidate:sub(1, cut)) > max_width do
+        cut = cut - 1
+      end
+      local split = candidate:sub(1, cut):match("^.*()%s+")
+      if split and split > 1 then
+        cut = split
+      end
+      local line = trim_text(candidate:sub(1, cut))
+      if line == "" then
+        line = candidate:sub(1, math.max(1, cut))
+      end
+      lines[#lines + 1] = line
+      remaining = trim_text(candidate:sub(cut + 1))
+    end
+  end
+  return lines
+end
+
+function DocView:update_lsp_diagnostic_tooltip(x, y)
+  if config.plugins.lsp.inline_diagnostics == false or not self.doc.abs_filename or self.doc.large_file_mode then
+    self.lsp_diagnostic_tooltip = nil
+    return
+  end
+
+  local tooltip = self.lsp_diagnostic_tooltip or { x = 0, y = 0, begin = 0, alpha = 0 }
+  local line, col = self:resolve_screen_position(x, y)
+  local diagnostic = nil
+  if self.hovering_gutter then
+    diagnostic = manager.get_hover_diagnostic(self.doc, line, nil)
+  else
+    diagnostic = manager.get_hover_diagnostic(self.doc, line, col)
+  end
+
+  local text = diagnostic_tooltip_text(diagnostic)
+  if text then
+    if tooltip.text ~= text then
+      tooltip.text = text
+      tooltip.lines = wrap_tooltip_lines(style.font, text, diagnostic_tooltip_max_width - style.padding.x * 2)
+      tooltip.begin = system.get_time()
+      tooltip.alpha = 0
+    end
+    tooltip.x = x
+    tooltip.y = y
+    self.lsp_diagnostic_tooltip = tooltip
+    if system.get_time() - tooltip.begin > diagnostic_tooltip_delay then
+      self:move_towards(tooltip, "alpha", 255, 1, "lsp_diagnostic_tooltip")
+    else
+      tooltip.alpha = 0
+    end
+  else
+    self.lsp_diagnostic_tooltip = nil
+  end
+end
+
+function DocView:draw_lsp_diagnostic_tooltip()
+  local tooltip = self.lsp_diagnostic_tooltip
+  if not (tooltip and tooltip.text and tooltip.alpha > 0) then
+    return
+  end
+
+  local lines = tooltip.lines or { tooltip.text }
+  local line_height = style.font:get_height()
+  local text_w = 0
+  for i = 1, #lines do
+    text_w = math.max(text_w, style.font:get_width(lines[i]))
+  end
+  local w = math.min(diagnostic_tooltip_max_width, text_w + style.padding.x * 2)
+  local h = math.max(line_height, #lines * line_height) + style.padding.y * 2
+  local x = tooltip.x + diagnostic_tooltip_offset
+  local y = tooltip.y + diagnostic_tooltip_offset
+  local root_w = core.root_view.root_node.size.x
+  local root_h = core.root_view.root_node.size.y
+
+  if x + w > root_w - style.padding.x then
+    x = tooltip.x - w - diagnostic_tooltip_offset
+  end
+  if x < style.padding.x then
+    x = style.padding.x
+  end
+  if y + h > root_h - style.padding.y then
+    y = tooltip.y - h - diagnostic_tooltip_offset
+  end
+  if y < style.padding.y then
+    y = style.padding.y
+  end
+
+  renderer.draw_rect(
+    x - diagnostic_tooltip_border,
+    y - diagnostic_tooltip_border,
+    w + diagnostic_tooltip_border * 2,
+    h + diagnostic_tooltip_border * 2,
+    { style.text[1], style.text[2], style.text[3], tooltip.alpha }
+  )
+  renderer.draw_rect(
+    x,
+    y,
+    w,
+    h,
+    { style.background2[1], style.background2[2], style.background2[3], tooltip.alpha }
+  )
+
+  local text_color = { style.text[1], style.text[2], style.text[3], tooltip.alpha }
+  for i = 1, #lines do
+    common.draw_text(
+      style.font,
+      text_color,
+      lines[i],
+      nil,
+      x + style.padding.x,
+      y + style.padding.y + (i - 1) * line_height,
+      w - style.padding.x * 2,
+      line_height
+    )
+  end
+end
+
+local old_docview_mouse_moved = DocView.on_mouse_moved
+function DocView:on_mouse_moved(x, y, dx, dy)
+  old_docview_mouse_moved(self, x, y, dx, dy)
+  self:update_lsp_diagnostic_tooltip(x, y)
+end
+
+local old_docview_mouse_left = DocView.on_mouse_left
+function DocView:on_mouse_left()
+  self.lsp_diagnostic_tooltip = nil
+  old_docview_mouse_left(self)
 end
 
 local old_on_close = Doc.on_close
@@ -227,13 +416,14 @@ core.status_view:add_item({
       style.text, " Quick Fix"
     }
   end,
-  command = "lsp:code-action",
-  tooltip = "Show code actions for the current diagnostic line",
+  command = "lsp:quick-fix",
+  tooltip = "Show quick fixes for the current diagnostic line",
 })
 
 keymap.add {
   ["ctrl+space"] = "lsp:complete",
   ["f12"] = "lsp:goto-definition",
+  ["ctrl+alt+left"] = "lsp:jump-back",
   ["ctrl+f12"] = "lsp:goto-type-definition",
   ["shift+f12"] = "lsp:find-references",
   ["f8"] = "lsp:next-diagnostic",
@@ -241,6 +431,7 @@ keymap.add {
   ["ctrl+t"] = "lsp:show-document-symbols",
   ["ctrl+alt+t"] = "lsp:workspace-symbols",
   ["ctrl+shift+a"] = "lsp:code-action",
+  ["alt+return"] = "lsp:quick-fix",
   ["ctrl+shift+space"] = "lsp:signature-help",
   ["alt+shift+f"] = "lsp:format-document",
   ["f2"] = "lsp:rename-symbol",

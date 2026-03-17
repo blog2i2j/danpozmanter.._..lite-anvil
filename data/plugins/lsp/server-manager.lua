@@ -33,6 +33,7 @@ local manager = {
   clients = {},
   doc_state = setmetatable({}, { __mode = "k" }),
   diagnostics = {},
+  location_history = {},
   semantic_refresh_thread_started = false,
 }
 
@@ -220,6 +221,78 @@ local function config_exists()
   return manager.config_path and path_exists(manager.config_path)
 end
 
+local function capability_supported(client, capability)
+  local value = client and client.capabilities and client.capabilities[capability]
+  if value == nil then
+    return false
+  end
+  if type(value) == "boolean" then
+    return value
+  end
+  return true
+end
+
+local function capability_config(client, capability)
+  local value = client and client.capabilities and client.capabilities[capability]
+  return type(value) == "table" and value or nil
+end
+
+local function navigation_config_hint()
+  local hints = {}
+  if USERDIR then
+    hints[#hints + 1] = common.home_encode(join_path(USERDIR, "lsp.json"))
+  end
+  local project = core.root_project()
+  if project then
+    hints[#hints + 1] = common.home_encode(join_path(project.path, "lsp.json"))
+  end
+  return #hints > 0 and table.concat(hints, " or ") or "lsp.json"
+end
+
+local function capture_view_location(view)
+  if not (view and view.doc and view.doc.abs_filename) then
+    return nil
+  end
+  local line1, col1, line2, col2 = view.doc:get_selection()
+  return {
+    path = view.doc.abs_filename,
+    line1 = line1,
+    col1 = col1,
+    line2 = line2,
+    col2 = col2,
+  }
+end
+
+local function push_location_history(location)
+  if not location then
+    return
+  end
+  local prev = manager.location_history[#manager.location_history]
+  if prev
+      and prev.path == location.path
+      and prev.line1 == location.line1
+      and prev.col1 == location.col1
+      and prev.line2 == location.line2
+      and prev.col2 == location.col2 then
+    return
+  end
+  manager.location_history[#manager.location_history + 1] = location
+  if #manager.location_history > 200 then
+    table.remove(manager.location_history, 1)
+  end
+end
+
+local function open_captured_location(location)
+  if not (location and location.path) then
+    return false
+  end
+  local doc = core.open_doc(location.path)
+  local docview = core.root_view:open_doc(doc)
+  doc:set_selection(location.line1, location.col1, location.line2, location.col2)
+  docview:scroll_to_line(location.line1, true, true)
+  return true
+end
+
 local function merge_raw_config(into, source)
   if type(source) ~= "table" then
     return
@@ -236,11 +309,15 @@ local function location_to_target(location)
   return location.uri, location.range
 end
 
-local function open_location(uri, range)
+local function open_location(uri, range, options)
+  options = options or {}
   local abs_path = uri_to_path(uri)
   if not abs_path or not range then
     core.warn("LSP returned an unsupported location")
     return
+  end
+  if options.history then
+    push_location_history(options.history)
   end
   local doc = core.open_doc(abs_path)
   local line, col = doc_position_from_lsp(doc, range.start)
@@ -248,6 +325,24 @@ local function open_location(uri, range)
   local docview = core.root_view:open_doc(doc)
   doc:set_selection(line, col, end_line, end_col)
   docview:scroll_to_line(line, true, true)
+end
+
+local function navigation_client(doc, capability, action)
+  local spec = manager.find_spec_for_doc(doc)
+  if not spec then
+    local label = doc.syntax and doc.syntax.name or doc:get_name()
+    core.warn("No LSP server configured for %s. Add a server in %s.", label, navigation_config_hint())
+    return nil
+  end
+  local client = manager.open_doc(doc)
+  if not client then
+    return nil
+  end
+  if client.is_initialized and capability and not capability_supported(client, capability) then
+    core.warn("LSP server %s does not support %s", client.name, action)
+    return nil
+  end
+  return client
 end
 
 local function content_to_text(content)
@@ -401,6 +496,108 @@ local function execute_lsp_command(client, command_info)
   end)
 end
 
+local function format_action_kind(kind)
+  if type(kind) ~= "string" or kind == "" then
+    return ""
+  end
+  local tail = kind:match("([^%.]+)$") or kind
+  tail = tail:gsub("^%l", string.upper)
+  tail = tail:gsub("(%u)", " %1"):gsub("^%s+", "")
+  return tail
+end
+
+local function action_score(action)
+  local score = 0
+  if action.isPreferred then
+    score = score + 1000
+  end
+  if action.kind == "quickfix" then
+    score = score + 100
+  elseif type(action.kind) == "string" and action.kind:match("^quickfix%.") then
+    score = score + 80
+  elseif type(action.kind) == "string" and action.kind:match("^source%.fixAll") then
+    score = score + 60
+  end
+  if action.disabled then
+    score = score - 500
+  end
+  return score
+end
+
+local function sort_actions(actions)
+  table.sort(actions, function(a, b)
+    local as = action_score(a)
+    local bs = action_score(b)
+    if as == bs then
+      return tostring(a.title or "") < tostring(b.title or "")
+    end
+    return as > bs
+  end)
+  return actions
+end
+
+local function resolve_code_action(client, action, callback)
+  local provider = capability_config(client, "codeActionProvider")
+  if not (provider and provider.resolveProvider and action and action.data) then
+    callback(action)
+    return
+  end
+  client:request("codeAction/resolve", action, function(result, err)
+    if err then
+      core.warn("LSP code action resolve failed: %s", err.message or tostring(err))
+      callback(action)
+      return
+    end
+    callback(result or action)
+  end)
+end
+
+local function apply_code_action(client, action)
+  if not action or action.disabled then
+    local disabled = action and action.disabled
+    local reason = type(disabled) == "table" and disabled.reason or disabled
+    if reason and tostring(reason) ~= "" then
+      core.warn("LSP action unavailable: %s", tostring(reason))
+    else
+      core.warn("LSP action unavailable")
+    end
+    return
+  end
+
+  resolve_code_action(client, action, function(resolved)
+    if resolved.edit then
+      apply_workspace_edit(resolved.edit)
+    end
+    if resolved.command then
+      execute_lsp_command(client, resolved.command)
+    elseif resolved.command == nil and resolved.arguments and resolved.title == nil then
+      execute_lsp_command(client, resolved)
+    end
+  end)
+end
+
+local function code_action_items(actions)
+  local items = {}
+  for i = 1, #(actions or {}) do
+    local action = actions[i]
+    local kind = format_action_kind(action.kind)
+    local info = kind
+    if action.isPreferred then
+      info = (info ~= "" and (info .. " · preferred") or "preferred")
+    end
+    if action.disabled then
+      local reason = type(action.disabled) == "table" and action.disabled.reason or "unavailable"
+      info = (info ~= "" and (info .. " · ") or "") .. tostring(reason)
+    end
+    items[#items + 1] = {
+      text = string.format("%03d %s", i, action.title or "Code Action"),
+      info = info,
+      payload = action,
+    }
+  end
+  return items
+end
+
 local function apply_text_edits_to_doc(doc, edits)
   if type(edits) ~= "table" or #edits == 0 then
     return
@@ -466,6 +663,24 @@ local function diagnostic_line_range(diagnostic)
   return (range.start.line or 0) + 1, (range["end"].line or range.start.line or 0) + 1
 end
 
+local function diagnostic_intersects_range(doc, diagnostic, line1, col1, line2, col2)
+  local range = diagnostic and diagnostic.range
+  if not range then
+    return false
+  end
+  local start_line, start_col = doc_position_from_lsp(doc, range.start)
+  local end_line, end_col = doc_position_from_lsp(doc, range["end"])
+  if end_line < start_line or (end_line == start_line and end_col < start_col) then
+    end_line, end_col = start_line, start_col
+  end
+  if line2 < line1 or (line2 == line1 and col2 < col1) then
+    line2, col2 = line1, col1
+  end
+  local starts_before_selection_end = start_line < line2 or (start_line == line2 and start_col <= col2)
+  local ends_after_selection_start = end_line > line1 or (end_line == line1 and end_col >= col1)
+  return starts_before_selection_end and ends_after_selection_start
+end
+
 local function get_doc_diagnostics(doc)
   if not doc or not doc.abs_filename then
     return {}
@@ -487,6 +702,27 @@ local function get_sorted_doc_diagnostics(doc)
   end
   local diagnostics = get_doc_diagnostics(doc)
   table.sort(diagnostics, diagnostic_sorter)
+  return diagnostics
+end
+
+local function diagnostics_for_range(doc, uri, line1, col1, line2, col2)
+  local diagnostics = {}
+  for _, diagnostic in ipairs(get_doc_diagnostics(doc)) do
+    if diagnostic_intersects_range(doc, diagnostic, line1, col1, line2, col2) then
+      diagnostics[#diagnostics + 1] = diagnostic
+    end
+  end
+  if #diagnostics == 0 then
+    return get_doc_diagnostics(doc)
+  end
+  table.sort(diagnostics, function(a, b)
+    local sa = a.severity or 3
+    local sb = b.severity or 3
+    if sa == sb then
+      return diagnostic_sorter(a, b)
+    end
+    return sa < sb
+  end)
   return diagnostics
 end
 
@@ -933,11 +1169,11 @@ function manager.goto_definition()
   if not view or not view.doc.abs_filename then
     return
   end
-  local client = manager.open_doc(view.doc)
+  local client = navigation_client(view.doc, "definitionProvider", "goto definition")
   if not client then
-    core.warn("No LSP server configured for %s", view.doc:get_name())
     return
   end
+  local origin = capture_view_location(view)
 
   client:request("textDocument/definition", manager.document_params(view.doc), function(result, err)
     if err then
@@ -951,25 +1187,25 @@ function manager.goto_definition()
 
     local items = make_location_items(result[1] and result or { result })
     if #items == 1 then
-      open_location(items[1].payload.uri, items[1].payload.range)
+      open_location(items[1].payload.uri, items[1].payload.range, { history = origin })
     else
       pick_from_list("Definitions", items, function(item)
-        open_location(item.uri, item.range)
+        open_location(item.uri, item.range, { history = origin })
       end)
     end
   end)
 end
 
-local function goto_location_request(method, empty_message)
+local function goto_location_request(method, empty_message, capability, action)
   local view = current_docview()
   if not view or not view.doc.abs_filename then
     return
   end
-  local client = manager.open_doc(view.doc)
+  local client = navigation_client(view.doc, capability, action)
   if not client then
-    core.warn("No LSP server configured for %s", view.doc:get_name())
     return
   end
+  local origin = capture_view_location(view)
   client:request(method, manager.document_params(view.doc), function(result, err)
     if err then
       core.warn("LSP request %s failed: %s", method, err.message or tostring(err))
@@ -981,21 +1217,48 @@ local function goto_location_request(method, empty_message)
     end
     local items = make_location_items(result[1] and result or { result })
     if #items == 1 then
-      open_location(items[1].payload.uri, items[1].payload.range)
+      open_location(items[1].payload.uri, items[1].payload.range, { history = origin })
     else
       pick_from_list(method, items, function(item)
-        open_location(item.uri, item.range)
+        open_location(item.uri, item.range, { history = origin })
       end)
     end
   end)
 end
 
 function manager.goto_type_definition()
-  goto_location_request("textDocument/typeDefinition", "LSP type definition returned no result")
+  goto_location_request(
+    "textDocument/typeDefinition",
+    "LSP type definition returned no result",
+    "typeDefinitionProvider",
+    "goto type definition"
+  )
 end
 
 function manager.goto_implementation()
-  goto_location_request("textDocument/implementation", "LSP implementation returned no result")
+  goto_location_request(
+    "textDocument/implementation",
+    "LSP implementation returned no result",
+    "implementationProvider",
+    "goto implementation"
+  )
+end
+
+function manager.jump_back()
+  local current = capture_view_location(current_docview())
+  while #manager.location_history > 0 do
+    local location = table.remove(manager.location_history)
+    if not current
+        or current.path ~= location.path
+        or current.line1 ~= location.line1
+        or current.col1 ~= location.col1
+        or current.line2 ~= location.line2
+        or current.col2 ~= location.col2 then
+      return open_captured_location(location)
+    end
+  end
+  core.warn("LSP jump history is empty")
+  return false
 end
 
 function manager.hover()
@@ -1112,6 +1375,43 @@ function manager.get_line_diagnostic_segments(doc, line)
   return #segments > 0 and segments or nil
 end
 
+function manager.get_hover_diagnostic(doc, line, col)
+  local diagnostics = get_doc_diagnostics(doc)
+  if #diagnostics == 0 then
+    return nil
+  end
+
+  local best = nil
+  for i = 1, #diagnostics do
+    local diagnostic = diagnostics[i]
+    local range = diagnostic.range
+    local start_line, end_line = diagnostic_line_range(diagnostic)
+    if range and start_line and line >= start_line and line <= end_line then
+      local start_col = 1
+      local end_col = math.huge
+      if line == start_line then
+        start_col = select(2, doc_position_from_lsp(doc, range.start))
+      end
+      if line == end_line then
+        end_col = select(2, doc_position_from_lsp(doc, range["end"]))
+      end
+
+      local on_line = col == nil
+      local within = on_line or (col >= start_col and col <= math.max(start_col + 1, end_col))
+      if within then
+        local severity = diagnostic.severity or 3
+        if not best
+            or severity < (best.severity or 3)
+            or ((severity == (best.severity or 3)) and #tostring(diagnostic.message or "") > #tostring(best.message or "")) then
+          best = diagnostic
+        end
+      end
+    end
+  end
+
+  return best
+end
+
 make_location_items = function(locations)
   local items = {}
   for i = 1, #locations do
@@ -1158,11 +1458,11 @@ function manager.find_references()
   if not view or not view.doc.abs_filename then
     return
   end
-  local client = manager.open_doc(view.doc)
+  local client = navigation_client(view.doc, "referencesProvider", "find references")
   if not client then
-    core.warn("No LSP server configured for %s", view.doc:get_name())
     return
   end
+  local origin = capture_view_location(view)
   local params = manager.document_params(view.doc)
   params.context = { includeDeclaration = true }
   client:request("textDocument/references", params, function(result, err)
@@ -1172,7 +1472,7 @@ function manager.find_references()
     end
     local items = make_location_items(result or {})
     pick_from_list("References", items, function(item)
-      open_location(item.uri, item.range)
+      open_location(item.uri, item.range, { history = origin })
     end)
   end)
 end
@@ -1182,11 +1482,11 @@ function manager.show_document_symbols()
   if not view or not view.doc.abs_filename then
     return
   end
-  local client = manager.open_doc(view.doc)
+  local client = navigation_client(view.doc, "documentSymbolProvider", "show document symbols")
   if not client then
-    core.warn("No LSP server configured for %s", view.doc:get_name())
     return
   end
+  local origin = capture_view_location(view)
   client:request("textDocument/documentSymbol", {
     textDocument = { uri = path_to_uri(view.doc.abs_filename) },
   }, function(result, err)
@@ -1196,57 +1496,90 @@ function manager.show_document_symbols()
     end
     local items = flatten_document_symbols(result or {}, path_to_uri(view.doc.abs_filename))
     pick_from_list("Document Symbols", items, function(item)
-      open_location(item.uri, item.range)
+      open_location(item.uri, item.range, { history = origin })
     end)
   end)
 end
 
-function manager.code_action()
+function manager.request_code_actions(options)
+  options = options or {}
   local view = current_docview()
   if not view or not view.doc.abs_filename then
     return
   end
-  local client = manager.open_doc(view.doc)
+  local client = navigation_client(view.doc, "codeActionProvider", options.only and "quick fixes" or "code actions")
   if not client then
-    core.warn("No LSP server configured for %s", view.doc:get_name())
     return
   end
-  local line1, col1, line2, col2 = view.doc:get_selection(true)
+  local line1, col1, line2, col2
+  if options.line then
+    line1 = options.line
+    col1 = options.col1 or 1
+    line2 = options.line2 or options.line
+    col2 = options.col2 or math.max(#(view.doc.lines[line2] or "\n"), 1)
+  else
+    line1, col1, line2, col2 = view.doc:get_selection(true)
+  end
   local uri = path_to_uri(view.doc.abs_filename)
+  local context = {
+    diagnostics = diagnostics_for_range(view.doc, uri, line1, col1, line2, col2),
+  }
+  if options.only then
+    context.only = options.only
+  end
   client:request("textDocument/codeAction", {
     textDocument = { uri = uri },
     range = {
       start = lsp_position_from_doc(view.doc, line1, col1),
       ["end"] = lsp_position_from_doc(view.doc, line2, col2),
     },
-    context = {
-      diagnostics = manager.diagnostics[uri] or {},
-    },
+    context = context,
   }, function(result, err)
     if err then
       core.warn("LSP code action failed: %s", err.message or tostring(err))
       return
     end
-    local items = {}
+    local actions = {}
     for i = 1, #(result or {}) do
       local action = result[i]
-      items[#items + 1] = {
-        text = string.format("%03d %s", i, action.title or "Code Action"),
-        info = action.kind or "",
-        payload = action,
-      }
+      if not action.disabled then
+        actions[#actions + 1] = action
+      end
     end
-    pick_from_list("Code Actions", items, function(action)
-      if action.edit then
-        apply_workspace_edit(action.edit)
-      end
-      if action.command then
-        execute_lsp_command(client, action.command)
-      elseif action.command == nil and action.arguments and action.title == nil then
-        execute_lsp_command(client, action)
-      end
+    sort_actions(actions)
+    if #actions == 0 then
+      core.warn("%s: no results", options.label or "Code Actions")
+      return
+    end
+    if options.auto_apply_single and #actions == 1 then
+      apply_code_action(client, actions[1])
+      return
+    end
+    pick_from_list(options.label or "Code Actions", code_action_items(actions), function(action)
+      apply_code_action(client, action)
     end)
   end)
+end
+
+function manager.code_action()
+  return manager.request_code_actions({})
+end
+
+function manager.quick_fix()
+  return manager.request_code_actions({
+    only = { "quickfix" },
+    auto_apply_single = true,
+    label = "Quick Fixes",
+  })
+end
+
+function manager.quick_fix_for_line(line)
+  return manager.request_code_actions({
+    only = { "quickfix" },
+    auto_apply_single = true,
+    label = "Quick Fixes",
+    line = line,
+  })
 end
 
 function manager.signature_help()
@@ -1678,21 +2011,6 @@ command.add(function()
   local view = current_docview()
   return view and view.doc and view.doc.abs_filename, view
 end, {
-  ["lsp:goto-definition"] = function()
-    manager.goto_definition()
-  end,
-  ["lsp:goto-type-definition"] = function()
-    manager.goto_type_definition()
-  end,
-  ["lsp:goto-implementation"] = function()
-    manager.goto_implementation()
-  end,
-  ["lsp:find-references"] = function()
-    manager.find_references()
-  end,
-  ["lsp:show-document-symbols"] = function()
-    manager.show_document_symbols()
-  end,
   ["lsp:next-diagnostic"] = function()
     manager.next_diagnostic()
   end,
@@ -1731,7 +2049,67 @@ end, {
   end,
 })
 
+local function lsp_navigation_predicate(capability)
+  return function()
+    local view = current_docview()
+    if not (view and view.doc and view.doc.abs_filename) then
+      return false
+    end
+    if not manager.find_spec_for_doc(view.doc) then
+      return false
+    end
+    local state = manager.doc_state[view.doc]
+    local client = state and state.client
+    if client and client.is_initialized and capability and not capability_supported(client, capability) then
+      return false
+    end
+    return true, view
+  end
+end
+
+command.add(lsp_navigation_predicate("definitionProvider"), {
+  ["lsp:goto-definition"] = function()
+    manager.goto_definition()
+  end,
+})
+
+command.add(lsp_navigation_predicate("typeDefinitionProvider"), {
+  ["lsp:goto-type-definition"] = function()
+    manager.goto_type_definition()
+  end,
+})
+
+command.add(lsp_navigation_predicate("implementationProvider"), {
+  ["lsp:goto-implementation"] = function()
+    manager.goto_implementation()
+  end,
+})
+
+command.add(lsp_navigation_predicate("referencesProvider"), {
+  ["lsp:find-references"] = function()
+    manager.find_references()
+  end,
+})
+
+command.add(lsp_navigation_predicate("documentSymbolProvider"), {
+  ["lsp:show-document-symbols"] = function()
+    manager.show_document_symbols()
+  end,
+})
+
+command.add(lsp_navigation_predicate("codeActionProvider"), {
+  ["lsp:code-action"] = function()
+    manager.code_action()
+  end,
+  ["lsp:quick-fix"] = function()
+    manager.quick_fix()
+  end,
+})
+
 command.add(nil, {
+  ["lsp:jump-back"] = function()
+    return manager.jump_back()
+  end,
   ["lsp:restart"] = function()
     manager.restart()
   end,

@@ -64,6 +64,20 @@ local function save_view(view)
       text = view.doc.new_file and view.doc:get_text(1, 1, math.huge, math.huge)
     }
   end
+  if view and view.__tostring and view:__tostring() == "TerminalView" then
+    if not (view.handle and view.handle:running()) then
+      return
+    end
+    return {
+      type = "terminal",
+      active = (core.active_view == view),
+      cwd = view.cwd,
+      title = view.title,
+      placement = view.open_placement,
+      color_scheme = view.color_scheme,
+      scroll = { x = view.scroll.to.x, y = view.scroll.to.y },
+    }
+  end
   if mt == LogView then return end
   for name, mod in pairs(package.loaded) do
     if mod == mt then
@@ -103,6 +117,34 @@ local function load_view(t)
     end
     return dv
   end
+  if t.type == "view" and t.module == "plugins.terminal.view" then
+    local TerminalView = require "plugins.terminal.view"
+    local view = TerminalView({
+      cwd = t.cwd,
+      title = t.title,
+      restored = true,
+    })
+    if t.scroll then
+      view.scroll.x, view.scroll.to.x = t.scroll.x or 0, t.scroll.x or 0
+      view.scroll.y, view.scroll.to.y = t.scroll.y or 0, t.scroll.y or 0
+    end
+    return view
+  end
+  if t.type == "terminal" then
+    local TerminalView = require "plugins.terminal.view"
+    local view = TerminalView({
+      cwd = t.cwd,
+      title = t.title,
+      placement = t.placement,
+      color_scheme = t.color_scheme,
+      restored = true,
+    })
+    if t.scroll then
+      view.scroll.x, view.scroll.to.x = t.scroll.x or 0, t.scroll.x or 0
+      view.scroll.y, view.scroll.to.y = t.scroll.y or 0, t.scroll.y or 0
+    end
+    return view
+  end
   return require(t.module)()
 end
 
@@ -111,6 +153,7 @@ local function save_node(node)
   local res = {}
   res.type = node.type
   if node.type == "leaf" then
+    if node.locked then return nil end
     res.views = {}
     for _, view in ipairs(node.views) do
       local t = save_view(view)
@@ -154,7 +197,7 @@ local function load_node(node, t)
         if t.active_view == i then
           active_view = view
         end
-        if not view:is(DocView) then
+        if not view:is(DocView) and v.type ~= "terminal" then
           view.scroll = v.scroll
         end
       end
@@ -179,7 +222,11 @@ end
 
 
 local function save_directories()
-  local project_dir = core.root_project().path
+  local project = core.root_project()
+  if not project or not project.path then
+    return {}
+  end
+  local project_dir = project.path
   local dir_list = {}
   for i = 2, #core.projects do
     dir_list[#dir_list + 1] = common.relative_path(project_dir, core.projects[i].path)
@@ -189,27 +236,37 @@ end
 
 
 local function save_workspace()
-  local project_dir = common.basename(core.root_project().path)
-  local id_list = {}
-  for filename, id in workspace_keys_for(project_dir) do
-    id_list[id] = true
+  local project = core.root_project()
+  if not project or not project.path then
+    return
   end
-  local id = 1
-  while id_list[id] do
-    id = id + 1
+  local project_dir = common.basename(project.path)
+  local stale = {}
+  for key in workspace_keys_for(project_dir) do
+    local ws = storage.load(STORAGE_MODULE, key)
+    if ws and ws.path == project.path then
+      stale[#stale + 1] = key
+    end
   end
-  local root = get_unlocked_root(core.root_view.root_node)
-  local documents = save_node(root)
+  for _, key in ipairs(stale) do
+    storage.clear(STORAGE_MODULE, key)
+  end
+  local documents = save_node(core.root_view.root_node)
   if not documents then
     return
   end
-  storage.save(STORAGE_MODULE, project_dir .. "-" .. id, { path = core.root_project().path, documents = documents, directories = save_directories() })
+  storage.save(STORAGE_MODULE, project_dir .. "-1", { path = project.path, documents = documents, directories = save_directories() })
 end
 
 
 local function load_workspace()
-  local workspace = consume_workspace(core.root_project().path)
+  local project = core.root_project()
+  if not project or not project.path then
+    return false
+  end
+  local workspace = consume_workspace(project.path)
   if workspace and workspace.documents then
+    core.skip_session_restore_open_files = true
     local root = get_unlocked_root(core.root_view.root_node)
     local active_view = load_node(root, workspace.documents)
     if active_view then
@@ -218,7 +275,9 @@ local function load_workspace()
     for i, dir_name in ipairs(workspace.directories) do
       core.add_project(system.absolute_path(dir_name))
     end
+    return true
   end
+  return false
 end
 
 
@@ -226,8 +285,6 @@ local run = core.run
 
 function core.run(...)
   if #core.docs == 0 then
-    core.try(load_workspace)
-
     local set_project = core.set_project
     function core.set_project(project)
       core.try(save_workspace)
@@ -244,4 +301,8 @@ function core.run(...)
 
   core.run = run
   return core.run(...)
+end
+
+core.session_load_hooks["workspace"] = function()
+  core.try(load_workspace)
 end

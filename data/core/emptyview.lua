@@ -22,6 +22,8 @@ EmptyView.commands = {
   { fmt = "%s for shortcuts", cmd = "core:show-shortcuts-help" },
   { fmt = "%s to open a file", cmd = "core:open-file" },
   { fmt = "%s to open a file from the project", cmd = "core:find-file" },
+  { fmt = "%s to toggle focus mode", cmd = "root:toggle-focus-mode" },
+  { fmt = "%s to close the project folder", cmd = "core:close-project-folder" },
   { fmt = "%s to change project folder", cmd = "core:change-project-folder" },
   { fmt = "%s to open a project folder", cmd = "core:open-project-folder" },
 }

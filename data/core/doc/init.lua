@@ -59,6 +59,17 @@ local function apply_native_snapshot(self, snapshot)
   self.crlf = snapshot.crlf
 end
 
+local function content_signature(lines)
+  local hash = 2166136261
+  for _, line in ipairs(lines or {}) do
+    for i = 1, #line do
+      hash = ((hash ~ line:byte(i)) * 16777619) % 4294967296
+    end
+    hash = ((hash ~ 10) * 16777619) % 4294967296
+  end
+  return hash
+end
+
 
 function Doc:new(filename, abs_filename, new_file, options)
   options = options or {}
@@ -88,6 +99,8 @@ function Doc:reset()
   self.undo_stack = { idx = 1 }
   self.redo_stack = { idx = 1 }
   self.clean_change_id = 1
+  self.clean_signature = content_signature(self.lines)
+  self._signature_cache = { change_id = 1, signature = self.clean_signature }
   self.highlighter = Highlighter(self)
   self.overwrite = false
   self._read_only_warned = false
@@ -246,13 +259,31 @@ function Doc:is_dirty()
   if self.new_file then
     if self.filename then return true end
     return #self.lines > 1 or #self.lines[1] > 1
-  else
-    return self.clean_change_id ~= self:get_change_id()
   end
+  local change_id = self:get_change_id()
+  if self.clean_change_id == change_id then
+    return false
+  end
+  return self.clean_signature ~= self:get_content_signature(change_id)
 end
 
 function Doc:clean()
   self.clean_change_id = self:get_change_id()
+  self.clean_signature = self:get_content_signature(self.clean_change_id)
+end
+
+function Doc:get_content_signature(change_id)
+  change_id = change_id or self:get_change_id()
+  local cached = self._signature_cache
+  if cached and cached.change_id == change_id then
+    return cached.signature
+  end
+  local signature = content_signature(self.lines)
+  self._signature_cache = {
+    change_id = change_id,
+    signature = signature,
+  }
+  return signature
 end
 
 function Doc:get_indent_info()

@@ -133,40 +133,4 @@ keymap.add {
   ["ctrl+shift+t"] = "terminal:new",
 }
 
-local function walk_terminals(fn)
-  local function walk(node)
-    if node.type == "leaf" then
-      for _, view in ipairs(node.views or {}) do
-        if view and view:__tostring() == "TerminalView" then
-          fn(view)
-        end
-      end
-    else
-      if node.a then walk(node.a) end
-      if node.b then walk(node.b) end
-    end
-  end
-  if core.root_view and core.root_view.root_node then
-    pcall(walk, core.root_view.root_node)
-  end
-end
-
-core.session_save_hooks["terminal"] = function()
-  local terminals = {}
-  walk_terminals(function(view)
-    terminals[#terminals + 1] = { cwd = view.cwd, title = view.title }
-  end)
-  return #terminals > 0 and terminals or nil
-end
-
-core.session_load_hooks["terminal"] = function(data, primary)
-  if not data then return end
-  for _, t in ipairs(data) do
-    local ok, view = pcall(TerminalView, { cwd = t.cwd, title = t.title })
-    if ok and view then
-      primary:add_view(view)
-    end
-  end
-end
-
 return TerminalView

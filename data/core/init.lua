@@ -142,8 +142,23 @@ function core.set_project(project)
     close_unreferenced_docs()
   end
   while #core.projects > 0 do core.remove_project(core.projects[#core.projects], true) end
+  if not project then
+    core.redraw = true
+    return nil
+  end
   local project = core.add_project(project)
   return project
+end
+
+function core.close_project()
+  if core.root_view then
+    core.root_view:close_all_docviews()
+    close_unreferenced_docs()
+  end
+  while #core.projects > 0 do
+    core.remove_project(core.projects[#core.projects], true)
+  end
+  core.redraw = true
 end
 
 
@@ -549,7 +564,11 @@ function core.init()
   if #files == 0 then
     core.add_thread(function()
       local primary = core.root_view:get_primary_node()
-      if session.open_files then
+      core.skip_session_restore_open_files = false
+      for name, hook in pairs(core.session_load_hooks) do
+        pcall(hook, session.plugin_data and session.plugin_data[name], primary)
+      end
+      if not core.skip_session_restore_open_files and session.open_files then
         for _, path in ipairs(session.open_files) do
           local ok, doc = pcall(core.open_doc, path)
           if ok and doc then
@@ -565,9 +584,6 @@ function core.init()
             end
           end
         end
-      end
-      for name, hook in pairs(core.session_load_hooks) do
-        pcall(hook, session.plugin_data and session.plugin_data[name], primary)
       end
     end)
   end
@@ -1072,7 +1088,11 @@ function core.project_for_path(path)
   return nil
 end
 -- Legacy interface; do not use. Use a specific project instead. When in doubt, use root_project.
-function core.normalize_to_project_dir(path) core.deprecation_log("core.normalize_to_project_dir") return core.root_project():normalize_path(path) end
+function core.normalize_to_project_dir(path)
+  core.deprecation_log("core.normalize_to_project_dir")
+  local project = core.root_project()
+  return project and project:normalize_path(path) or common.normalize_path(path)
+end
 function core.project_absolute_path(path) core.deprecation_log("core.project_absolute_path") return core.root_project() and core.root_project():absolute_path(path) or system.absolute_path(path) end
 
 function core.open_doc(filename)
@@ -1082,8 +1102,9 @@ function core.open_doc(filename)
   if filename then
     -- normalize filename and set absolute filename then
     -- try to find existing doc for filename
-    filename = core.root_project():normalize_path(filename)
-    abs_filename = core.root_project():absolute_path(filename)
+    local project = core.root_project()
+    filename = project and project:normalize_path(filename) or common.normalize_path(filename)
+    abs_filename = project and project:absolute_path(filename) or system.absolute_path(filename)
     local info = system.get_file_info(abs_filename)
     new_file = not info
     if info and info.type == "file" then

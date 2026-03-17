@@ -268,7 +268,7 @@ end
 -- return the width including the padding space and separately
 -- the padding space itself
 local function get_scroll_button_width()
-  local w = style.icon_font:get_width(">")
+  local w = style.font:get_width(">")
   local pad = w
   return w + 2 * pad, pad
 end
@@ -313,6 +313,9 @@ end
 
 function Node:should_show_tabs()
   if self.locked then return false end
+  if core.root_view and core.root_view:is_focus_mode_active() then
+    return false
+  end
   local dn = core.root_view.dragged_node
   if #self.views > 1
      or (dn and dn.dragging) then -- show tabs while dragging
@@ -695,11 +698,11 @@ function Node:draw_tabs()
     local xrb, yrb, wrb, hrb = self:get_scroll_button_rect(1)
     renderer.draw_rect(xrb + pad, yrb, wrb * 2, hrb, style.background2)
     local left_button_style = (self.hovered_scroll_button == 1 and self.tab_offset > 1) and style.text or style.dim
-    common.draw_text(style.icon_font, left_button_style, "<", nil, xrb + scroll_padding, yrb, 0, h)
+    common.draw_text(style.font, left_button_style, "<", nil, xrb + scroll_padding, yrb, 0, h)
 
     xrb, yrb, wrb = self:get_scroll_button_rect(2)
     local right_button_style = (self.hovered_scroll_button == 2 and #self.views > self.tab_offset + tabs_number - 1) and style.text or style.dim
-    common.draw_text(style.icon_font, right_button_style, ">", nil, xrb + scroll_padding, yrb, 0, h)
+    common.draw_text(style.font, right_button_style, ">", nil, xrb + scroll_padding, yrb, 0, h)
   end
 
   core.pop_clip_rect()

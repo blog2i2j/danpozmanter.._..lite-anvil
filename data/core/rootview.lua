@@ -19,6 +19,106 @@ local root_split_type = {
   bottom = "vsplit",
 }
 
+local function serialize_node(node)
+  local state = {
+    type = node.type,
+    divider = node.divider,
+    locked = node.locked,
+    resizable = node.resizable,
+    is_primary_node = node.is_primary_node,
+  }
+
+  if node.type == "leaf" then
+    state.views = {}
+    state.active_view = node.active_view
+    state.tab_offset = node.tab_offset
+    for _, view in ipairs(node.views or {}) do
+      if not view:is(EmptyView) then
+        state.views[#state.views + 1] = view
+      end
+    end
+  else
+    state.a = serialize_node(node.a)
+    state.b = serialize_node(node.b)
+  end
+
+  return state
+end
+
+local function collect_docviews(node, out, set)
+  out = out or {}
+  set = set or {}
+
+  if node.type == "leaf" then
+    for _, view in ipairs(node.views or {}) do
+      if view:is(DocView) and not set[view] then
+        out[#out + 1] = view
+        set[view] = true
+      end
+    end
+    return out, set
+  end
+
+  collect_docviews(node.a, out, set)
+  collect_docviews(node.b, out, set)
+  return out, set
+end
+
+local function collect_visible_views(node, out, set)
+  out = out or {}
+  set = set or {}
+
+  if node.type == "leaf" then
+    for _, view in ipairs(node.views or {}) do
+      if not view:is(EmptyView) and not set[view] then
+        out[#out + 1] = view
+        set[view] = true
+      end
+    end
+    return out, set
+  end
+
+  collect_visible_views(node.a, out, set)
+  collect_visible_views(node.b, out, set)
+  return out, set
+end
+
+local function restore_node(state, live_docviews, assigned)
+  local node = Node(state.type == "leaf" and nil or state.type)
+  node.is_primary_node = state.is_primary_node
+
+  if state.type == "leaf" then
+    node.views = {}
+    node.active_view = nil
+
+    for _, view in ipairs(state.views or {}) do
+      local is_docview = view:is(DocView)
+      if not assigned[view] and (not is_docview or live_docviews[view]) then
+        node:add_view(view)
+        assigned[view] = true
+      end
+    end
+
+    if #node.views == 0 then
+      node:add_view(EmptyView())
+    elseif state.active_view and node:get_view_idx(state.active_view) then
+      node:set_active_view(state.active_view)
+    end
+
+    node.tab_offset = common.clamp(state.tab_offset or 1, 1, math.max(#node.views, 1))
+    node.locked = state.locked
+    node.resizable = state.resizable
+    return node
+  end
+
+  node.a = restore_node(state.a, live_docviews, assigned)
+  node.b = restore_node(state.b, live_docviews, assigned)
+  node.divider = state.divider or 0.5
+  node.locked = state.locked
+  node.resizable = state.resizable
+  return node
+end
+
 local function get_edge_node(root, placement)
   local target = (placement == "left" or placement == "top") and "a" or "b"
   local split_type = root_split_type[placement]
@@ -49,6 +149,7 @@ function RootView:new()
   self.first_dnd_processed = false
   self.first_update_done = false
   self.context_menu = ContextMenu()
+  self.focus_mode = nil
 end
 
 
@@ -137,6 +238,9 @@ end
 
 function RootView:add_view(view, placement)
   placement = placement or "tab"
+  if self.focus_mode and (placement ~= "tab" or not view:is(DocView)) then
+    self:exit_focus_mode()
+  end
   if placement == "tab" then
     self:get_active_node_default():add_view(view)
     self.root_node:update_layout()
@@ -193,6 +297,90 @@ function RootView:get_session_views()
   end
   walk(self.root_node)
   return views
+end
+
+function RootView:is_focus_mode_active()
+  return self.focus_mode ~= nil
+end
+
+function RootView:enter_focus_mode()
+  local active_view = core.active_view
+  if not (active_view and active_view:is(DocView)) then
+    return false
+  end
+  if self.focus_mode then
+    return true
+  end
+
+  local focus_views = collect_docviews(self.root_node)
+  if #focus_views == 0 then
+    return false
+  end
+
+  local focus_root = Node()
+  focus_root.views = {}
+  focus_root.active_view = nil
+  focus_root.is_primary_node = true
+
+  for _, view in ipairs(focus_views) do
+    focus_root:add_view(view)
+  end
+
+  if focus_root:get_view_idx(active_view) then
+    focus_root:set_active_view(active_view)
+  end
+
+  self.focus_mode = {
+    snapshot = serialize_node(self.root_node),
+    previous_active_view = active_view,
+  }
+  self.root_node:consume(focus_root)
+  self.root_node:update_layout()
+  core.redraw = true
+  return true
+end
+
+function RootView:exit_focus_mode()
+  local focus_state = self.focus_mode
+  if not focus_state then
+    return false
+  end
+
+  local _, live_docview_set = collect_docviews(self.root_node)
+  local live_views = collect_visible_views(self.root_node)
+  local assigned = {}
+  local restored_root = restore_node(focus_state.snapshot, live_docview_set, assigned)
+  local primary = get_primary_node(restored_root) or restored_root
+
+  for _, view in ipairs(live_views) do
+    if not assigned[view] then
+      primary:add_view(view)
+      assigned[view] = true
+    end
+  end
+
+  self.focus_mode = nil
+  self.root_node:consume(restored_root)
+  self.root_node:update_layout()
+
+  local target_view = core.active_view
+  if not self.root_node:get_node_for_view(target_view) then
+    target_view = focus_state.previous_active_view
+  end
+  local target_node = target_view and self.root_node:get_node_for_view(target_view) or self:get_primary_node()
+  if target_node then
+    target_node:set_active_view(target_view or target_node.active_view or target_node.views[1])
+  end
+
+  core.redraw = true
+  return true
+end
+
+function RootView:toggle_focus_mode()
+  if self.focus_mode then
+    return self:exit_focus_mode()
+  end
+  return self:enter_focus_mode()
 end
 
 function RootView:close_views(entries)

@@ -3,6 +3,26 @@ local command = require "core.command"
 local common = require "core.common"
 
 command.add("core.nagview", {
+  ["dialog:select-initial"] = function(v, ch)
+    if v ~= core.nag_view or type(ch) ~= "string" or #ch ~= 1 then return end
+    local matched = nil
+    local lower = ch:lower()
+    for i, option in ipairs(v.options or {}) do
+      local initial = tostring(option.text or ""):sub(1, 1):lower()
+      if initial == lower then
+        if matched then
+          matched = nil
+          break
+        end
+        matched = i
+      end
+    end
+    if matched then
+      v:change_hovered(matched)
+      command.perform "dialog:select"
+      return true
+    end
+  end,
   ["dialog:previous-entry"] = function(v)
     local hover = v.hovered_item or 1
     v:change_hovered(hover == 1 and #v.options or hover - 1)
