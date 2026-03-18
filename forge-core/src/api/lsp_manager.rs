@@ -443,6 +443,9 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             state.diagnostics.clear();
             state.diagnostic_meta.clear();
             state.docs.clear();
+            state.diagnostics.shrink_to_fit();
+            state.diagnostic_meta.shrink_to_fit();
+            state.docs.shrink_to_fit();
             Ok(state.specs.len() as i64)
         })?,
     )?;
@@ -501,6 +504,11 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             state.docs.remove(&uri);
             state.diagnostics.remove(&uri);
             state.diagnostic_meta.remove(&uri);
+            if state.docs.is_empty() {
+                state.docs.shrink_to_fit();
+                state.diagnostics.shrink_to_fit();
+                state.diagnostic_meta.shrink_to_fit();
+            }
             Ok(true)
         })?,
     )?;
@@ -525,6 +533,20 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 Ok(true)
             },
         )?,
+    )?;
+
+    module.set(
+        "clear_runtime_state",
+        lua.create_function(|_, ()| {
+            let mut state = STATE.lock();
+            state.diagnostics.clear();
+            state.diagnostic_meta.clear();
+            state.docs.clear();
+            state.diagnostics.shrink_to_fit();
+            state.diagnostic_meta.shrink_to_fit();
+            state.docs.shrink_to_fit();
+            Ok(true)
+        })?,
     )?;
 
     module.set(

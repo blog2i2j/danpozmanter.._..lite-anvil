@@ -124,5 +124,23 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         })?,
     )?;
 
+    module.set(
+        "clear_all",
+        lua.create_function(|_, ()| {
+            let mut guard = SYMBOLS.lock();
+            guard.clear();
+            guard.shrink_to_fit();
+            Ok(true)
+        })?,
+    )?;
+
+    module.set(
+        "shrink",
+        lua.create_function(|_, ()| {
+            SYMBOLS.lock().shrink_to_fit();
+            Ok(true)
+        })?,
+    )?;
+
     Ok(module)
 }

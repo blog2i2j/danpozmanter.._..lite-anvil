@@ -327,5 +327,18 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(|_, id: u64| Ok(TRANSPORTS.lock().remove(&id).is_some()))?,
     )?;
 
+    module.set(
+        "clear_all",
+        lua.create_function(|_, ()| {
+            let mut transports = TRANSPORTS.lock();
+            for handle in transports.values_mut() {
+                let _ = handle.child.kill();
+            }
+            transports.clear();
+            transports.shrink_to_fit();
+            Ok(true)
+        })?,
+    )?;
+
     Ok(module)
 }

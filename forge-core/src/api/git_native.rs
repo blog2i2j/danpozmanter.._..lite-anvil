@@ -1,14 +1,50 @@
 use mlua::prelude::*;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-static STATUS_CACHE: Lazy<Mutex<std::collections::HashMap<String, u64>>> =
-    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+struct StatusCache {
+    map: HashMap<String, u64>,
+    order: VecDeque<String>,
+}
+
+impl StatusCache {
+    const MAX: usize = 2_000;
+
+    fn get(&self, root: &str) -> Option<u64> {
+        self.map.get(root).copied()
+    }
+
+    fn insert(&mut self, root: String, signature: u64) {
+        if !self.map.contains_key(&root) {
+            self.order.push_back(root.clone());
+            if self.order.len() > Self::MAX {
+                if let Some(evicted) = self.order.pop_front() {
+                    self.map.remove(&evicted);
+                }
+            }
+        }
+        self.map.insert(root, signature);
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+        self.map.shrink_to_fit();
+        self.order.shrink_to_fit();
+    }
+}
+
+static STATUS_CACHE: Lazy<Mutex<StatusCache>> = Lazy::new(|| {
+    Mutex::new(StatusCache {
+        map: HashMap::new(),
+        order: VecDeque::new(),
+    })
+});
 
 fn normalize(path: &str) -> String {
     path.replace('\\', "/")
@@ -193,7 +229,7 @@ fn status_cached(lua: &Lua, root: &str) -> LuaResult<LuaTable> {
     let signature = status_signature(out.status.code().unwrap_or(-1), &out.stdout, &out.stderr);
     let changed = {
         let mut cache = STATUS_CACHE.lock();
-        let changed = cache.get(root).copied() != Some(signature);
+        let changed = cache.get(root) != Some(signature);
         cache.insert(root.to_string(), signature);
         changed
     };
@@ -261,6 +297,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let root = discover_repo(&path)
                 .ok_or_else(|| LuaError::RuntimeError("Not inside a Git repository".to_string()))?;
             list_branches(lua, &root)
+        })?,
+    )?;
+    module.set(
+        "clear_cache",
+        lua.create_function(|_, ()| {
+            STATUS_CACHE.lock().clear();
+            Ok(true)
         })?,
     )?;
     Ok(module)

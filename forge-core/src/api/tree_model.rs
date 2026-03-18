@@ -75,9 +75,9 @@ struct GitignoreRule {
 #[derive(Clone)]
 struct ProjectSnapshot {
     nodes: Vec<TreeNode>,
-    path_to_node: HashMap<String, usize>,
+    sorted_node_ids: Vec<usize>,
     visible: Vec<usize>,
-    visible_index: HashMap<String, usize>,
+    visible_index: HashMap<usize, usize>,
 }
 
 #[derive(Clone)]
@@ -92,7 +92,6 @@ struct TreeNode {
     /// True once this directory's immediate children have been read from disk.
     /// False for collapsed dirs that were not traversed in the last build.
     explored: bool,
-    project_root: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -597,9 +596,8 @@ fn rebuild_visible(snapshot: &mut ProjectSnapshot) {
     let mut stack = vec![0usize];
     while let Some(node_id) = stack.pop() {
         let idx = snapshot.visible.len();
-        let path = snapshot.nodes[node_id].abs_path.clone();
         snapshot.visible.push(node_id);
-        snapshot.visible_index.insert(path, idx + 1);
+        snapshot.visible_index.insert(node_id, idx + 1);
         if snapshot.nodes[node_id].kind == NodeKind::Dir && snapshot.nodes[node_id].expanded {
             for child in snapshot.nodes[node_id].children.iter().rev() {
                 stack.push(*child);
@@ -610,8 +608,8 @@ fn rebuild_visible(snapshot: &mut ProjectSnapshot) {
 
 fn reindex_visible_from(snapshot: &mut ProjectSnapshot, start: usize) {
     for idx in start..snapshot.visible.len() {
-        let path = snapshot.nodes[snapshot.visible[idx]].abs_path.clone();
-        snapshot.visible_index.insert(path, idx + 1);
+        let node_id = snapshot.visible[idx];
+        snapshot.visible_index.insert(node_id, idx + 1);
     }
 }
 
@@ -629,11 +627,7 @@ fn collect_visible_subtree(snapshot: &ProjectSnapshot, node_ids: &[usize], out: 
 }
 
 fn collapse_visible_subtree(snapshot: &mut ProjectSnapshot, node_id: usize) -> bool {
-    let Some(row) = snapshot
-        .visible_index
-        .get(&snapshot.nodes[node_id].abs_path)
-        .copied()
-    else {
+    let Some(row) = snapshot.visible_index.get(&node_id).copied() else {
         return false;
     };
     let base_depth = snapshot.nodes[node_id].depth;
@@ -650,8 +644,7 @@ fn collapse_visible_subtree(snapshot: &mut ProjectSnapshot, node_id: usize) -> b
         return false;
     }
     for removed_id in snapshot.visible.drain(start..end) {
-        let path = snapshot.nodes[removed_id].abs_path.clone();
-        snapshot.visible_index.remove(&path);
+        snapshot.visible_index.remove(&removed_id);
     }
     reindex_visible_from(snapshot, start);
     true
@@ -661,11 +654,7 @@ fn expand_visible_subtree(snapshot: &mut ProjectSnapshot, node_id: usize) -> boo
     if !snapshot.nodes[node_id].explored {
         return false;
     }
-    let Some(row) = snapshot
-        .visible_index
-        .get(&snapshot.nodes[node_id].abs_path)
-        .copied()
-    else {
+    let Some(row) = snapshot.visible_index.get(&node_id).copied() else {
         return false;
     };
     let mut inserted = Vec::new();
@@ -679,8 +668,7 @@ fn expand_visible_subtree(snapshot: &mut ProjectSnapshot, node_id: usize) -> boo
         .visible
         .splice(insert_at..insert_at, inserted.iter().copied());
     for inserted_id in inserted {
-        let path = snapshot.nodes[inserted_id].abs_path.clone();
-        snapshot.visible_index.insert(path, 0);
+        snapshot.visible_index.insert(inserted_id, 0);
     }
     reindex_visible_from(snapshot, insert_at);
     true
@@ -699,10 +687,7 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
         children: Vec::new(),
         expanded: true,
         explored: false,
-        project_root: root.clone(),
     }];
-    let mut path_to_node = HashMap::new();
-    path_to_node.insert(root.clone(), 0);
     let mut stack = vec![(0usize, PathBuf::from(&root))];
 
     while let Some((parent_id, path)) = stack.pop() {
@@ -734,9 +719,7 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
                 children: Vec::new(),
                 expanded: is_expanded,
                 explored: false,
-                project_root: root.clone(),
             });
-            path_to_node.insert(child_path.clone(), child_id);
             children.push(child_id);
             // Only recurse into directories that are currently expanded.
             // Collapsed dirs are represented as leaf nodes until expanded.
@@ -750,14 +733,25 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
         nodes[parent_id].explored = true;
     }
 
+    let mut sorted_node_ids: Vec<usize> = (0..nodes.len()).collect();
+    sorted_node_ids.sort_unstable_by(|&a, &b| nodes[a].abs_path.cmp(&nodes[b].abs_path));
+
     let mut snapshot = ProjectSnapshot {
         nodes,
-        path_to_node,
+        sorted_node_ids,
         visible: Vec::new(),
         visible_index: HashMap::new(),
     };
     rebuild_visible(&mut snapshot);
     snapshot
+}
+
+fn find_node(snapshot: &ProjectSnapshot, path: &str) -> Option<usize> {
+    snapshot
+        .sorted_node_ids
+        .binary_search_by(|&id| snapshot.nodes[id].abs_path.as_str().cmp(path))
+        .ok()
+        .map(|idx| snapshot.sorted_node_ids[idx])
 }
 
 fn parse_opts(opts: Option<LuaTable>) -> LuaResult<TreeOptionsKey> {
@@ -1007,7 +1001,11 @@ fn row_item_for_roots(lua: &Lua, roots: &[String], row: usize) -> LuaResult<LuaV
         let len = snapshot.visible.len();
         if row <= offset + len {
             let node_id = snapshot.visible[row - offset - 1];
-            return Ok(LuaValue::Table(item_to_lua(lua, &snapshot.nodes[node_id])?));
+            return Ok(LuaValue::Table(item_to_lua(
+                lua,
+                &snapshot.nodes[node_id],
+                root,
+            )?));
         }
         offset += len;
     }
@@ -1042,7 +1040,7 @@ fn items_for_range_in_roots(
         };
         for node_id in &snapshot.visible {
             if global_row >= start_row && global_row <= end_row {
-                out.raw_set(out_idx, item_to_lua(lua, &snapshot.nodes[*node_id])?)?;
+                out.raw_set(out_idx, item_to_lua(lua, &snapshot.nodes[*node_id], root)?)?;
                 out_idx += 1;
             }
             if global_row > end_row {
@@ -1065,15 +1063,20 @@ fn row_for_path_in_roots(roots: &[String], path: &str) -> Option<usize> {
         let Some(snapshot) = snapshot_guard.as_ref() else {
             continue;
         };
-        if let Some(row) = snapshot.visible_index.get(path) {
-            return Some(offset + *row);
+        if let Some(node_id) = find_node(snapshot, path) {
+            if let Some(row) = snapshot.visible_index.get(&node_id) {
+                return Some(offset + *row);
+            }
         }
         offset += snapshot.visible.len();
     }
     None
 }
 
-fn item_to_lua(lua: &Lua, node: &TreeNode) -> LuaResult<LuaTable> {
+/// Serialises a single tree node into a Lua table for the treeview consumer.
+/// `project_root` is passed in from the enclosing tree rather than stored on
+/// every node, eliminating one heap-allocated string clone per node.
+fn item_to_lua(lua: &Lua, node: &TreeNode, project_root: &str) -> LuaResult<LuaTable> {
     let table = lua.create_table()?;
     table.set("name", node.name.as_str())?;
     table.set("abs_filename", node.abs_path.as_str())?;
@@ -1081,7 +1084,7 @@ fn item_to_lua(lua: &Lua, node: &TreeNode) -> LuaResult<LuaTable> {
     table.set("depth", node.depth as i64)?;
     table.set("ignored", node.ignored)?;
     table.set("expanded", node.expanded)?;
-    table.set("project_root", node.project_root.as_str())?;
+    table.set("project_root", project_root)?;
     Ok(table)
 }
 
@@ -1181,7 +1184,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 let mut needs_rebuild = false;
                 let mut changed_visible = false;
                 if let Some(snapshot) = snapshot {
-                    if let Some(&node_id) = snapshot.path_to_node.get(&path) {
+                    if let Some(node_id) = find_node(snapshot, &path) {
                         if snapshot.nodes[node_id].kind == NodeKind::Dir {
                             if snapshot.nodes[node_id].expanded != next {
                                 snapshot.nodes[node_id].expanded = next;
@@ -1243,7 +1246,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     let inserted = expanded.insert(dir.clone());
                     if inserted {
                         if let Some(snapshot) = snapshot_guard.as_mut() {
-                            if let Some(&node_id) = snapshot.path_to_node.get(&dir) {
+                            if let Some(node_id) = find_node(snapshot, &dir) {
                                 if snapshot.nodes[node_id].kind == NodeKind::Dir
                                     && !snapshot.nodes[node_id].expanded
                                 {

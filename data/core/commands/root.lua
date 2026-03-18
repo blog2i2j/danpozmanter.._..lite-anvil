@@ -160,12 +160,15 @@ command.add(nil, {
   ["root:enter-focus-mode"] = function()
     return core.root_view:enter_focus_mode()
   end,
-  ["root:exit-focus-mode"] = function()
-    return core.root_view:exit_focus_mode()
-  end,
   ["root:toggle-focus-mode"] = function()
     return core.root_view:toggle_focus_mode()
   end
+})
+
+command.add(function() return core.root_view:is_focus_mode_active() end, {
+  ["root:exit-focus-mode"] = function()
+    return core.root_view:exit_focus_mode()
+  end,
 })
 
 command.add(function(node)

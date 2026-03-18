@@ -84,9 +84,11 @@ local function open_file(use_dialog)
       return common.home_encode_list(common.path_suggest(common.home_expand(text), current_project_path()))
     end,
     validate = function(text)
+        if not text or text == "" then return false end
         local project = core.root_project and core.root_project()
         local filename = project and project:absolute_path(common.home_expand(text))
           or system.absolute_path(common.home_expand(text))
+        if not filename then return false end
         local path_stat, err = system.get_file_info(filename)
         if err then
           if err:find("No such file", 1, true) then

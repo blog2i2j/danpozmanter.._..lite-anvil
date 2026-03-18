@@ -5,6 +5,8 @@ local gitignore = {
   cache = {},
 }
 
+local GITIGNORE_CACHE_MAX = 256
+
 local function normalize(path)
   return path and common.normalize_path(path):gsub("\\", "/") or nil
 end
@@ -126,6 +128,20 @@ local function load_rules(dir)
     modified = modified,
     rules = rules,
   }
+  if not cached then
+    local count = 0
+    for _ in pairs(gitignore.cache) do
+      count = count + 1
+      if count > GITIGNORE_CACHE_MAX then
+        gitignore.cache = {}
+        gitignore.cache[ignore_path] = {
+          modified = modified,
+          rules = rules,
+        }
+        break
+      end
+    end
+  end
   return rules
 end
 

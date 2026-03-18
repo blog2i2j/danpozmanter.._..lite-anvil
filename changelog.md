@@ -1,5 +1,28 @@
 # Change Log
 
+## [Unreleased] - 2026-03-18 — RAM reductions and cache bounds.
+
+* Pack terminal cells into fixed-width native fields instead of heap-allocating a `String` per cell, substantially reducing terminal scrollback memory and allocator churn.
+* Stop cloning full terminal screen/history buffers when switching to and from the alternate screen; the terminal now swaps ownership instead.
+* Share the native project file list between `project_model` and `project_manifest` when no extra filtering is needed, avoiding duplicate file-path vectors and duplicate watchers for the same root.
+* Replace tree path-to-node string-key duplication with a sorted node-id index, so tree path lookup no longer stores a second owned copy of every node path.
+* Add explicit native cache cleanup for symbol index, Git status cache, LSP runtime state, and LSP transports when projects close.
+* Cap the native Git status cache and clear it on project close so long sessions do not retain old repository roots indefinitely.
+* Shrink native document undo/redo history storage aggressively after resets, loads, and bulk clears.
+* Cap command palette suggestion metrics, gitignore rule caching, and font glyph caching so UI caches do not grow without bound across long sessions.
+
+## [0.14.7] - 2026-03-17 — Treeview memory trim, project restore fix, and command UX fixes.
+
+* Reduce treeview memory per node by removing the redundant `project_root` string from every `TreeNode`; it is now passed through from the enclosing tree entry.
+* Replace path-string keys in the treeview `visible_index` with node-id keys, avoiding a second string allocation per visible node.
+* Add size-based eviction to the treeview label and text-width caches so very large project trees do not accumulate unbounded UI entries.
+* Fix Windows treeview project lookup: `sync_model` now stores the forward-slash form of each project path so items returned by the Rust layer (which normalises to forward slashes) resolve correctly without per-item path manipulation.
+* Close all open files belonging to a project when that project directory is removed, prompting to save any unsaved changes.
+* Remove the `alt+1` keybinding (`root:switch-to-tab-1`).
+* Fix empty treeview on startup when the session has `active_project=false` (introduced in 0.14.6): fall back to the most recent project or the current directory.
+* Fix crash in Open File validate when submitting an empty string (`bad argument #1: error converting Lua nil to String`).
+* Fix Esc not exiting commands like Open File: `root:exit-focus-mode` now only fires when focus mode is actually active, allowing `command:escape` to run when a CommandView is open.
+
 ## [0.14.6] - 2026-03-17 — macOS release fix and lower-memory restore.
 
 * Fix macOS release builds by replacing the non-portable BSD-`sed` version lookup in the release workflow with a portable parser.

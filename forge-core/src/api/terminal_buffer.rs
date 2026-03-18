@@ -1,19 +1,19 @@
 use mlua::prelude::*;
 use parking_lot::Mutex;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Cell {
-    ch: String,
-    fg: Option<[u8; 4]>,
-    bg: Option<[u8; 4]>,
+    ch: u32,
+    fg: u32,
+    bg: u32,
 }
 
 impl Cell {
     fn blank(default_fg: [u8; 4]) -> Self {
         Self {
-            ch: " ".to_string(),
-            fg: Some(default_fg),
-            bg: None,
+            ch: ' ' as u32,
+            fg: pack_color(default_fg),
+            bg: 0,
         }
     }
 }
@@ -55,15 +55,15 @@ enum EscapeState {
 }
 
 impl TerminalBufferInner {
-    fn normalize_char(ch: &str) -> &str {
+    fn normalize_char(ch: char) -> char {
         match ch {
-            "❯" | "➜" | "▶" | "›" | "»" => ">",
-            "❮" | "◀" | "‹" | "«" => "<",
-            "│" | "┃" | "┆" | "┇" | "┊" | "┋" => "|",
-            "─" | "━" | "┄" | "┅" | "┈" | "┉" => "-",
-            "╭" | "╮" | "╰" | "╯" | "┌" | "┐" | "└" | "┘" | "┼" | "┬" | "┴" | "├"
-            | "┤" | "╞" | "╡" | "╪" | "╤" | "╧" | "╟" | "╢" | "╔" | "╗" | "╚" | "╝"
-            | "╠" | "╣" | "╦" | "╩" | "╬" => "+",
+            '❯' | '➜' | '▶' | '›' | '»' => '>',
+            '❮' | '◀' | '‹' | '«' => '<',
+            '│' | '┃' | '┆' | '┇' | '┊' | '┋' => '|',
+            '─' | '━' | '┄' | '┅' | '┈' | '┉' => '-',
+            '╭' | '╮' | '╰' | '╯' | '┌' | '┐' | '└' | '┘' | '┼' | '┬' | '┴' | '├' | '┤' | '╞'
+            | '╡' | '╪' | '╤' | '╧' | '╟' | '╢' | '╔' | '╗' | '╚' | '╝' | '╠' | '╣' | '╦' | '╩'
+            | '╬' => '+',
             _ => ch,
         }
     }
@@ -108,9 +108,7 @@ impl TerminalBufferInner {
     }
 
     fn blank_row(&self) -> Vec<Cell> {
-        (0..self.cols)
-            .map(|_| Cell::blank(self.default_fg))
-            .collect()
+        vec![Cell::blank(self.default_fg); self.cols]
     }
 
     fn reset_screen(&mut self) {
@@ -159,6 +157,7 @@ impl TerminalBufferInner {
 
     fn clear(&mut self) {
         self.history.clear();
+        self.history.shrink_to_fit();
         self.current_fg = Some(self.default_fg);
         self.current_bg = None;
         self.cursor_row = 1;
@@ -172,8 +171,11 @@ impl TerminalBufferInner {
         self.osc_esc = false;
         self.in_alt_screen = false;
         self.main_screen.clear();
+        self.main_screen.shrink_to_fit();
         self.main_history.clear();
+        self.main_history.shrink_to_fit();
         self.alt_screen.clear();
+        self.alt_screen.shrink_to_fit();
         self.reset_screen();
     }
 
@@ -188,7 +190,7 @@ impl TerminalBufferInner {
         self.scroll_up_in_region(1);
     }
 
-    fn put_char(&mut self, ch: &str) {
+    fn put_char(&mut self, ch: char) {
         let ch = Self::normalize_char(ch);
         if self.cursor_col > self.cols {
             self.cursor_col = 1;
@@ -200,9 +202,9 @@ impl TerminalBufferInner {
         }
         let row = &mut self.screen[self.cursor_row - 1];
         row[self.cursor_col - 1] = Cell {
-            ch: ch.to_string(),
-            fg: self.current_fg,
-            bg: self.current_bg,
+            ch: ch as u32,
+            fg: self.current_fg.map(pack_color).unwrap_or(0),
+            bg: self.current_bg.map(pack_color).unwrap_or(0),
         };
         self.cursor_col += 1;
     }
@@ -311,7 +313,10 @@ impl TerminalBufferInner {
 
     fn insert_chars(&mut self, count: usize) {
         let row = &mut self.screen[self.cursor_row - 1];
-        let start = self.cursor_col.saturating_sub(1).min(self.cols.saturating_sub(1));
+        let start = self
+            .cursor_col
+            .saturating_sub(1)
+            .min(self.cols.saturating_sub(1));
         let count = count.max(1).min(self.cols.saturating_sub(start));
         for idx in (start..self.cols - count).rev() {
             row[idx + count] = row[idx].clone();
@@ -324,7 +329,10 @@ impl TerminalBufferInner {
 
     fn delete_chars(&mut self, count: usize) {
         let row = &mut self.screen[self.cursor_row - 1];
-        let start = self.cursor_col.saturating_sub(1).min(self.cols.saturating_sub(1));
+        let start = self
+            .cursor_col
+            .saturating_sub(1)
+            .min(self.cols.saturating_sub(1));
         let count = count.max(1).min(self.cols.saturating_sub(start));
         for idx in start..self.cols - count {
             row[idx] = row[idx + count].clone();
@@ -337,7 +345,10 @@ impl TerminalBufferInner {
 
     fn erase_chars(&mut self, count: usize) {
         let row = &mut self.screen[self.cursor_row - 1];
-        let start = self.cursor_col.saturating_sub(1).min(self.cols.saturating_sub(1));
+        let start = self
+            .cursor_col
+            .saturating_sub(1)
+            .min(self.cols.saturating_sub(1));
         let end = (start + count.max(1)).min(self.cols);
         let blank = Cell::blank(self.default_fg);
         for cell in &mut row[start..end] {
@@ -356,26 +367,27 @@ impl TerminalBufferInner {
         }
 
         if enabled {
-            self.main_screen = self.screen.clone();
-            self.main_history = self.history.clone();
-            if self.alt_screen.len() != self.rows || self.alt_screen.first().map(|r| r.len()) != Some(self.cols) {
+            self.main_screen = std::mem::take(&mut self.screen);
+            self.main_history = std::mem::take(&mut self.history);
+            if self.alt_screen.len() != self.rows
+                || self.alt_screen.first().map(|r| r.len()) != Some(self.cols)
+            {
                 self.alt_screen = (0..self.rows).map(|_| self.blank_row()).collect();
             }
             self.screen = if clear {
                 (0..self.rows).map(|_| self.blank_row()).collect()
             } else {
-                self.alt_screen.clone()
+                std::mem::take(&mut self.alt_screen)
             };
-            self.history.clear();
             self.in_alt_screen = true;
         } else {
-            self.alt_screen = self.screen.clone();
+            self.alt_screen = std::mem::take(&mut self.screen);
             self.screen = if self.main_screen.is_empty() {
                 (0..self.rows).map(|_| self.blank_row()).collect()
             } else {
-                self.main_screen.clone()
+                std::mem::take(&mut self.main_screen)
             };
-            self.history = self.main_history.clone();
+            self.history = std::mem::take(&mut self.main_history);
             self.in_alt_screen = false;
         }
         self.cursor_row = 1;
@@ -646,7 +658,7 @@ impl TerminalBufferInner {
         ))
     }
 
-    fn decode_utf8_char(bytes: &[u8], i: usize) -> (String, usize) {
+    fn decode_utf8_char(bytes: &[u8], i: usize) -> (char, usize) {
         let b = *bytes.get(i).unwrap_or(&0);
         let end = if b < 0x80 {
             i + 1
@@ -657,7 +669,11 @@ impl TerminalBufferInner {
         } else {
             (i + 4).min(bytes.len())
         };
-        (String::from_utf8_lossy(&bytes[i..end]).into_owned(), end)
+        let ch = std::str::from_utf8(&bytes[i..end])
+            .ok()
+            .and_then(|text| text.chars().next())
+            .unwrap_or(char::REPLACEMENT_CHARACTER);
+        (ch, end)
     }
 
     fn process_output_and_collect_replies(&mut self, bytes: &[u8]) -> Vec<u8> {
@@ -776,7 +792,7 @@ impl TerminalBufferInner {
                         let next_tab = (self.cursor_col + (8 - ((self.cursor_col - 1) % 8)))
                             .min(self.cols + 1);
                         while self.cursor_col < next_tab {
-                            self.put_char(" ");
+                            self.put_char(' ');
                         }
                         i += 1;
                     }
@@ -785,7 +801,7 @@ impl TerminalBufferInner {
                     }
                     _ => {
                         let (ch, next) = Self::decode_utf8_char(bytes, i);
-                        self.put_char(&ch);
+                        self.put_char(ch);
                         i = next;
                     }
                 },
@@ -834,6 +850,25 @@ fn color_to_table(lua: &Lua, color: [u8; 4]) -> LuaResult<LuaTable> {
     Ok(table)
 }
 
+#[inline]
+fn pack_color(color: [u8; 4]) -> u32 {
+    u32::from_be_bytes(color)
+}
+
+#[inline]
+fn unpack_color(color: u32) -> Option<[u8; 4]> {
+    if color == 0 {
+        None
+    } else {
+        Some(color.to_be_bytes())
+    }
+}
+
+#[inline]
+fn cell_char(ch: u32) -> char {
+    char::from_u32(ch).unwrap_or(' ')
+}
+
 fn row_runs(lua: &Lua, row: &[Cell]) -> LuaResult<LuaTable> {
     let out = lua.create_table()?;
     if row.is_empty() {
@@ -845,19 +880,20 @@ fn row_runs(lua: &Lua, row: &[Cell]) -> LuaResult<LuaTable> {
         let fg = row[start].fg;
         let bg = row[start].bg;
         let mut finish = start + 1;
-        let mut text = row[start].ch.clone();
+        let mut text = String::new();
+        text.push(cell_char(row[start].ch));
         while finish < row.len() && row[finish].fg == fg && row[finish].bg == bg {
-            text.push_str(&row[finish].ch);
+            text.push(cell_char(row[finish].ch));
             finish += 1;
         }
         let run = lua.create_table()?;
         run.set("text", text)?;
         run.set("start_col", (start + 1) as i64)?;
         run.set("end_col", finish as i64)?;
-        if let Some(fg) = fg {
+        if let Some(fg) = unpack_color(fg) {
             run.set("fg", color_to_table(lua, fg)?)?;
         }
-        if let Some(bg) = bg {
+        if let Some(bg) = unpack_color(bg) {
             run.set("bg", color_to_table(lua, bg)?)?;
         }
         out.raw_set(idx, run)?;
@@ -970,7 +1006,7 @@ mod tests {
     fn processes_basic_output() {
         let mut buf = TerminalBufferInner::new(8, 2, 10, palette(), [255, 255, 255, 255]);
         buf.process_output(b"abc");
-        assert_eq!(buf.screen[0][0].ch, "a");
+        assert_eq!(super::cell_char(buf.screen[0][0].ch), 'a');
         assert_eq!(buf.cursor_col, 4);
     }
 
@@ -987,7 +1023,10 @@ mod tests {
         colors[1] = [255, 0, 0, 255];
         let mut buf = TerminalBufferInner::new(4, 1, 10, colors, [255, 255, 255, 255]);
         buf.process_output(b"\x1b[31mx");
-        assert_eq!(buf.screen[0][0].fg, Some([255, 0, 0, 255]));
+        assert_eq!(
+            super::unpack_color(buf.screen[0][0].fg),
+            Some([255, 0, 0, 255])
+        );
     }
 
     #[test]
@@ -998,10 +1037,10 @@ mod tests {
         buf.process_output(b"alt");
         assert!(buf.in_alt_screen);
         assert_eq!(buf.history.len(), 0);
-        assert_eq!(buf.screen[0][0].ch, "a");
+        assert_eq!(super::cell_char(buf.screen[0][0].ch), 'a');
         buf.process_output(b"\x1b[?1049l");
         assert!(!buf.in_alt_screen);
-        assert_eq!(buf.screen[0][0].ch, "m");
+        assert_eq!(super::cell_char(buf.screen[0][0].ch), 'm');
     }
 
     #[test]
@@ -1018,30 +1057,30 @@ mod tests {
     fn swallows_charset_escape_sequences() {
         let mut buf = TerminalBufferInner::new(8, 2, 10, palette(), [255, 255, 255, 255]);
         buf.process_output(b"\x1b(Babc");
-        assert_eq!(buf.screen[0][0].ch, "a");
-        assert_eq!(buf.screen[0][1].ch, "b");
-        assert_eq!(buf.screen[0][2].ch, "c");
+        assert_eq!(super::cell_char(buf.screen[0][0].ch), 'a');
+        assert_eq!(super::cell_char(buf.screen[0][1].ch), 'b');
+        assert_eq!(super::cell_char(buf.screen[0][2].ch), 'c');
     }
 
     #[test]
     fn supports_esc_save_and_restore_cursor() {
         let mut buf = TerminalBufferInner::new(8, 2, 10, palette(), [255, 255, 255, 255]);
         buf.process_output(b"ab\x1b7\x1b[2;3Hz\x1b8q");
-        assert_eq!(buf.screen[0][0].ch, "a");
-        assert_eq!(buf.screen[0][1].ch, "b");
-        assert_eq!(buf.screen[0][2].ch, "q");
-        assert_eq!(buf.screen[1][2].ch, "z");
+        assert_eq!(super::cell_char(buf.screen[0][0].ch), 'a');
+        assert_eq!(super::cell_char(buf.screen[0][1].ch), 'b');
+        assert_eq!(super::cell_char(buf.screen[0][2].ch), 'q');
+        assert_eq!(super::cell_char(buf.screen[1][2].ch), 'z');
     }
 
     #[test]
     fn normalizes_prompt_glyphs_to_ascii_fallbacks() {
         let mut buf = TerminalBufferInner::new(8, 2, 10, palette(), [255, 255, 255, 255]);
         buf.process_output("❯›│─╭".as_bytes());
-        assert_eq!(buf.screen[0][0].ch, ">");
-        assert_eq!(buf.screen[0][1].ch, ">");
-        assert_eq!(buf.screen[0][2].ch, "|");
-        assert_eq!(buf.screen[0][3].ch, "-");
-        assert_eq!(buf.screen[0][4].ch, "+");
+        assert_eq!(super::cell_char(buf.screen[0][0].ch), '>');
+        assert_eq!(super::cell_char(buf.screen[0][1].ch), '>');
+        assert_eq!(super::cell_char(buf.screen[0][2].ch), '|');
+        assert_eq!(super::cell_char(buf.screen[0][3].ch), '-');
+        assert_eq!(super::cell_char(buf.screen[0][4].ch), '+');
     }
 
     #[test]

@@ -5,9 +5,17 @@ use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::{Duration, Instant};
 
 const MAX_QUEUED_CHANGES: usize = 4096;
+const SHARED_REBUILD_DEBOUNCE: Duration = Duration::from_millis(500);
+
+#[cfg(feature = "sdl")]
+const SHARED_WAKEUP_RATE_LIMIT: Duration = Duration::from_millis(200);
 
 struct WatchHandle {
     _watcher: RecommendedWatcher,
@@ -16,6 +24,18 @@ struct WatchHandle {
 
 static WATCHERS: Lazy<Mutex<HashMap<u64, WatchHandle>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static NEXT_WATCH_ID: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(1));
+
+struct SharedFileEntry {
+    files: Arc<Mutex<Vec<String>>>,
+    dirty: Arc<AtomicBool>,
+    rebuilding: Arc<AtomicBool>,
+    last_event: Arc<Mutex<Option<Instant>>>,
+    _watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
+    max_size_bytes: Option<u64>,
+}
+
+static SHARED_FILE_CACHE: Lazy<Mutex<HashMap<String, SharedFileEntry>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Default)]
 pub(crate) struct WalkOptions {
@@ -88,10 +108,14 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+fn normalize_root(root: &str) -> String {
+    root.replace('\\', "/")
+}
+
 fn sort_entries(entries: &mut [DirEntry]) {
     entries.sort_by(|a, b| {
-        let a_type = if a.kind == "dir" { "dir" } else { "file" };
-        let b_type = if b.kind == "dir" { "dir" } else { "file" };
+        let a_type = if a.is_dir { "dir" } else { "file" };
+        let b_type = if b.is_dir { "dir" } else { "file" };
         if super::path_compare(&a.name, a_type, &b.name, b_type) {
             std::cmp::Ordering::Less
         } else if super::path_compare(&b.name, b_type, &a.name, a_type) {
@@ -106,7 +130,7 @@ fn sort_entries(entries: &mut [DirEntry]) {
 struct DirEntry {
     name: String,
     abs_path: String,
-    kind: String,
+    is_dir: bool,
     size: u64,
 }
 
@@ -121,7 +145,7 @@ fn read_dir_entries(path: &Path, show_hidden: bool, max_entries: Option<usize>) 
             let Ok(file_type) = entry.file_type() else {
                 continue;
             };
-            let kind = if file_type.is_dir() { "dir" } else { "file" }.to_string();
+            let is_dir = file_type.is_dir();
             let size = if file_type.is_file() {
                 entry.metadata().map(|meta| meta.len()).unwrap_or(0)
             } else {
@@ -130,7 +154,7 @@ fn read_dir_entries(path: &Path, show_hidden: bool, max_entries: Option<usize>) 
             entries.push(DirEntry {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 abs_path: entry_path.to_string_lossy().into_owned(),
-                kind,
+                is_dir,
                 size,
             });
             if max_entries.is_some_and(|limit| entries.len() >= limit) {
@@ -156,7 +180,7 @@ pub(crate) fn walk_files(roots: &[String], opts: &WalkOptions) -> Vec<String> {
         let entries = read_dir_entries(&path, opts.show_hidden, opts.max_entries);
         for entry in entries {
             let entry_path = PathBuf::from(&entry.abs_path);
-            if entry.kind == "dir" {
+            if entry.is_dir {
                 if !opts.exclude_dirs.is_empty() {
                     let basename = entry_path
                         .file_name()
@@ -190,6 +214,182 @@ pub(crate) fn walk_files(roots: &[String], opts: &WalkOptions) -> Vec<String> {
     files
 }
 
+fn build_shared_files(root: &str, max_size_bytes: Option<u64>) -> Vec<String> {
+    walk_files(
+        &[root.to_string()],
+        &WalkOptions {
+            show_hidden: false,
+            max_size_bytes,
+            path_glob: None,
+            max_files: None,
+            max_entries: None,
+            exclude_dirs: vec![],
+        },
+    )
+}
+
+pub(crate) fn shared_file_list(root: &str, max_size_bytes: Option<u64>) -> Arc<Mutex<Vec<String>>> {
+    let root = normalize_root(root);
+
+    enum Work {
+        None,
+        Rebuild {
+            files: Arc<Mutex<Vec<String>>>,
+            rebuilding: Arc<AtomicBool>,
+        },
+        New {
+            files: Arc<Mutex<Vec<String>>>,
+            dirty: Arc<AtomicBool>,
+            rebuilding: Arc<AtomicBool>,
+            last_event: Arc<Mutex<Option<Instant>>>,
+            watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
+        },
+    }
+
+    let (files_arc, work) = {
+        let mut cache = SHARED_FILE_CACHE.lock();
+        match cache.get_mut(&root) {
+            Some(entry) => {
+                let config_changed = entry.max_size_bytes != max_size_bytes;
+                let is_dirty = entry.dirty.load(Ordering::Relaxed);
+                let files_arc = Arc::clone(&entry.files);
+                let work = if entry.rebuilding.load(Ordering::Relaxed) {
+                    Work::None
+                } else if !config_changed && !is_dirty {
+                    Work::None
+                } else {
+                    if is_dirty && !config_changed {
+                        let elapsed = entry
+                            .last_event
+                            .lock()
+                            .as_ref()
+                            .map(|t| t.elapsed())
+                            .unwrap_or(Duration::MAX);
+                        if elapsed < SHARED_REBUILD_DEBOUNCE {
+                            return files_arc;
+                        }
+                    }
+                    entry.dirty.store(false, Ordering::Relaxed);
+                    entry.rebuilding.store(true, Ordering::Relaxed);
+                    entry.max_size_bytes = max_size_bytes;
+                    Work::Rebuild {
+                        files: Arc::clone(&entry.files),
+                        rebuilding: Arc::clone(&entry.rebuilding),
+                    }
+                };
+                (files_arc, work)
+            }
+            None => {
+                let files = Arc::new(Mutex::new(Vec::<String>::new()));
+                let dirty = Arc::new(AtomicBool::new(false));
+                let rebuilding = Arc::new(AtomicBool::new(true));
+                let last_event = Arc::new(Mutex::new(None::<Instant>));
+                let watcher = Arc::new(Mutex::new(None::<RecommendedWatcher>));
+                cache.insert(
+                    root.clone(),
+                    SharedFileEntry {
+                        files: Arc::clone(&files),
+                        dirty: Arc::clone(&dirty),
+                        rebuilding: Arc::clone(&rebuilding),
+                        last_event: Arc::clone(&last_event),
+                        _watcher: Arc::clone(&watcher),
+                        max_size_bytes,
+                    },
+                );
+                (
+                    Arc::clone(&files),
+                    Work::New {
+                        files,
+                        dirty,
+                        rebuilding,
+                        last_event,
+                        watcher,
+                    },
+                )
+            }
+        }
+    };
+
+    match work {
+        Work::None => {}
+        Work::Rebuild { files, rebuilding } => {
+            let root_clone = root.clone();
+            std::thread::spawn(move || {
+                let new_files = build_shared_files(&root_clone, max_size_bytes);
+                *files.lock() = new_files;
+                rebuilding.store(false, Ordering::Relaxed);
+                #[cfg(feature = "sdl")]
+                crate::window::push_wakeup_event();
+            });
+        }
+        Work::New {
+            files,
+            dirty,
+            rebuilding,
+            last_event,
+            watcher,
+        } => {
+            let dirty_for_cb = Arc::clone(&dirty);
+            let last_event_for_cb = Arc::clone(&last_event);
+            #[cfg(feature = "sdl")]
+            let last_wakeup_for_cb: Arc<Mutex<Option<Instant>>> =
+                Arc::new(Mutex::new(None::<Instant>));
+            let root_clone = root.clone();
+            std::thread::spawn(move || {
+                let new_files = build_shared_files(&root_clone, max_size_bytes);
+                *files.lock() = new_files;
+                rebuilding.store(false, Ordering::Relaxed);
+                #[cfg(feature = "sdl")]
+                crate::window::push_wakeup_event();
+
+                let watcher_result = (|| -> Result<RecommendedWatcher, notify::Error> {
+                    let mut w = RecommendedWatcher::new(
+                        move |_res: notify::Result<notify::Event>| {
+                            dirty_for_cb.store(true, Ordering::Relaxed);
+                            *last_event_for_cb.lock() = Some(Instant::now());
+                            #[cfg(feature = "sdl")]
+                            {
+                                let should_push = {
+                                    let mut guard = last_wakeup_for_cb.lock();
+                                    let now = Instant::now();
+                                    let elapsed = guard
+                                        .as_ref()
+                                        .map(|t| now.duration_since(*t))
+                                        .unwrap_or(Duration::MAX);
+                                    if elapsed >= SHARED_WAKEUP_RATE_LIMIT {
+                                        *guard = Some(now);
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                };
+                                if should_push {
+                                    crate::window::push_wakeup_event();
+                                }
+                            }
+                        },
+                        notify::Config::default(),
+                    )?;
+                    w.watch(Path::new(&root_clone), RecursiveMode::Recursive)?;
+                    Ok(w)
+                })();
+                if let Ok(shared_watcher) = watcher_result {
+                    *watcher.lock() = Some(shared_watcher);
+                }
+            });
+        }
+    }
+
+    files_arc
+}
+
+pub(crate) fn invalidate_shared_file_list(root: &str) -> bool {
+    SHARED_FILE_CACHE
+        .lock()
+        .remove(&normalize_root(root))
+        .is_some()
+}
+
 fn parse_walk_opts(opts: Option<LuaTable>) -> LuaResult<WalkOptions> {
     let mut out = WalkOptions::default();
     if let Some(opts) = opts {
@@ -220,7 +420,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 let item = lua.create_table()?;
                 item.set("name", entry.name)?;
                 item.set("abs_filename", entry.abs_path)?;
-                item.set("type", entry.kind)?;
+                item.set("type", if entry.is_dir { "dir" } else { "file" })?;
                 item.set("size", entry.size)?;
                 out.raw_set((idx + 1) as i64, item)?;
             }

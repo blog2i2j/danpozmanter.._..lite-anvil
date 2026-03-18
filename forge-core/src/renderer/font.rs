@@ -46,6 +46,7 @@ const FT_LOAD_TARGET_LCD: i32 = 3 << 16;
 // pixel_mode constants (FT_Pixel_Mode_ variants as u8 values)
 const PIXEL_MODE_GRAY: u8 = 2;
 const PIXEL_MODE_LCD: u8 = 5;
+const MAX_GLYPH_CACHE_ENTRIES: usize = 4096;
 
 // ── Antialiasing / Hinting ────────────────────────────────────────────────────
 
@@ -210,6 +211,10 @@ impl FontInner {
 
     pub fn get_glyph(&mut self, codepoint: u32) -> &GlyphInfo {
         if !self.glyphs.contains_key(&codepoint) {
+            if self.glyphs.len() >= MAX_GLYPH_CACHE_ENTRIES {
+                self.glyphs.clear();
+                self.glyphs.shrink_to_fit();
+            }
             let info = self.load_glyph(codepoint);
             self.glyphs.insert(codepoint, info);
         }
@@ -272,9 +277,9 @@ impl FontInner {
                 continue;
             }
             let adv = if !is_whitespace(cp) {
-                let g = self.get_glyph(cp).clone();
-                if g.xadvance > 0.0 {
-                    g.xadvance
+                let xadvance = self.get_glyph(cp).xadvance;
+                if xadvance > 0.0 {
+                    xadvance
                 } else {
                     self.space_advance
                 }

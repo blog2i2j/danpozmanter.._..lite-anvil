@@ -10,7 +10,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use super::project_fs::{WalkOptions, walk_files};
+use super::project_fs::{WalkOptions, invalidate_shared_file_list, shared_file_list, walk_files};
 
 /// Minimum quiet time after the last filesystem event before triggering a
 /// file-list rebuild. Prevents rapid-fire rebuilds during active builds.
@@ -79,6 +79,10 @@ fn build_files(
             exclude_dirs: exclude_dirs.to_vec(),
         },
     )
+}
+
+fn can_use_shared(max_files: Option<usize>, exclude_dirs: &[String]) -> bool {
+    max_files.is_none() && exclude_dirs.is_empty()
 }
 
 /// Ensure the file list for `root` is up-to-date.
@@ -321,11 +325,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             } else {
                 (None, None, Vec::new())
             };
-            ensure_project(&root, max_size_bytes, max_files, exclude_dirs)?;
-            let root = normalize_path(&root);
-            // Clone the Arc before releasing PROJECTS to avoid holding two
-            // locks simultaneously (PROJECTS then files).
-            let files_arc = PROJECTS.lock().get(&root).map(|e| Arc::clone(&e.files));
+            let files_arc = if can_use_shared(max_files, &exclude_dirs) {
+                Some(shared_file_list(&root, max_size_bytes))
+            } else {
+                ensure_project(&root, max_size_bytes, max_files, exclude_dirs)?;
+                let root = normalize_path(&root);
+                PROJECTS.lock().get(&root).map(|e| Arc::clone(&e.files))
+            };
             let out = lua.create_table()?;
             if let Some(files_arc) = files_arc {
                 let files = files_arc.lock();
@@ -353,12 +359,16 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let mut out_idx = 1i64;
             for root in roots.sequence_values::<String>() {
                 let root = root?;
-                ensure_project(&root, max_size_bytes, max_files, exclude_dirs.clone())?;
-                let normalized_root = normalize_path(&root);
-                let files_arc = PROJECTS
-                    .lock()
-                    .get(&normalized_root)
-                    .map(|e| Arc::clone(&e.files));
+                let files_arc = if can_use_shared(max_files, &exclude_dirs) {
+                    Some(shared_file_list(&root, max_size_bytes))
+                } else {
+                    ensure_project(&root, max_size_bytes, max_files, exclude_dirs.clone())?;
+                    let normalized_root = normalize_path(&root);
+                    PROJECTS
+                        .lock()
+                        .get(&normalized_root)
+                        .map(|e| Arc::clone(&e.files))
+                };
                 if let Some(files_arc) = files_arc {
                     let files = files_arc.lock();
                     for file in files.iter() {
@@ -390,7 +400,8 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     module.set(
         "invalidate",
         lua.create_function(|_, root: String| {
-            Ok(PROJECTS.lock().remove(&normalize_path(&root)).is_some())
+            let removed = PROJECTS.lock().remove(&normalize_path(&root)).is_some();
+            Ok(invalidate_shared_file_list(&root) || removed)
         })?,
     )?;
 

@@ -728,7 +728,15 @@ fn clamp_history(history: &mut Vec<Vec<u8>>) {
     if history.len() > MAX_UNDOS {
         let drop_count = history.len() - MAX_UNDOS;
         history.drain(0..drop_count);
+        history.shrink_to_fit();
     }
+}
+
+fn reset_history(state: &mut BufferState) {
+    state.undo.clear();
+    state.redo.clear();
+    state.undo.shrink_to_fit();
+    state.redo.shrink_to_fit();
 }
 
 fn apply_record_to_state(state: &mut BufferState, packed: &[u8], push_redo: bool) -> LuaResult<()> {
@@ -779,6 +787,7 @@ fn apply_insert_to_buffer(state: &mut BufferState, line: usize, col: usize, text
     ));
     clamp_history(&mut state.undo);
     state.redo.clear();
+    state.redo.shrink_to_fit();
     state.change_id += 1;
     state.lines.len() as isize - before_len
 }
@@ -816,6 +825,7 @@ fn apply_remove_to_buffer(
     ));
     clamp_history(&mut state.undo);
     state.redo.clear();
+    state.redo.shrink_to_fit();
     state.change_id += 1;
     state.lines.len() as isize - before_len
 }
@@ -872,6 +882,7 @@ fn apply_edits_to_buffer(state: &mut BufferState, edits: LuaTable) -> LuaResult<
     state.undo.push(pack_record(&selection_restore, &inverse));
     clamp_history(&mut state.undo);
     state.redo.clear();
+    state.redo.shrink_to_fit();
     state.change_id += 1;
     Ok(state.lines.len() as isize - before_len)
 }
@@ -902,8 +913,9 @@ fn load_file_into_state(state: &mut BufferState, filename: &str) -> LuaResult<()
         }
     }
     state.selections = vec![1, 1, 1, 1];
-    state.undo.clear();
-    state.redo.clear();
+    state.lines.shrink_to_fit();
+    state.selections.shrink_to_fit();
+    reset_history(state);
     state.change_id = 1;
     Ok(())
 }
@@ -1082,7 +1094,14 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "buffer_free",
-        lua.create_function(|_, buffer_id: u64| Ok(BUFFERS.lock().remove(&buffer_id).is_some()))?,
+        lua.create_function(|_, buffer_id: u64| {
+            let mut buffers = BUFFERS.lock();
+            let removed = buffers.remove(&buffer_id).is_some();
+            if buffers.is_empty() {
+                buffers.shrink_to_fit();
+            }
+            Ok(removed)
+        })?,
     )?;
 
     module.set(

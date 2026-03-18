@@ -411,7 +411,6 @@ keymap.add_direct {
   ["ctrl+shift+f"] = "root:toggle-focus-mode",
   ["ctrl+pageup"] = "root:move-tab-left",
   ["ctrl+pagedown"] = "root:move-tab-right",
-  ["alt+1"] = "root:switch-to-tab-1",
   ["alt+2"] = "root:switch-to-tab-2",
   ["alt+3"] = "root:switch-to-tab-3",
   ["alt+4"] = "root:switch-to-tab-4",

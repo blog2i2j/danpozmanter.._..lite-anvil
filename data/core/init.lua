@@ -130,6 +130,26 @@ local function release_project_resources(project)
   end
 end
 
+local function clear_native_runtime_caches()
+  local ok, symbol_index = pcall(require, "symbol_index")
+  if ok and symbol_index then
+    if symbol_index.clear_all then pcall(symbol_index.clear_all) end
+    if symbol_index.shrink then pcall(symbol_index.shrink) end
+  end
+  local git_ok, git_native = pcall(require, "git_native")
+  if git_ok and git_native and git_native.clear_cache then
+    pcall(git_native.clear_cache)
+  end
+  local lsp_ok, lsp_manager = pcall(require, "lsp_manager")
+  if lsp_ok and lsp_manager and lsp_manager.clear_runtime_state then
+    pcall(lsp_manager.clear_runtime_state)
+  end
+  local transport_ok, lsp_transport = pcall(require, "lsp_transport")
+  if transport_ok and lsp_transport and lsp_transport.clear_all then
+    pcall(lsp_transport.clear_all)
+  end
+end
+
 
 function core.add_project(project)
   project = type(project) == "string" and Project(common.normalize_volume(project)) or project
@@ -145,6 +165,22 @@ function core.remove_project(project, force)
     if project == core.projects[i] or project == core.projects[i].path then
       local project = core.projects[i]
       table.remove(core.projects, i)
+      -- Close all open views whose document belongs to the removed project.
+      if core.root_view then
+        local entries = {}
+        for _, view in ipairs(core.root_view.root_node:get_children()) do
+          if view.doc and view.doc.abs_filename
+              and common.path_belongs_to(view.doc.abs_filename, project.path) then
+            local node = core.root_view.root_node:get_node_for_view(view)
+            if node then
+              entries[#entries + 1] = { node = node, view = view }
+            end
+          end
+        end
+        if #entries > 0 then
+          core.root_view:confirm_close_views(entries)
+        end
+      end
       return project
     end
   end
@@ -161,6 +197,7 @@ function core.set_project(project)
     local removed = core.remove_project(core.projects[#core.projects], true)
     release_project_resources(removed)
   end
+  clear_native_runtime_caches()
   if not project then
     core.redraw = true
     return nil
@@ -178,6 +215,7 @@ function core.close_project()
     local removed = core.remove_project(core.projects[#core.projects], true)
     release_project_resources(removed)
   end
+  clear_native_runtime_caches()
   core.redraw = true
 end
 
@@ -475,7 +513,7 @@ function core.init()
   core.previous_find = {}
   core.previous_replace = {}
 
-  local project_dir = session.active_project
+  local project_dir = session.active_project or core.recent_projects[1] or "."
   local project_dir_explicit = false
   local files = {}
   if not RESTARTED then

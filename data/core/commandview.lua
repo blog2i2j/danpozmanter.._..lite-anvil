@@ -49,6 +49,8 @@ local default_state = {
   wrap = true,
 }
 
+local SUGGESTION_CACHE_MAX = 512
+
 
 function CommandView:new()
   CommandView.super.new(self, SingleLineDoc())
@@ -68,6 +70,7 @@ function CommandView:new()
   self.size.y = 0
   self.label = ""
   self.suggestion_cache = {}
+  self.suggestion_cache_count = 0
   self.suggestion_max_width = 0
 end
 
@@ -233,6 +236,7 @@ function CommandView:exit(submitted, inexplicit)
   self.save_suggestion = nil
   self.last_text = ""
   self.suggestion_cache = {}
+  self.suggestion_cache_count = 0
   self.suggestion_max_width = 0
 end
 
@@ -253,6 +257,7 @@ end
 
 function CommandView:on_scale_change()
   self.suggestion_cache = {}
+  self.suggestion_cache_count = 0
   self.suggestion_max_width = 0
 end
 
@@ -267,6 +272,13 @@ function CommandView:get_cached_suggestion(item)
     text_width = self:get_font():get_width(item.text or ""),
     info_width = item.info and self:get_font():get_width(item.info) or 0,
   }
+  if not self.suggestion_cache[key] and self.suggestion_cache_count >= SUGGESTION_CACHE_MAX then
+    self.suggestion_cache = {}
+    self.suggestion_cache_count = 0
+  end
+  if not self.suggestion_cache[key] then
+    self.suggestion_cache_count = self.suggestion_cache_count + 1
+  end
   self.suggestion_cache[key] = cached
   return cached
 end

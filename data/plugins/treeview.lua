@@ -37,6 +37,9 @@ local tooltip_alpha = 255
 local tooltip_alpha_rate = 1
 local icon_vertical_nudge = common.round(1 * SCALE)
 local separator_inset = 10
+-- Maximum label cache entries before a full eviction. Prevents unbounded
+-- growth when scrolling through very large project trees.
+local LABEL_CACHE_MAX = 3000
 
 
 local function replace_alpha(color, alpha)
@@ -101,6 +104,7 @@ function TreeView:new()
   self.range_cache = { start_row = 0, end_row = 0, items = {} }
   self.text_width_cache = {}
   self.label_cache = {}
+  self.label_cache_count = 0
   self.item_font_height = 0
   self.icon_font_height = 0
 end
@@ -149,6 +153,11 @@ function TreeView:sync_model()
     self.project_roots = {}
     for _, project in ipairs(core.projects) do
       self.project_roots[project.path] = project
+      -- On Windows project.path uses backslashes; the Rust layer normalises to
+      -- forward slashes for project_root, so store both forms for fast lookup.
+      if PATHSEP == '\\' then
+        self.project_roots[project.path:gsub('\\', '/')] = project
+      end
     end
     self.model_opts = tree_model_opts(self)
     native_tree_model.sync_roots(self.model_roots, self.model_opts)
@@ -332,8 +341,14 @@ function TreeView:get_label_cache(path, text, avail_width)
       width = full_width,
     },
   }
+  if self.label_cache_count >= LABEL_CACHE_MAX then
+    self.label_cache = {}
+    self.text_width_cache = {}
+    self.label_cache_count = 0
+  end
   self.label_cache[path] = cached
   self.text_width_cache[path] = cached.width_cache
+  self.label_cache_count = self.label_cache_count + 1
   return cached
 end
 
@@ -460,6 +475,7 @@ function TreeView:on_scale_change()
   self.icon_font_height = style.icon_font:get_height()
   self.text_width_cache = {}
   self.label_cache = {}
+  self.label_cache_count = 0
 end
 
 

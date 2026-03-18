@@ -646,6 +646,9 @@ end
 Doc.on_close = function(self, ...)
   if symbol_index and cache[self] and cache[self].doc_id then
     symbol_index.remove_doc(cache[self].doc_id)
+    if symbol_index.shrink then
+      symbol_index.shrink()
+    end
   end
   return old_on_close(self, ...)
 end
