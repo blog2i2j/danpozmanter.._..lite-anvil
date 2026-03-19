@@ -9,6 +9,7 @@ local function keymap_macos(keymap)
     ["cmd+shift+r"] = "core:open-recent-file",
     ["cmd+option+shift+r"] = "core:open-recent-folder",
     ["cmd+n"] = "core:new-doc",
+    ["cmd+shift+n"] = "core:new-window",
     ["cmd+shift+c"] = "core:change-project-folder",
     ["cmd+option+o"] = "core:open-project-folder",
     ["cmd+option+w"] = "core:close-project-folder",

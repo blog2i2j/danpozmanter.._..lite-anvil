@@ -325,6 +325,10 @@ command.add(nil, {
     core.root_view:open_doc(core.open_doc())
   end,
 
+  ["core:new-window"] = function()
+    system.exec(string.format("%q", EXEFILE))
+  end,
+
   ["core:new-named-doc"] = function()
     core.command_view:enter("File name", {
       submit = function(text)

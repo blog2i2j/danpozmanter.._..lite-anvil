@@ -1,5 +1,7 @@
 use mlua::prelude::*;
 
+type SelectionRange = (usize, usize, usize, usize, usize);
+
 fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
     let require: LuaFunction = lua.globals().get("require")?;
     require.call(name)
@@ -31,7 +33,7 @@ fn selection_ranges(
     doc: &LuaTable,
     sort: bool,
     reverse: bool,
-) -> LuaResult<Vec<(usize, usize, usize, usize, usize)>> {
+) -> LuaResult<Vec<SelectionRange>> {
     let selections = doc_selections(doc)?;
     let mut out = Vec::with_capacity(selections.len() / 4);
     for (n, chunk) in selections.chunks_exact(4).enumerate() {
@@ -52,7 +54,7 @@ fn selection_ranges(
 fn multiline_selection_ranges(
     doc: &LuaTable,
     sort: bool,
-) -> LuaResult<Vec<(usize, usize, usize, usize, usize)>> {
+) -> LuaResult<Vec<SelectionRange>> {
     let lines: LuaTable = doc.get("lines")?;
     let mut out = Vec::new();
     for (idx, line1, col1, mut line2, mut col2) in selection_ranges(doc, sort, false)? {
@@ -577,21 +579,11 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         "doc:select-none",
         lua.create_function(|_, dv: LuaTable| {
             let doc: LuaTable = dv.get("doc")?;
-            let (mut l1, mut c1, _, _, _): (
-                Option<usize>,
-                Option<usize>,
-                Option<usize>,
-                Option<usize>,
-                Option<bool>,
-            ) = doc.call_method("get_selection_idx", doc.get::<usize>("last_selection")?)?;
+            type Sel = (Option<usize>, Option<usize>, Option<usize>, Option<usize>, Option<bool>);
+            let (mut l1, mut c1, _, _, _): Sel =
+                doc.call_method("get_selection_idx", doc.get::<usize>("last_selection")?)?;
             if l1.is_none() {
-                let vals: (
-                    Option<usize>,
-                    Option<usize>,
-                    Option<usize>,
-                    Option<usize>,
-                    Option<bool>,
-                ) = doc.call_method("get_selection_idx", 1)?;
+                let vals: Sel = doc.call_method("get_selection_idx", 1)?;
                 l1 = vals.0;
                 c1 = vals.1;
             }
@@ -1130,7 +1122,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                                 }
 
                                 let common = require_table(lua, "core.common")?;
-                                Ok(common.call_function("fuzzy_match", (items, text))?)
+                                common.call_function("fuzzy_match", (items, text))
                             })?,
                         )?;
                         spec
@@ -1226,7 +1218,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                                 )?;
                                 let suggestions: LuaValue =
                                     common.call_function("path_suggest", home_expand)?;
-                                Ok(common.call_function("home_encode_list", suggestions)?)
+                                common.call_function("home_encode_list", suggestions)
                             })?,
                         )?;
                         spec.set(
@@ -1321,10 +1313,10 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                                         common.call_function::<String>("home_encode", abs)?
                                     ),
                                 )?;
-                                Ok(common.call_function(
+                                common.call_function(
                                     "home_encode_list",
                                     common.call_function::<LuaValue>("path_suggest", target)?,
-                                )?)
+                                )
                             })?,
                         )?;
                         spec.set(

@@ -501,8 +501,17 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
     t.set(
         "exec",
         lua.create_function(|_, cmd: String| -> LuaResult<()> {
+            #[cfg(unix)]
             let _ = std::process::Command::new("sh")
                 .arg("-c")
+                .arg(&cmd)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            #[cfg(windows)]
+            let _ = std::process::Command::new("cmd")
+                .arg("/C")
                 .arg(&cmd)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())

@@ -159,6 +159,7 @@ fn split_type(size_x: f64, size_y: f64, tab_height: f64, mouse_x: f64, mouse_y: 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drag_overlay_tab_position(
     view_count: usize,
     tab_offset: usize,

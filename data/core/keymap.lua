@@ -387,6 +387,7 @@ keymap.add_direct {
   ["ctrl+shift+r"] = "core:open-recent-file",
   ["ctrl+alt+shift+r"] = "core:open-recent-folder",
   ["ctrl+n"] = "core:new-doc",
+  ["ctrl+shift+n"] = "core:new-window",
   ["ctrl+shift+c"] = "core:change-project-folder",
   ["ctrl+alt+o"] = "core:open-project-folder",
   ["ctrl+alt+w"] = "core:close-project-folder",

@@ -102,7 +102,7 @@ fn visible_to_actual(visible: usize, line_count: usize, folds: &[(usize, usize)]
 
 fn next_visible_line(line: usize, folds: &[(usize, usize)]) -> usize {
     for (start, end_line) in folds {
-        if line + 1 > *start && line + 1 <= *end_line {
+        if line >= *start && line < *end_line {
             return end_line + 1;
         }
     }

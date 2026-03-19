@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.15.1] - 2026-03-19 — New window command and clippy cleanup.
+
+* Add `core:new-window` command (`Ctrl+Shift+N` / `Cmd+Shift+N`) that opens a new editor instance by spawning the current executable.
+* Make `system.exec` cross-platform: uses `sh -c` on Unix and `cmd /C` on Windows.
+* Fix 23 clippy warnings across `affordance_model`, `commands_doc_native`, `docview_native`, `node_model`, `project_fs`, `project_model`, `terminal_buffer`, `tree_model`, and `workspace_native`.
+
 ## [0.15.0] - 2026-03-19 — Rust-owned editor runtime + fixes.
 
 * Move all core module bodies (`core`, `core.statusview`, `core.rootview`, `core.node`, `core.doc`, `core.docview`, `core.commands.doc`, `plugins.treeview`, `plugins.lsp.server-manager`, `plugins.terminal.view`, `plugins.workspace`) to Rust-owned package preloads. Lua is now the extension and customization layer; the runtime is Rust.

@@ -253,9 +253,9 @@ pub(crate) fn shared_file_list(root: &str, max_size_bytes: Option<u64>) -> Arc<M
                 let config_changed = entry.max_size_bytes != max_size_bytes;
                 let is_dirty = entry.dirty.load(Ordering::Relaxed);
                 let files_arc = Arc::clone(&entry.files);
-                let work = if entry.rebuilding.load(Ordering::Relaxed) {
-                    Work::None
-                } else if !config_changed && !is_dirty {
+                let work = if entry.rebuilding.load(Ordering::Relaxed)
+                    || (!config_changed && !is_dirty)
+                {
                     Work::None
                 } else {
                     if is_dirty && !config_changed {

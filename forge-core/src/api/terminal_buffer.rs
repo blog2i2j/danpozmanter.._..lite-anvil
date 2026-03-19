@@ -319,11 +319,11 @@ impl TerminalBufferInner {
             .min(self.cols.saturating_sub(1));
         let count = count.max(1).min(self.cols.saturating_sub(start));
         for idx in (start..self.cols - count).rev() {
-            row[idx + count] = row[idx].clone();
+            row[idx + count] = row[idx];
         }
         let blank = Cell::blank(self.default_fg);
-        for idx in start..(start + count).min(self.cols) {
-            row[idx] = blank.clone();
+        for cell in &mut row[start..(start + count).min(self.cols)] {
+            *cell = blank;
         }
     }
 
@@ -335,11 +335,11 @@ impl TerminalBufferInner {
             .min(self.cols.saturating_sub(1));
         let count = count.max(1).min(self.cols.saturating_sub(start));
         for idx in start..self.cols - count {
-            row[idx] = row[idx + count].clone();
+            row[idx] = row[idx + count];
         }
         let blank = Cell::blank(self.default_fg);
-        for idx in self.cols.saturating_sub(count)..self.cols {
-            row[idx] = blank.clone();
+        for cell in &mut row[self.cols.saturating_sub(count)..self.cols] {
+            *cell = blank;
         }
     }
 
@@ -352,7 +352,7 @@ impl TerminalBufferInner {
         let end = (start + count.max(1)).min(self.cols);
         let blank = Cell::blank(self.default_fg);
         for cell in &mut row[start..end] {
-            *cell = blank.clone();
+            *cell = blank;
         }
     }
 
@@ -405,8 +405,8 @@ impl TerminalBufferInner {
         }
         let blank = Cell::blank(self.default_fg);
         let row = &mut self.screen[self.cursor_row - 1];
-        for col in start_col..=end_col.min(self.cols) {
-            row[col - 1] = blank.clone();
+        for cell in &mut row[(start_col - 1)..end_col.min(self.cols)] {
+            *cell = blank;
         }
     }
 

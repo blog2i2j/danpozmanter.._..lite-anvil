@@ -913,7 +913,7 @@ fn docview_draw_line_text(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, 
         }
         idx += 2;
     }
-    Ok(docview_get_line_height(lua, &this)?)
+    docview_get_line_height(lua, &this)
 }
 
 fn docview_draw_overwrite_caret(lua: &Lua, (this, x, y, width): (LuaTable, f64, f64, f64)) -> LuaResult<()> {
@@ -1058,7 +1058,7 @@ fn docview_draw_line_gutter(lua: &Lua, (this, line, x, y, width): (LuaTable, usi
         "draw_text",
         (docview_get_font(lua, &this)?, color, line, "right", x + padding_x, y, width, docview_get_line_height(lua, &this)?),
     )?;
-    Ok(docview_get_line_height(lua, &this)?)
+    docview_get_line_height(lua, &this)
 }
 
 fn docview_draw_ime_decoration(

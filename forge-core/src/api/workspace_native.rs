@@ -185,6 +185,8 @@ fn save_node(lua: &Lua, core: &LuaTable, node: &LuaTable) -> LuaResult<Option<Lu
     }
 }
 
+// `lua` is passed through to recursive calls as required by mlua signatures.
+#[allow(clippy::only_used_in_recursion)]
 fn has_no_locked_children(lua: &Lua, node: &LuaTable) -> LuaResult<bool> {
     if node.get::<Option<LuaValue>>("locked")?.is_some() {
         return Ok(false);
