@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.17.1] - 2026-03-22 — macOS Intel build fix.
+
+* Fix macOS Intel CI build: SDL3 cmake issue.
+
 ## [0.17.0] - 2026-03-22 — Some plugins into Rust + fixes.
 
 * Translate all embedded Lua plugin bootstraps to pure Rust via mlua APIs. Autorestart, quote, terminal, findfile, lineguide, autoreload, folding, drawwhitespace, toolbarview, git commands and UI, autocomplete, and all three LSP modules (`plugins.lsp`, `plugins.lsp.server-manager`, `plugins.lsp.client`) are now registered as Rust closures; no Lua string is interpreted at runtime for any bundled plugin.
