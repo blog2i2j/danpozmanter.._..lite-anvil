@@ -54,17 +54,6 @@ local function apply_native_snapshot(self, snapshot)
   self.crlf = snapshot.crlf
 end
 
-local function content_signature(lines)
-  local hash = 2166136261
-  for _, line in ipairs(lines or {}) do
-    for i = 1, #line do
-      hash = ((hash ~ line:byte(i)) * 16777619) % 4294967296
-    end
-    hash = ((hash ~ 10) * 16777619) % 4294967296
-  end
-  return hash
-end
-
 
 function Doc:new(filename, abs_filename, new_file, options)
   options = options or {}
@@ -79,6 +68,7 @@ function Doc:new(filename, abs_filename, new_file, options)
     self:set_filename(filename, abs_filename)
     if not new_file and not options.lazy_restore then
       self:load(abs_filename)
+      self:clean()
     elseif not new_file and options.lazy_restore then
       self.deferred_load = abs_filename
     end
@@ -111,15 +101,14 @@ function Doc:reset()
   self.last_selection = 1
   self.undo_stack = { idx = 1 }
   self.redo_stack = { idx = 1 }
-  self.clean_change_id = 1
-  self.clean_signature = content_signature(self.lines)
-  self._signature_cache = { change_id = 1, signature = self.clean_signature }
   self.highlighter = Highlighter(self)
   self.overwrite = false
   self._read_only_warned = false
   if self.buffer_id then
     apply_native_snapshot(self, doc_native.buffer_reset(self.buffer_id))
   end
+  self.clean_change_id = self:get_change_id()
+  self.clean_signature = doc_native.buffer_content_signature(self.buffer_id)
   self:reset_syntax()
 end
 
@@ -219,29 +208,23 @@ function Doc:is_dirty()
   if self.clean_change_id == change_id then
     return false
   end
-  return self.clean_signature ~= self:get_content_signature(change_id)
+  if not self.buffer_id or not self.clean_signature then
+    return true
+  end
+  local current_sig = doc_native.buffer_content_signature(self.buffer_id)
+  return self.clean_signature ~= current_sig
 end
 
 function Doc:clean()
   self.clean_change_id = self:get_change_id()
-  self.clean_signature = self:get_content_signature(self.clean_change_id)
+  self.clean_signature = doc_native.buffer_content_signature(self.buffer_id)
   if not (self.indent_info and self.indent_info.confirmed) then
     doc_native.update_indent_info(self)
   end
 end
 
 function Doc:get_content_signature(change_id)
-  change_id = change_id or self:get_change_id()
-  local cached = self._signature_cache
-  if cached and cached.change_id == change_id then
-    return cached.signature
-  end
-  local signature = content_signature(self.lines)
-  self._signature_cache = {
-    change_id = change_id,
-    signature = signature,
-  }
-  return signature
+  return doc_native.buffer_content_signature(self.buffer_id)
 end
 
 function Doc:get_indent_info()
@@ -386,6 +369,9 @@ end
 -- If idx_reverse is true, it'll reverse iterate. If nil, or false, regular iterate.
 -- If a number, runs for exactly that iteration.
 function Doc:get_selections(sort_intra, idx_reverse)
+  if not self.selections or #self.selections == 0 then
+    self.selections = { 1, 1, 1, 1 }
+  end
   return selection_iterator, { self.selections, sort_intra, idx_reverse },
       idx_reverse == true and ((#self.selections / 4) + 1) or ((idx_reverse or -1) + 1)
 end

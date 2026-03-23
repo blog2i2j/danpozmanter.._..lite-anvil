@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.18.1] - 2026-03-23 — Dirty-state tracking behavior fix.
+* Move content signature (FNV-1a hash) to native Rust in `BufferState`.
+* Fix stale signature cache after `load_file_into_state`.
+* Fix `Doc:new` not calling `clean()` after non-lazy `load()`, leaving `clean_signature` stuck at the empty-buffer hash.
+
 ## [0.18.0] - 2026-03-23 — Core runtime fully native Rust.
 * Converted all 38 `data/core/*.lua` files and the `core` orchestrator to pure Rust via mlua.
 * Some key fixes including around Lua/C/Rust boundaries, yielding, and closures.

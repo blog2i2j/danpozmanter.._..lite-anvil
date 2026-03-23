@@ -22,6 +22,8 @@ struct BufferState {
     redo: Vec<Vec<u8>>,
     change_id: i64,
     crlf: bool,
+    /// Cached content signature and the change_id it was computed at.
+    sig_cache: (i64, u32),
 }
 
 static BUFFERS: Lazy<Mutex<HashMap<u64, BufferState>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -35,14 +37,32 @@ fn next_buffer_id() -> u64 {
 }
 
 fn default_buffer_state() -> BufferState {
+    let lines = vec!["\n".to_string()];
+    let sig = content_signature(&lines);
     BufferState {
-        lines: vec!["\n".to_string()],
+        lines,
         selections: vec![1, 1, 1, 1],
         undo: Vec::new(),
         redo: Vec::new(),
         change_id: 1,
         crlf: false,
+        sig_cache: (1, sig),
     }
+}
+
+/// FNV-1a hash of all line contents. Matches the Lua `content_signature`.
+fn content_signature(lines: &[String]) -> u32 {
+    let mut hash: u32 = 2_166_136_261;
+    for line in lines {
+        for &b in line.as_bytes() {
+            hash ^= b as u32;
+            hash = hash.wrapping_mul(16_777_619);
+        }
+        // Extra newline separator between lines — matches the Lua implementation.
+        hash ^= 10;
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash
 }
 
 fn get_lines(lines: LuaTable) -> LuaResult<Vec<String>> {
@@ -917,6 +937,8 @@ fn load_file_into_state(state: &mut BufferState, filename: &str) -> LuaResult<()
     state.selections.shrink_to_fit();
     reset_history(state);
     state.change_id = 1;
+    // Invalidate signature cache — content changed but change_id was reset.
+    state.sig_cache = (0, 0);
     Ok(())
 }
 
@@ -1163,6 +1185,23 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         "buffer_get_change_id",
         lua.create_function(|_, buffer_id: u64| {
             with_buffer_mut(buffer_id, |state| Ok(state.change_id))
+        })?,
+    )?;
+
+    // Returns the content signature for the buffer, using a cached value when
+    // the change_id hasn't changed since the last computation.
+    module.set(
+        "buffer_content_signature",
+        lua.create_function(|_, buffer_id: u64| {
+            with_buffer_mut(buffer_id, |state| {
+                let (cached_id, cached_sig) = state.sig_cache;
+                if cached_id == state.change_id {
+                    return Ok(cached_sig);
+                }
+                let sig = content_signature(&state.lines);
+                state.sig_cache = (state.change_id, sig);
+                Ok(sig)
+            })
         })?,
     )?;
 
@@ -1420,5 +1459,146 @@ mod tests {
 
         assert_eq!(state.lines, vec!["abcfgh\n".to_string()]);
         assert_eq!(state.selections, vec![1, 6, 1, 6]);
+    }
+
+    #[test]
+    fn content_signature_is_deterministic() {
+        let lines = vec!["hello\n".to_string(), "world\n".to_string()];
+        let sig1 = content_signature(&lines);
+        let sig2 = content_signature(&lines);
+        assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn content_signature_differs_for_different_content() {
+        let a = vec!["hello\n".to_string()];
+        let b = vec!["world\n".to_string()];
+        assert_ne!(content_signature(&a), content_signature(&b));
+    }
+
+    #[test]
+    fn content_signature_matches_after_roundtrip_edit() {
+        let lines = vec!["ab[cd\n".to_string()];
+        let original_sig = content_signature(&lines);
+
+        // Simulate: delete '[' at position 3 -> "abcd\n"
+        let edited = vec!["abcd\n".to_string()];
+        assert_ne!(content_signature(&edited), original_sig);
+
+        // Simulate: reinsert '[' at position 3 -> "ab[cd\n"
+        let restored = vec!["ab[cd\n".to_string()];
+        assert_eq!(content_signature(&restored), original_sig);
+    }
+
+    #[test]
+    fn dirty_clears_via_full_api_after_delete_retype() {
+        // Simulates: open file with "hello.\n", save, delete '.', type '.'
+        let mut state = default_buffer_state();
+        // "Load" file
+        state.lines = vec!["hello.\n".to_string()];
+        state.change_id = 1;
+        state.sig_cache = (0, 0); // stale
+
+        // "clean()" after load - captures the saved signature
+        let clean_sig = {
+            let sig = content_signature(&state.lines);
+            state.sig_cache = (state.change_id, sig);
+            sig
+        };
+        let clean_change_id = state.change_id;
+        assert_eq!(clean_change_id, 1);
+
+        // "save" doesn't change buffer, just captures clean state again
+        let save_sig = {
+            let (cached_id, cached_sig) = state.sig_cache;
+            if cached_id == state.change_id { cached_sig }
+            else { content_signature(&state.lines) }
+        };
+        assert_eq!(save_sig, clean_sig);
+
+        // User deletes '.' via backspace: remove(1, 6, 1, 7)
+        apply_remove_to_buffer(&mut state, 1, 6, 1, 7);
+        assert_eq!(state.change_id, 2);
+        assert_eq!(state.lines, vec!["hello\n".to_string()]);
+
+        // is_dirty check: change_id != clean_change_id, check sigs
+        let current_sig = content_signature(&state.lines);
+        assert_ne!(current_sig, clean_sig); // content differs -> dirty
+
+        // User types '.' via insert(1, 6, ".")
+        apply_insert_to_buffer(&mut state, 1, 6, ".");
+        assert_eq!(state.change_id, 3);
+        assert_eq!(state.lines, vec!["hello.\n".to_string()]);
+
+        // is_dirty check: change_id != clean_change_id, check sigs
+        let current_sig = content_signature(&state.lines);
+        assert_eq!(current_sig, clean_sig); // content matches -> NOT dirty!
+    }
+
+    #[test]
+    fn dirty_clears_after_delete_then_retype() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["hello.\n".to_string()];
+        state.change_id = 1;
+        let saved_sig = content_signature(&state.lines);
+        state.sig_cache = (1, saved_sig);
+        let clean_change_id = 1;
+
+        // Delete the '.' at position 6 (line=1, col=6 removes char at index 5)
+        apply_remove_to_buffer(&mut state, 1, 6, 1, 7);
+        // change_id is now 2
+        assert_eq!(state.lines, vec!["hello\n".to_string()]);
+        assert_ne!(state.change_id, clean_change_id);
+        assert_ne!(content_signature(&state.lines), saved_sig);
+
+        // Type '.' back at position 6
+        apply_insert_to_buffer(&mut state, 1, 6, ".");
+        // change_id is now 3
+        assert_eq!(state.lines, vec!["hello.\n".to_string()]);
+        assert_ne!(state.change_id, clean_change_id);
+        // Content should match the saved state
+        assert_eq!(content_signature(&state.lines), saved_sig);
+    }
+
+    #[test]
+    fn sig_cache_invalidated_after_load() {
+        // Regression: load_file_into_state resets change_id to 1, but the
+        // default buffer also has change_id=1 with a different sig_cache.
+        let mut state = default_buffer_state();
+        let default_sig = content_signature(&state.lines);
+        assert_eq!(state.sig_cache, (1, default_sig));
+
+        // Simulate load
+        state.lines = vec!["different content\n".to_string()];
+        state.change_id = 1;
+        state.sig_cache = (0, 0); // Must invalidate!
+
+        let (cached_id, _) = state.sig_cache;
+        assert_ne!(cached_id, state.change_id, "Cache must be invalidated after load");
+
+        let loaded_sig = content_signature(&state.lines);
+        assert_ne!(loaded_sig, default_sig, "Loaded content sig must differ from default");
+    }
+
+    #[test]
+    fn sig_cache_invalidates_on_change_id() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["test\n".to_string()];
+        state.change_id = 5;
+        state.sig_cache = (0, 0); // stale cache
+
+        let sig = {
+            let (cached_id, cached_sig) = state.sig_cache;
+            if cached_id == state.change_id {
+                cached_sig
+            } else {
+                let sig = content_signature(&state.lines);
+                state.sig_cache = (state.change_id, sig);
+                sig
+            }
+        };
+
+        assert_eq!(state.sig_cache, (5, sig));
+        assert_ne!(sig, 0);
     }
 }
