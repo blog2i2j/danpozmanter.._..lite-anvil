@@ -36,7 +36,7 @@ jobs:
             libdrm-dev libgbm-dev \
             libegl1-mesa-dev libgles2-mesa-dev \
             libwayland-dev libxkbcommon-dev wayland-protocols
-          git clone --depth 1 https://github.com/libsdl-org/SDL.git
+          git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
           cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -G Ninja
           cmake --build SDL/build
           sudo cmake --install SDL/build
@@ -144,7 +144,7 @@ jobs:
           PREFIX=/tmp/deps-x86
           COMMON="-DCMAKE_BUILD_TYPE=Release -G Ninja -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"
 
-          git clone --depth 1 https://github.com/libsdl-org/SDL.git
+          git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
           cmake -S SDL -B SDL/build $COMMON \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON \
             -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF \

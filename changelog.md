@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.17.2] - 2026-03-22 — CI cleanup + release script.
+
+* Fix macOS Intel CI build - attempt 2.
+* Add `release.sh` helper script.
+
 ## [0.17.1] - 2026-03-22 — macOS Intel build fix.
 
 * Fix macOS Intel CI build: SDL3 cmake issue.
