@@ -709,15 +709,19 @@ fn patch_methods(
         let old_key = Arc::new(lua.create_registry_value(old)?);
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        doc_class.set("remove", lua.create_function(move |lua, (this, line1, col1, line2, col2): (LuaTable, i64, i64, i64, i64)| {
+        doc_class.set("remove", lua.create_function(move |lua, (this, line1, col1, line2, col2): (LuaTable, f64, f64, f64, f64)| {
             let old: LuaFunction = lua.registry_value(&old_key)?;
             old.call::<()>((this, line1, col1, line2, col2))?;
             let state: LuaTable = lua.registry_value(&sk)?;
             let ac: LuaTable = lua.registry_value(&ak)?;
             let triggered: bool = state.get("triggered_manually")?;
-            if triggered && line1 == line2 {
-                let last_col: i64 = state.get("last_col").unwrap_or(col1);
-                if last_col >= col1 {
+            // Use i64 casts for comparison only; math.huge passed by commandview saturates to i64::MAX
+            let iline1 = line1 as i64;
+            let icol1 = col1 as i64;
+            let iline2 = line2 as i64;
+            if triggered && iline1 == iline2 {
+                let last_col: i64 = state.get("last_col").unwrap_or(icol1);
+                if last_col >= icol1 {
                     reset_suggestions(lua, &state, &ac)?;
                 } else {
                     show_autocomplete(lua, &state, &ac)?;

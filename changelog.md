@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.17.3] - 2026-03-22 — Command palette, open, and script fixes.
+* Fix command palette input showing only the very last character of a path (e.g. "e" from "forge-core/"). `docview_get_line_screen_position` used `docview_get_gutter_width` (Rust, line-number-based, ~28 px) to position text on screen, while `scroll_to_make_visible` and the clip rect both used `gutter_width_from_method` (virtual Lua dispatch, returns CommandView's label width, ~98 px). The 70 px discrepancy caused `scroll_to_make_visible` to over-scroll by exactly that amount, leaving only the last character in view. Changed `docview_get_line_screen_position` to use `gutter_width_from_method` so all three subsystems agree on where text starts — for regular DocView the result is identical (both paths call the same Rust function), and for CommandView the label width is used consistently.
+* Fix path truncation and invisible-backspace in the Open File (and all other) command palette inputs. `CommandView:scroll_to_make_visible` was a no-op and `get_h_scrollable_size` returned 0, so the view never scrolled horizontally and `View:clamp_scroll_position` immediately zeroed any scroll.x that was set. Now `scroll_to_make_visible` delegates to DocView for horizontal tracking (resetting y=0 to stay single-line), `clamp_scroll_position` is overridden to preserve x while locking y=0, and the `get_h_scrollable_size` override is removed so the inherited `math.huge` allows the scroll position to be maintained.
+* Fix `attempt to index a nil value (local 'path_stat')` crash when submitting a filename in the Open File command palette. `system.get_file_info` was returning a single `nil` on error, but the Lua validate callback expects the canonical two-return `nil, error_string` form. Changed the Rust implementation to return `nil, error_message` on failure.
+* Fix `bad argument #4: error converting Lua number to i64 (out of range)` crash when opening a file through the command palette. The autocomplete `Doc:remove` wrapper used `i64` for coordinates, which cannot represent `math.huge` (Lua infinity) passed by `commandview.set_text` to clear the input doc. Changed coordinate types to `f64` so infinity passes through to the original sanitizing function.
+
 ## [0.17.2] - 2026-03-22 — CI cleanup + release script.
 
 * Fix macOS Intel CI build - attempt 2.

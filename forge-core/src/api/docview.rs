@@ -167,7 +167,7 @@ fn docview_get_line_screen_position(
 ) -> LuaResult<LuaMultiValue> {
     let (mut x, mut y): (f64, f64) = this.call_method("get_content_offset", ())?;
     let lh = docview_get_line_height(lua, this)?;
-    let (gw, _) = docview_get_gutter_width(lua, this)?;
+    let (gw, _) = gutter_width_from_method(this)?;
     let mut out = LuaMultiValue::new();
 
     if super::linewrap::is_active(this)? {

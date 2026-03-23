@@ -524,7 +524,7 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
 
     t.set(
         "get_file_info",
-        lua.create_function(|lua, path: String| -> LuaResult<LuaValue> {
+        lua.create_function(|lua, path: String| -> LuaResult<LuaMultiValue> {
             match std::fs::metadata(&path) {
                 Ok(meta) => {
                     let info = lua.create_table()?;
@@ -537,9 +537,12 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
                         .map(|d| d.as_secs_f64())
                         .unwrap_or(0.0);
                     info.set("modified", modified)?;
-                    Ok(LuaValue::Table(info))
+                    Ok(LuaMultiValue::from_vec(vec![LuaValue::Table(info)]))
                 }
-                Err(_) => Ok(LuaValue::Nil),
+                Err(e) => Ok(LuaMultiValue::from_vec(vec![
+                    LuaValue::Nil,
+                    LuaValue::String(lua.create_string(e.to_string())?),
+                ])),
             }
         })?,
     )?;

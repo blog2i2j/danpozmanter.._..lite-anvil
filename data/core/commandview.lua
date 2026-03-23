@@ -102,13 +102,18 @@ function CommandView:get_scrollable_size()
   return 0
 end
 
-function CommandView:get_h_scrollable_size()
-  return 0
+
+function CommandView:scroll_to_make_visible(line, col)
+  -- Delegate to DocView for horizontal cursor tracking; suppress vertical scroll
+  -- (the input is single-line so vertical movement is meaningless).
+  CommandView.super.scroll_to_make_visible(self, line, col)
+  self.scroll.to.y = 0
 end
 
-
-function CommandView:scroll_to_make_visible()
-  -- no-op function to disable this functionality
+function CommandView:clamp_scroll_position()
+  -- Keep vertical locked at 0. Skip clamping x so the horizontal scroll set by
+  -- scroll_to_make_visible is not immediately wiped out by the base-class clamp.
+  self.scroll.to.y = 0
 end
 
 
