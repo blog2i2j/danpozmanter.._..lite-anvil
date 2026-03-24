@@ -1,5 +1,7 @@
 # Change Log
 
+## [0.19.1] - 2026-03-23 — Fix Mac OS Intel build regression.
+
 ## [0.19.0] - 2026-03-23 — All embedded Lua eliminated from Rust source; all plugins native, fixes++.
 * Converted all remaining embedded Lua to pure Rust mlua closures. Modules converted: doc, syntax, highlighter, statusview, node, rootview, git_view, treeview, toolbarview, terminal_view, tokenizer_shim.
 * Converted all 13 bundled plugin .lua files (3,550 lines) to pure Rust: projectsearch, projectreplace, markdown_preview, remotessh, scale, trimwhitespace, theme_toggle, macro, reflow, tabularize, language_md. Delete data/plugins/ .lua files.

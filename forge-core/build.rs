@@ -5,6 +5,12 @@ fn main() {
     println!("cargo::rerun-if-env-changed=VCPKG_ROOT");
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    // macOS: FreeType's HVF (Hardware Variable Fonts) support requires CoreText.
+    if target_os == "macos" {
+        println!("cargo::rustc-link-lib=framework=CoreText");
+    }
+
     if target_os != "windows" || target_env != "msvc" {
         return;
     }
