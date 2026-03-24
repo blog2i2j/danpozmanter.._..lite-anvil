@@ -1354,7 +1354,6 @@ fn register_init_fn(
                 }
             }
 
-            // Open files from command line.
             for file_val in files_list.sequence_values::<String>() {
                 let filename = file_val?;
                 let root_view2: LuaTable = core.get("root_view")?;
@@ -1364,11 +1363,26 @@ fn register_init_fn(
                 rv_open.call::<()>((root_view2, doc))?;
             }
 
-            // Restore session if no files given.
             if files_list.raw_len() == 0 {
                 let add_thread: LuaFunction = core.get("add_thread")?;
                 let restore_fn = lua.create_function(|lua, ()| {
                     let core = get_core(lua)?;
+
+                    // Read active file directly from disk BEFORE opening files.
+                    let saved_active: Option<String> = {
+                        let userdir: String = lua.globals().get("USERDIR")?;
+                        let path = std::path::PathBuf::from(&userdir)
+                            .join("storage").join("session").join("active_file");
+                        std::fs::read_to_string(&path).ok().and_then(|s| {
+                            let trimmed = s.trim();
+                            if trimmed.starts_with('"') && trimmed.ends_with('"') {
+                                Some(trimmed[1..trimmed.len()-1].to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    };
+
                     let root_view: LuaTable = core.get("root_view")?;
                     let get_primary: LuaFunction = root_view.get("get_primary_node")?;
                     let primary: LuaTable = get_primary.call(root_view.clone())?;
@@ -1485,24 +1499,20 @@ fn register_init_fn(
                         }
                     }
 
-                    let storage = get_module(lua, "core.storage")?;
-                    let load_s: LuaFunction = storage.get("load")?;
-                    let af: LuaValue = load_s.call(("session", "active_file"))?;
-                    if let LuaValue::String(af_s) = af {
-                        let af_str = af_s.to_str()?.to_string();
-                        let root_view: LuaTable = core.get("root_view")?;
+                    if let Some(af_str) = saved_active {
+                        // Get views directly from primary node (preserves tab order).
+                        let primary: LuaTable = get_primary.call(root_view.clone())?;
                         let root_node: LuaTable = root_view.get("root_node")?;
-                        let get_children: LuaFunction = root_node.get("get_children")?;
-                        let children: LuaTable = get_children.call(root_node)?;
-                        for view in children.sequence_values::<LuaTable>() {
+                        let views: LuaTable = primary.get("views")?;
+                        for view in views.sequence_values::<LuaTable>() {
                             let v = view?;
                             if let Some(doc) = v.get::<Option<LuaTable>>("doc")? {
-                                let abs: LuaValue = doc.get("abs_filename")?;
-                                if let LuaValue::String(ref s) = abs {
+                                if let LuaValue::String(ref s) = doc.get::<LuaValue>("abs_filename")? {
                                     if s.to_str()? == af_str.as_str() {
-                                        let set_active: LuaFunction =
-                                            core.get("set_active_view")?;
-                                        set_active.call::<()>(v)?;
+                                        let get_node: LuaFunction = root_node.get("get_node_for_view")?;
+                                        if let LuaValue::Table(node) = get_node.call::<LuaValue>((root_node.clone(), v.clone()))? {
+                                            node.call_method::<()>("set_active_view", v)?;
+                                        }
                                         break;
                                     }
                                 }
@@ -3430,18 +3440,8 @@ fn register_view_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                 }
                 core.set("last_active_view", active_view)?;
                 core.set("active_view", view.clone())?;
-
-                // Persist active file to storage immediately.
-                let doc_val2: LuaValue = view.get("doc")?;
-                if let LuaValue::Table(ref doc) = doc_val2 {
-                    let abs: LuaValue = doc.get("abs_filename")?;
-                    if let LuaValue::String(ref s) = abs {
-                        let storage = get_module(lua, "core.storage")?;
-                        let save_s: LuaFunction = storage.get("save")?;
-                        let _ = save_s.call::<()>(("session", "active_file", s.to_str()?.to_string()));
-                    }
-                }
             }
+
             Ok(())
         })?,
     )?;
@@ -4446,7 +4446,7 @@ fn register_misc(
         lua.create_function(|lua, (quit_fn, force): (LuaFunction, Option<bool>)| {
             let core = get_core(lua)?;
             if force.unwrap_or(false) {
-                // Save session BEFORE removing projects — views are still alive.
+                core.set("_exiting", true)?;
                 let save: LuaFunction = core.get("_save_session")?;
                 save.call::<()>(())?;
                 let delete_temp: LuaFunction = core.get("delete_temp_files")?;

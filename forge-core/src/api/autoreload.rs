@@ -349,7 +349,22 @@ fn patch_node_set_active_view(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaR
             let old: LuaFunction = lua.registry_value(&old_key)?;
             old.call::<()>((this, view.clone()))?;
             let doc: Option<LuaTable> = view.get("doc")?;
-            doc_changes_visibility(lua, doc, true, &state, sk.clone())?;
+            doc_changes_visibility(lua, doc.clone(), true, &state, sk.clone())?;
+            // Persist active file (skip during exit teardown).
+            let core_t = require_table(lua, "core")?;
+            let quitting = matches!(core_t.get::<LuaValue>("_exiting")?, LuaValue::Boolean(true));
+            if !quitting {
+                if let Some(ref d) = doc {
+                    if let LuaValue::String(s) = d.get::<LuaValue>("abs_filename")? {
+                        let path_str = s.to_str()?.to_string();
+                        let userdir: String = lua.globals().get("USERDIR")?;
+                        let dir = std::path::PathBuf::from(&userdir)
+                            .join("storage").join("session");
+                        let _ = std::fs::create_dir_all(&dir);
+                        let _ = std::fs::write(dir.join("active_file"), format!("\"{}\"", path_str));
+                    }
+                }
+            }
             Ok(())
         })?,
     )?;

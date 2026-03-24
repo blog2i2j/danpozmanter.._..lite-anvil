@@ -138,28 +138,19 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             let load_fn: LuaFunction = storage.get("load")?;
             let saved: LuaValue = load_fn.call(("linewrapping", "enabled"))?;
             if matches!(saved, LuaValue::Boolean(true)) {
-                let core = require_table(lua, "core")?;
-                let add_thread: LuaFunction = core.get("add_thread")?;
-                let apply = lua.create_function(|lua, ()| {
-                    let core = require_table(lua, "core")?;
-                    if let LuaValue::Table(rv) = core.get::<LuaValue>("root_view")? {
-                        if let LuaValue::Table(rn) = rv.get::<LuaValue>("root_node")? {
-                            if let LuaValue::Function(gc) = rn.get::<LuaValue>("get_children")? {
-                                if let LuaValue::Table(ch) = gc.call::<LuaValue>(rn)? {
-                                    for view in ch.sequence_values::<LuaTable>() {
-                                        let v = view?;
-                                        if v.get::<Option<LuaTable>>("doc")?.is_some() {
-                                            v.set("wrapping_enabled", true)?;
-                                            let _ = super::linewrap::update_docview_breaks(lua, &v);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Ok(())
-                })?;
-                add_thread.call::<()>(apply)?;
+                let docview: LuaTable = require_table(lua, "core.docview")?;
+                let old_new: LuaValue = docview.get("new")?;
+                if let LuaValue::Function(orig) = old_new {
+                    let orig_key = std::sync::Arc::new(lua.create_registry_value(orig)?);
+                    docview.set("new", lua.create_function(move |lua, (this, args): (LuaTable, LuaMultiValue)| {
+                        let orig_fn: LuaFunction = lua.registry_value(&orig_key)?;
+                        let mut call_args = vec![LuaValue::Table(this.clone())];
+                        call_args.extend(args);
+                        orig_fn.call::<()>(LuaMultiValue::from_vec(call_args))?;
+                        this.set("wrapping_enabled", true)?;
+                        Ok(())
+                    })?)?;
+                }
             }
 
             Ok(LuaValue::Boolean(true))

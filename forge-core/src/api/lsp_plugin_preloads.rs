@@ -2942,7 +2942,11 @@ fn init_client_module(lua: &Lua) -> LuaResult<LuaValue> {
                             let lq: LuaFunction = core.get("log_quiet")?;
                             for i in 1..=len {
                                 let line: String = stderr.get::<String>(i).unwrap_or_default();
-                                let _ = lq.call::<LuaValue>(format!("LSP {client_name} stderr: {}", line.trim_end()));
+                                let trimmed = line.trim_end();
+                                if trimmed.contains("WARN notify error: No path was found") {
+                                    continue;
+                                }
+                                let _ = lq.call::<LuaValue>(format!("LSP {client_name} stderr: {trimmed}"));
                             }
                         }
                     }
