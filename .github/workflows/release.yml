@@ -152,7 +152,7 @@ jobs:
           cmake --build SDL/build
           cmake --install SDL/build
 
-          git clone --depth 1 https://github.com/freetype/freetype.git
+          git clone --depth 1 --branch VER-2-14-2 https://github.com/freetype/freetype.git
           cmake -S freetype -B freetype/build $COMMON \
             -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BZIP2=ON \
             -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_PNG=ON

@@ -249,10 +249,11 @@ dependencies = [
 
 [[package]]
 name = "forge-core"
-version = "0.19.1"
+version = "0.19.2"
 dependencies = [
  "anyhow",
  "bitflags 2.11.0",
+ "cc",
  "crossbeam-channel",
  "env_logger",
  "fontdue",

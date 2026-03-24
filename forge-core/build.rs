@@ -6,9 +6,15 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
 
-    // macOS: FreeType's HVF (Hardware Variable Fonts) support requires CoreText.
     if target_os == "macos" {
         println!("cargo::rustc-link-lib=framework=CoreText");
+
+        // Some pre-built libfreetype.a archives on macOS enable the HVF
+        // (Hardware Variable Fonts) module but omit the implementation object.
+        // Compile stub symbols so the link succeeds.
+        cc::Build::new()
+            .file("src/freetype_hvf_stubs.c")
+            .compile("freetype_hvf_stubs");
     }
 
     if target_os != "windows" || target_env != "msvc" {
@@ -35,4 +41,3 @@ fn main() {
         println!("cargo::rustc-link-search=native={}", lib_dir.display());
     }
 }
-

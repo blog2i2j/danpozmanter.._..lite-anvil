@@ -1,5 +1,8 @@
 # Change Log
 
+## [0.19.2] - 2026-03-24 — macOS Intel link fix.
+* Fix macOS x86_64 link failure: undefined `HVF_*` symbols from FreeType HEAD (VER-2-14-3, released 2026-03-22). Pin CI FreeType build to VER-2-14-2. Provide C stub fallbacks via `cc` build dep for local builds against newer FreeType.
+
 ## [0.19.1] - 2026-03-23 — Fix Mac OS Intel build regression.
 
 ## [0.19.0] - 2026-03-23 — All embedded Lua eliminated from Rust source; all plugins native, fixes++.
