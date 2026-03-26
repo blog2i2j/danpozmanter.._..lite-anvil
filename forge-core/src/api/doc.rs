@@ -809,9 +809,11 @@ fn apply_insert_to_buffer(state: &mut BufferState, line: usize, col: usize, text
 
     // Check if we can merge with the previous undo entry.
     let can_merge = is_single
-        && state.last_edit.is_some_and(|(t, l, c, was_insert, was_single)| {
-            was_insert && was_single && l == line && c == col && (now - t) < UNDO_MERGE_TIMEOUT
-        })
+        && state
+            .last_edit
+            .is_some_and(|(t, l, c, was_insert, was_single)| {
+                was_insert && was_single && l == line && c == col && (now - t) < UNDO_MERGE_TIMEOUT
+            })
         && !state.undo.is_empty();
 
     let selection_restore = if can_merge && !state.undo.is_empty() {
@@ -822,7 +824,12 @@ fn apply_insert_to_buffer(state: &mut BufferState, line: usize, col: usize, text
         let (line2, col2) = if let Some(e) = prev_edits.first() {
             // The previous removal range started at (e.line1, e.col1) and ended at (e.line2, e.col2).
             // Extend the end by the new character.
-            position_offset(&state.lines, e.line1, e.col1, (col - e.col1 + text.len()) as isize)
+            position_offset(
+                &state.lines,
+                e.line1,
+                e.col1,
+                (col - e.col1 + text.len()) as isize,
+            )
         } else {
             position_offset(&state.lines, line, col, text.len() as isize)
         };
@@ -1009,8 +1016,7 @@ fn save_state_to_file(state: &BufferState, filename: &str, crlf: bool) -> LuaRes
     use std::io::Write;
     let path = std::path::Path::new(filename);
     let tmp = path.with_extension("tmp");
-    let mut f = fs::File::create(&tmp)
-        .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    let mut f = fs::File::create(&tmp).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
     for line in &state.lines {
         if crlf {
             f.write_all(line.replace('\n', "\r\n").as_bytes())
@@ -1019,7 +1025,8 @@ fn save_state_to_file(state: &BufferState, filename: &str, crlf: bool) -> LuaRes
         }
         .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
     }
-    f.sync_all().map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    f.sync_all()
+        .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
     fs::rename(&tmp, path).map_err(|e| LuaError::RuntimeError(e.to_string()))
 }
 
@@ -1387,10 +1394,16 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             const SCORE_THRESHOLD: usize = 2;
             let (detected_type, detected_size, score) =
                 super::affordance_model::detect_indent(&lines, MAX_LINES, default_indent);
-            let indent_type =
-                if score >= SCORE_THRESHOLD { detected_type } else { default_type.as_str() };
-            let indent_size =
-                if score >= SCORE_THRESHOLD { detected_size } else { default_indent };
+            let indent_type = if score >= SCORE_THRESHOLD {
+                detected_type
+            } else {
+                default_type.as_str()
+            };
+            let indent_size = if score >= SCORE_THRESHOLD {
+                detected_size
+            } else {
+                default_indent
+            };
             let info = lua.create_table()?;
             info.set("type", indent_type)?;
             info.set("size", indent_size as i64)?;
@@ -1580,8 +1593,11 @@ mod tests {
         // "save" doesn't change buffer, just captures clean state again
         let save_sig = {
             let (cached_id, cached_sig) = state.sig_cache;
-            if cached_id == state.change_id { cached_sig }
-            else { content_signature(&state.lines) }
+            if cached_id == state.change_id {
+                cached_sig
+            } else {
+                content_signature(&state.lines)
+            }
         };
         assert_eq!(save_sig, clean_sig);
 
@@ -1643,10 +1659,16 @@ mod tests {
         state.sig_cache = (0, 0); // Must invalidate!
 
         let (cached_id, _) = state.sig_cache;
-        assert_ne!(cached_id, state.change_id, "Cache must be invalidated after load");
+        assert_ne!(
+            cached_id, state.change_id,
+            "Cache must be invalidated after load"
+        );
 
         let loaded_sig = content_signature(&state.lines);
-        assert_ne!(loaded_sig, default_sig, "Loaded content sig must differ from default");
+        assert_ne!(
+            loaded_sig, default_sig,
+            "Loaded content sig must differ from default"
+        );
     }
 
     #[test]
@@ -1722,7 +1744,11 @@ mod tests {
         assert_eq!(state.undo.len(), 2, "delete should not merge with insert");
 
         apply_insert_to_buffer(&mut state, 1, 7, "c");
-        assert_eq!(state.undo.len(), 3, "insert after delete should start new group");
+        assert_eq!(
+            state.undo.len(),
+            3,
+            "insert after delete should start new group"
+        );
     }
 
     #[test]
@@ -1757,7 +1783,11 @@ mod tests {
 
         // Insert at col 10 -- far from col 6 where next merge would expect.
         apply_insert_to_buffer(&mut state, 1, 10, "y");
-        assert_eq!(state.undo.len(), 2, "insert at non-adjacent column must not merge");
+        assert_eq!(
+            state.undo.len(),
+            2,
+            "insert at non-adjacent column must not merge"
+        );
 
         assert_eq!(state.lines, vec!["hellxo woyrld\n".to_string()]);
     }
@@ -1807,7 +1837,10 @@ mod tests {
 
         // The cached signature must reflect the loaded content, not the default buffer.
         let default_sig = content_signature(&default_buffer_state().lines);
-        assert_ne!(fresh_sig, default_sig, "loaded sig must differ from default");
+        assert_ne!(
+            fresh_sig, default_sig,
+            "loaded sig must differ from default"
+        );
 
         let _ = std::fs::remove_file(&path);
     }
@@ -1844,13 +1877,21 @@ mod tests {
         if let LuaValue::Integer(n) = &reverse_val {
             // n is 1, idx_i - 1 is 2, so this would stop after one iteration.
             // This confirms the single-selection-at-index behavior.
-            assert_ne!(*n, idx_i - 1, "Integer(1) targets selection index 1 specifically");
+            assert_ne!(
+                *n,
+                idx_i - 1,
+                "Integer(1) targets selection index 1 specifically"
+            );
         }
 
         // But for idx_i == 2 (the selection at index 1), n == idx_i - 1.
         let idx_i: i64 = 2;
         if let LuaValue::Integer(n) = &reverse_val {
-            assert_eq!(*n, idx_i - 1, "Integer(1) matches when iterating selection 1");
+            assert_eq!(
+                *n,
+                idx_i - 1,
+                "Integer(1) matches when iterating selection 1"
+            );
         }
     }
 }

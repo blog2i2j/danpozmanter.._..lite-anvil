@@ -44,7 +44,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
             // show_read_only_message(self)
             let show_read_only_message = lua.create_function(|lua, this: LuaTable| {
-                let warned: bool = this.get::<Option<bool>>("_read_only_warned")?.unwrap_or(false);
+                let warned: bool = this
+                    .get::<Option<bool>>("_read_only_warned")?
+                    .unwrap_or(false);
                 if warned {
                     return Ok(());
                 }
@@ -80,7 +82,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 if !matches!(buf_id, LuaValue::Nil) {
                     let doc_native: LuaTable = require_table(lua, "doc_native")?;
                     let selections: LuaValue = this.get("selections")?;
-                    doc_native.call_function::<()>("buffer_set_selections", (buf_id, selections))?;
+                    doc_native
+                        .call_function::<()>("buffer_set_selections", (buf_id, selections))?;
                 }
                 Ok(())
             })?;
@@ -232,7 +235,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         this.call_method::<()>("clean", ())?;
                         Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(true)]))
                     } else {
-                        let err = result.into_vec().into_iter().nth(1).unwrap_or(LuaValue::Nil);
+                        let err = result
+                            .into_vec()
+                            .into_iter()
+                            .nth(1)
+                            .unwrap_or(LuaValue::Nil);
                         Ok(LuaMultiValue::from_vec(vec![LuaValue::Nil, err]))
                     }
                 })?,
@@ -261,8 +268,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let redo_stack = lua.create_table()?;
                     redo_stack.set("idx", 1)?;
                     this.set("redo_stack", redo_stack)?;
-                    let highlighter_class: LuaTable =
-                        require_table(lua, "core.doc.highlighter")?;
+                    let highlighter_class: LuaTable = require_table(lua, "core.doc.highlighter")?;
                     let hl: LuaTable = highlighter_class.call(this.clone())?;
                     this.set("highlighter", hl)?;
                     this.set("overwrite", false)?;
@@ -292,8 +298,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 "reset_syntax",
                 lua.create_function(|lua, this: LuaTable| {
                     let syntax: LuaTable = require_table(lua, "core.syntax")?;
-                    let plain_text: bool =
-                        this.get::<Option<bool>>("plain_text_mode")?.unwrap_or(false);
+                    let plain_text: bool = this
+                        .get::<Option<bool>>("plain_text_mode")?
+                        .unwrap_or(false);
                     if plain_text {
                         this.set("syntax", syntax.get::<LuaValue>("plain_text_syntax")?)?;
                         let hl: LuaTable = this.get("highlighter")?;
@@ -450,8 +457,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             doc.set("save", {
                 let rok = Arc::clone(&show_ro_key);
                 lua.create_function(
-                    move |lua,
-                          (this, filename, abs_filename): (LuaTable, LuaValue, LuaValue)| {
+                    move |lua, (this, filename, abs_filename): (LuaTable, LuaValue, LuaValue)| {
                         this.call_method::<()>("ensure_loaded", ())?;
                         let read_only: bool =
                             this.get::<Option<bool>>("read_only")?.unwrap_or(false);
@@ -582,41 +588,38 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:get_indent_info()
             doc.set(
                 "get_indent_info",
-                lua.create_function(
-                    |lua, this: LuaTable| -> LuaResult<LuaMultiValue> {
-                        let config: LuaTable = require_table(lua, "core.config")?;
-                        let indent_info: LuaValue = this.get("indent_info")?;
-                        let info = match indent_info {
-                            LuaValue::Table(t) => t,
-                            _ => {
-                                return Ok(LuaMultiValue::from_vec(vec![
-                                    config.get::<LuaValue>("tab_type")?,
-                                    config.get::<LuaValue>("indent_size")?,
-                                    LuaValue::Boolean(false),
-                                ]));
-                            }
-                        };
-                        let itype: LuaValue = info.get("type")?;
-                        let isize_val: LuaValue = info.get("size")?;
-                        let confirmed: bool =
-                            info.get::<Option<bool>>("confirmed")?.unwrap_or(false);
-                        let tab_type = if matches!(itype, LuaValue::Nil) {
-                            config.get("tab_type")?
-                        } else {
-                            itype
-                        };
-                        let indent_size = if matches!(isize_val, LuaValue::Nil) {
-                            config.get("indent_size")?
-                        } else {
-                            isize_val
-                        };
-                        Ok(LuaMultiValue::from_vec(vec![
-                            tab_type,
-                            indent_size,
-                            LuaValue::Boolean(confirmed),
-                        ]))
-                    },
-                )?,
+                lua.create_function(|lua, this: LuaTable| -> LuaResult<LuaMultiValue> {
+                    let config: LuaTable = require_table(lua, "core.config")?;
+                    let indent_info: LuaValue = this.get("indent_info")?;
+                    let info = match indent_info {
+                        LuaValue::Table(t) => t,
+                        _ => {
+                            return Ok(LuaMultiValue::from_vec(vec![
+                                config.get::<LuaValue>("tab_type")?,
+                                config.get::<LuaValue>("indent_size")?,
+                                LuaValue::Boolean(false),
+                            ]));
+                        }
+                    };
+                    let itype: LuaValue = info.get("type")?;
+                    let isize_val: LuaValue = info.get("size")?;
+                    let confirmed: bool = info.get::<Option<bool>>("confirmed")?.unwrap_or(false);
+                    let tab_type = if matches!(itype, LuaValue::Nil) {
+                        config.get("tab_type")?
+                    } else {
+                        itype
+                    };
+                    let indent_size = if matches!(isize_val, LuaValue::Nil) {
+                        config.get("indent_size")?
+                    } else {
+                        isize_val
+                    };
+                    Ok(LuaMultiValue::from_vec(vec![
+                        tab_type,
+                        indent_size,
+                        LuaValue::Boolean(confirmed),
+                    ]))
+                })?,
             )?;
 
             // Doc:get_change_id()
@@ -638,9 +641,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let result: LuaMultiValue =
                             this.call_method("get_selection_idx", (last_sel, sort.clone()))?;
                         let vals: Vec<LuaValue> = result.into_vec();
-                        let line1_nil = vals
-                            .first()
-                            .is_none_or(|v| matches!(v, LuaValue::Nil));
+                        let line1_nil = vals.first().is_none_or(|v| matches!(v, LuaValue::Nil));
                         if line1_nil {
                             return this.call_method("get_selection_idx", (1, sort));
                         }
@@ -722,8 +723,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let l2 = iv.get(3).cloned().unwrap_or(LuaValue::Nil);
                         let c2 = iv.get(4).cloned().unwrap_or(LuaValue::Nil);
                         if l1 != l2 || c1 != c2 {
-                            let text: String =
-                                this.call_method("get_text", (l1, c1, l2, c2))?;
+                            let text: String = this.call_method("get_text", (l1, c1, l2, c2))?;
                             if !text.is_empty() {
                                 count += 1;
                                 result.raw_set(count, text)?;
@@ -921,7 +921,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             _ => {
                                 return Err(LuaError::runtime(
                                     "get_selections did not return iterator",
-                                ))
+                                ));
                             }
                         };
                         let invariant = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
@@ -1018,10 +1018,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             let si1: LuaValue = sels.raw_get(i + 1)?;
                             let sj1: LuaValue = sels.raw_get(j + 1)?;
                             if si == sj && si1 == sj1 {
-                                common.call_function::<()>(
-                                    "splice",
-                                    (sels.clone(), i, 4),
-                                )?;
+                                common.call_function::<()>("splice", (sels.clone(), i, 4))?;
                                 let last: i64 = this.get("last_selection")?;
                                 if last >= (i + 3) / 4 {
                                     this.set("last_selection", last - 1)?;
@@ -1042,8 +1039,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             doc.set(
                 "get_selections",
                 lua.create_function(
-                    |lua,
-                     (this, sort_intra, idx_reverse): (LuaTable, LuaValue, LuaValue)| {
+                    |lua, (this, sort_intra, idx_reverse): (LuaTable, LuaValue, LuaValue)| {
                         let sels: LuaTable = this.get("selections")?;
                         let sels_len = sels.raw_len() as i64;
                         if sels_len == 0 {
@@ -1172,10 +1168,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         }
                         let current_line: String = lines.raw_get(line_i)?;
                         let common: LuaTable = require_table(lua, "core.common")?;
-                        let clamped: i64 = common.call_function(
-                            "clamp",
-                            (col_i, 1, current_line.len() as i64),
-                        )?;
+                        let clamped: i64 =
+                            common.call_function("clamp", (col_i, 1, current_line.len() as i64))?;
                         Ok(LuaMultiValue::from_vec(vec![
                             LuaValue::Integer(line_i),
                             LuaValue::Integer(clamped),
@@ -1189,29 +1183,20 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 "position_offset",
                 lua.create_function(
                     |lua,
-                     (this, line, col, args): (
-                        LuaTable,
-                        LuaValue,
-                        LuaValue,
-                        LuaMultiValue,
-                    )|
+                     (this, line, col, args): (LuaTable, LuaValue, LuaValue, LuaMultiValue)|
                      -> LuaResult<LuaMultiValue> {
                         this.call_method::<()>("ensure_loaded", ())?;
                         let args_vec: Vec<LuaValue> = args.into_vec();
                         let first_arg = args_vec.first().cloned().unwrap_or(LuaValue::Nil);
                         let num_args = args_vec.len();
-                        if !matches!(
-                            first_arg,
-                            LuaValue::Integer(_) | LuaValue::Number(_)
-                        ) {
+                        if !matches!(first_arg, LuaValue::Integer(_) | LuaValue::Number(_)) {
                             let san: LuaMultiValue =
                                 this.call_method("sanitize_position", (line, col))?;
                             let sv: Vec<LuaValue> = san.into_vec();
                             let sline = sv.first().cloned().unwrap_or(LuaValue::Integer(1));
                             let scol = sv.get(1).cloned().unwrap_or(LuaValue::Integer(1));
                             if let LuaValue::Function(f) = &first_arg {
-                                let mut call_args =
-                                    vec![LuaValue::Table(this), sline, scol];
+                                let mut call_args = vec![LuaValue::Table(this), sline, scol];
                                 call_args.extend(args_vec.into_iter().skip(1));
                                 return f.call(LuaMultiValue::from_vec(call_args));
                             }
@@ -1228,9 +1213,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             )
                         } else if num_args == 2 {
                             let line_off = lua_to_i64(&first_arg);
-                            let col_off = lua_to_i64(
-                                args_vec.get(1).unwrap_or(&LuaValue::Integer(0)),
-                            );
+                            let col_off =
+                                lua_to_i64(args_vec.get(1).unwrap_or(&LuaValue::Integer(0)));
                             this.call_method(
                                 "sanitize_position",
                                 (lua_to_i64(&line) + line_off, lua_to_i64(&col) + col_off),
@@ -1280,21 +1264,18 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:get_char(line, col)
             doc.set(
                 "get_char",
-                lua.create_function(
-                    |lua, (this, line, col): (LuaTable, LuaValue, LuaValue)| {
-                        this.call_method::<()>("ensure_loaded", ())?;
-                        let san: LuaMultiValue =
-                            this.call_method("sanitize_position", (line, col))?;
-                        let sv: Vec<LuaValue> = san.into_vec();
-                        let line_i = lua_to_i64(sv.first().unwrap_or(&LuaValue::Integer(1)));
-                        let col_i = lua_to_i64(sv.get(1).unwrap_or(&LuaValue::Integer(1)));
-                        let lines: LuaTable = this.get("lines")?;
-                        let line_str: String = lines.raw_get(line_i)?;
-                        let string_sub: LuaFunction =
-                            lua.globals().get::<LuaTable>("string")?.get("sub")?;
-                        string_sub.call::<LuaValue>((line_str, col_i, col_i))
-                    },
-                )?,
+                lua.create_function(|lua, (this, line, col): (LuaTable, LuaValue, LuaValue)| {
+                    this.call_method::<()>("ensure_loaded", ())?;
+                    let san: LuaMultiValue = this.call_method("sanitize_position", (line, col))?;
+                    let sv: Vec<LuaValue> = san.into_vec();
+                    let line_i = lua_to_i64(sv.first().unwrap_or(&LuaValue::Integer(1)));
+                    let col_i = lua_to_i64(sv.get(1).unwrap_or(&LuaValue::Integer(1)));
+                    let lines: LuaTable = this.get("lines")?;
+                    let line_str: String = lines.raw_get(line_i)?;
+                    let string_sub: LuaFunction =
+                        lua.globals().get::<LuaTable>("string")?.get("sub")?;
+                    string_sub.call::<LuaValue>((line_str, col_i, col_i))
+                })?,
             )?;
 
             // Doc:raw_insert(line, col, text, undo_stack, time)
@@ -1461,8 +1442,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let ask = Arc::clone(&apply_snap_key);
                 lua.create_function(move |lua, this: LuaTable| {
                     this.call_method::<()>("ensure_loaded", ())?;
-                    let read_only: bool =
-                        this.get::<Option<bool>>("read_only")?.unwrap_or(false);
+                    let read_only: bool = this.get::<Option<bool>>("read_only")?.unwrap_or(false);
                     if read_only {
                         let show_ro: LuaFunction = lua.registry_value(&rok)?;
                         show_ro.call::<()>(this)?;
@@ -1495,8 +1475,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let ask = Arc::clone(&apply_snap_key);
                 lua.create_function(move |lua, this: LuaTable| {
                     this.call_method::<()>("ensure_loaded", ())?;
-                    let read_only: bool =
-                        this.get::<Option<bool>>("read_only")?.unwrap_or(false);
+                    let read_only: bool = this.get::<Option<bool>>("read_only")?.unwrap_or(false);
                     if read_only {
                         let show_ro: LuaFunction = lua.registry_value(&rok)?;
                         show_ro.call::<()>(this)?;
@@ -1529,9 +1508,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let ssk = Arc::clone(&sync_sel_key);
                 let aek = Arc::clone(&apply_edit_key);
                 lua.create_function(
-                    move |lua,
-                          (this, edits): (LuaTable, LuaValue)|
-                          -> LuaResult<bool> {
+                    move |lua, (this, edits): (LuaTable, LuaValue)| -> LuaResult<bool> {
                         this.call_method::<()>("ensure_loaded", ())?;
                         let read_only: bool =
                             this.get::<Option<bool>>("read_only")?.unwrap_or(false);
@@ -1560,21 +1537,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let first_edit: LuaTable = edits_tbl.raw_get(1)?;
                         let doc_native: LuaTable = require_table(lua, "doc_native")?;
                         let buf_id: LuaValue = this.get("buffer_id")?;
-                        let result: LuaValue = doc_native
-                            .call_function("buffer_apply_edits", (buf_id, edits))?;
-                        let line_hint: i64 =
-                            first_edit.get::<Option<i64>>("line1")?.unwrap_or(1);
+                        let result: LuaValue =
+                            doc_native.call_function("buffer_apply_edits", (buf_id, edits))?;
+                        let line_hint: i64 = first_edit.get::<Option<i64>>("line1")?.unwrap_or(1);
                         let undo_stack: LuaValue = this.get("undo_stack")?;
                         let system: LuaTable = lua.globals().get("system")?;
                         let time: LuaValue = system.call_function("get_time", ())?;
                         let apply_edit: LuaFunction = lua.registry_value(&aek)?;
-                        let applied: bool = apply_edit.call((
-                            this.clone(),
-                            result,
-                            undo_stack,
-                            time,
-                            line_hint,
-                        ))?;
+                        let applied: bool =
+                            apply_edit.call((this.clone(), result, undo_stack, time, line_hint))?;
                         if !applied {
                             return Ok(false);
                         }
@@ -1587,91 +1558,77 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:text_input(text, idx)
             doc.set(
                 "text_input",
-                lua.create_function(
-                    |lua, (this, text, idx): (LuaTable, LuaValue, LuaValue)| {
-                        this.call_method::<()>("ensure_loaded", ())?;
-                        let idx_val = if matches!(idx, LuaValue::Nil) {
-                            LuaValue::Boolean(true)
-                        } else {
-                            idx
-                        };
-                        let get_sels: LuaFunction = this.get("get_selections")?;
-                        let multi: LuaMultiValue = get_sels.call((
-                            this.clone(),
-                            LuaValue::Boolean(true),
-                            idx_val,
-                        ))?;
-                        let vals: Vec<LuaValue> = multi.into_vec();
-                        let iter_fn = match vals.first() {
-                            Some(LuaValue::Function(f)) => f.clone(),
-                            _ => return Ok(()),
-                        };
-                        let invariant = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                        let mut control = vals.get(2).cloned().unwrap_or(LuaValue::Nil);
-                        let translate: LuaTable = require_table(lua, "core.doc.translate")?;
-                        loop {
-                            let ir: LuaMultiValue =
-                                iter_fn.call((invariant.clone(), control.clone()))?;
-                            let iv: Vec<LuaValue> = ir.into_vec();
-                            let sidx = iv.first().cloned().unwrap_or(LuaValue::Nil);
-                            if matches!(sidx, LuaValue::Nil) {
-                                break;
-                            }
-                            control = sidx.clone();
-                            let l1 = iv.get(1).cloned().unwrap_or(LuaValue::Nil);
-                            let c1 = iv.get(2).cloned().unwrap_or(LuaValue::Nil);
-                            let l2 = iv.get(3).cloned().unwrap_or(LuaValue::Nil);
-                            let c2 = iv.get(4).cloned().unwrap_or(LuaValue::Nil);
-                            let mut had_selection = false;
-                            if l1 != l2 || c1 != c2 {
-                                this.call_method::<()>("delete_to_cursor", sidx.clone())?;
-                                had_selection = true;
-                            }
-                            let overwrite: bool =
-                                this.get::<Option<bool>>("overwrite")?.unwrap_or(false);
-                            if overwrite && !had_selection {
-                                let lines: LuaTable = this.get("lines")?;
-                                let l1_i = lua_to_i64(&l1);
-                                let c1_i = lua_to_i64(&c1);
-                                let line_str: String = lines.raw_get(l1_i)?;
-                                let text_str = match &text {
-                                    LuaValue::String(s) => s.to_str()?.to_string(),
-                                    _ => String::new(),
-                                };
-                                let ulen = text_str.chars().count();
-                                if c1_i < line_str.len() as i64 && ulen == 1 {
-                                    let next_char: LuaMultiValue =
-                                        translate.call_function(
-                                            "next_char",
-                                            (this.clone(), l1.clone(), c1.clone()),
-                                        )?;
-                                    let nc: Vec<LuaValue> = next_char.into_vec();
-                                    let nl =
-                                        nc.first().cloned().unwrap_or(l1.clone());
-                                    let nc_val =
-                                        nc.get(1).cloned().unwrap_or(c1.clone());
-                                    this.call_method::<()>(
-                                        "remove",
-                                        (l1.clone(), c1.clone(), nl, nc_val),
-                                    )?;
-                                }
-                            }
-                            this.call_method::<()>(
-                                "insert",
-                                (l1, c1, text.clone()),
-                            )?;
-                            let text_len = match &text {
-                                LuaValue::String(s) => s.as_bytes().len() as i64,
-                                _ => 0,
-                            };
-                            this.call_method::<()>(
-                                "move_to_cursor",
-                                (sidx, text_len),
-                            )?;
+                lua.create_function(|lua, (this, text, idx): (LuaTable, LuaValue, LuaValue)| {
+                    this.call_method::<()>("ensure_loaded", ())?;
+                    let idx_val = if matches!(idx, LuaValue::Nil) {
+                        LuaValue::Boolean(true)
+                    } else {
+                        idx
+                    };
+                    let get_sels: LuaFunction = this.get("get_selections")?;
+                    let multi: LuaMultiValue =
+                        get_sels.call((this.clone(), LuaValue::Boolean(true), idx_val))?;
+                    let vals: Vec<LuaValue> = multi.into_vec();
+                    let iter_fn = match vals.first() {
+                        Some(LuaValue::Function(f)) => f.clone(),
+                        _ => return Ok(()),
+                    };
+                    let invariant = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                    let mut control = vals.get(2).cloned().unwrap_or(LuaValue::Nil);
+                    let translate: LuaTable = require_table(lua, "core.doc.translate")?;
+                    loop {
+                        let ir: LuaMultiValue =
+                            iter_fn.call((invariant.clone(), control.clone()))?;
+                        let iv: Vec<LuaValue> = ir.into_vec();
+                        let sidx = iv.first().cloned().unwrap_or(LuaValue::Nil);
+                        if matches!(sidx, LuaValue::Nil) {
+                            break;
                         }
-                        Ok(())
-                    },
-                )?,
+                        control = sidx.clone();
+                        let l1 = iv.get(1).cloned().unwrap_or(LuaValue::Nil);
+                        let c1 = iv.get(2).cloned().unwrap_or(LuaValue::Nil);
+                        let l2 = iv.get(3).cloned().unwrap_or(LuaValue::Nil);
+                        let c2 = iv.get(4).cloned().unwrap_or(LuaValue::Nil);
+                        let mut had_selection = false;
+                        if l1 != l2 || c1 != c2 {
+                            this.call_method::<()>("delete_to_cursor", sidx.clone())?;
+                            had_selection = true;
+                        }
+                        let overwrite: bool =
+                            this.get::<Option<bool>>("overwrite")?.unwrap_or(false);
+                        if overwrite && !had_selection {
+                            let lines: LuaTable = this.get("lines")?;
+                            let l1_i = lua_to_i64(&l1);
+                            let c1_i = lua_to_i64(&c1);
+                            let line_str: String = lines.raw_get(l1_i)?;
+                            let text_str = match &text {
+                                LuaValue::String(s) => s.to_str()?.to_string(),
+                                _ => String::new(),
+                            };
+                            let ulen = text_str.chars().count();
+                            if c1_i < line_str.len() as i64 && ulen == 1 {
+                                let next_char: LuaMultiValue = translate.call_function(
+                                    "next_char",
+                                    (this.clone(), l1.clone(), c1.clone()),
+                                )?;
+                                let nc: Vec<LuaValue> = next_char.into_vec();
+                                let nl = nc.first().cloned().unwrap_or(l1.clone());
+                                let nc_val = nc.get(1).cloned().unwrap_or(c1.clone());
+                                this.call_method::<()>(
+                                    "remove",
+                                    (l1.clone(), c1.clone(), nl, nc_val),
+                                )?;
+                            }
+                        }
+                        this.call_method::<()>("insert", (l1, c1, text.clone()))?;
+                        let text_len = match &text {
+                            LuaValue::String(s) => s.as_bytes().len() as i64,
+                            _ => 0,
+                        };
+                        this.call_method::<()>("move_to_cursor", (sidx, text_len))?;
+                    }
+                    Ok(())
+                })?,
             )?;
 
             // Doc:ime_text_editing(text, start, length, idx)
@@ -1693,11 +1650,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             idx
                         };
                         let get_sels: LuaFunction = this.get("get_selections")?;
-                        let multi: LuaMultiValue = get_sels.call((
-                            this.clone(),
-                            LuaValue::Boolean(true),
-                            idx_val,
-                        ))?;
+                        let multi: LuaMultiValue =
+                            get_sels.call((this.clone(), LuaValue::Boolean(true), idx_val))?;
                         let vals: Vec<LuaValue> = multi.into_vec();
                         let iter_fn = match vals.first() {
                             Some(LuaValue::Function(f)) => f.clone(),
@@ -1719,10 +1673,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             let l2 = iv.get(3).cloned().unwrap_or(LuaValue::Nil);
                             let c2 = iv.get(4).cloned().unwrap_or(LuaValue::Nil);
                             if l1 != l2 || c1 != c2 {
-                                this.call_method::<()>(
-                                    "delete_to_cursor",
-                                    sidx.clone(),
-                                )?;
+                                this.call_method::<()>("delete_to_cursor", sidx.clone())?;
                             }
                             this.call_method::<()>(
                                 "insert",
@@ -1760,17 +1711,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                      -> LuaResult<LuaValue> {
                         let old_text: String = this.call_method(
                             "get_text",
-                            (
-                                line1.clone(),
-                                col1.clone(),
-                                line2.clone(),
-                                col2.clone(),
-                            ),
+                            (line1.clone(), col1.clone(), line2.clone(), col2.clone()),
                         )?;
                         let result: LuaMultiValue = func.call(old_text.clone())?;
                         let rv: Vec<LuaValue> = result.into_vec();
-                        let new_text_v =
-                            rv.first().cloned().unwrap_or(LuaValue::Nil);
+                        let new_text_v = rv.first().cloned().unwrap_or(LuaValue::Nil);
                         let res = rv.get(1).cloned().unwrap_or(LuaValue::Nil);
                         let new_text = match &new_text_v {
                             LuaValue::String(s) => s.to_str()?.to_string(),
@@ -1783,12 +1728,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             )?;
                             this.call_method::<()>(
                                 "remove",
-                                (
-                                    line1.clone(),
-                                    col1.clone(),
-                                    line2.clone(),
-                                    col2.clone(),
-                                ),
+                                (line1.clone(), col1.clone(), line2.clone(), col2.clone()),
                             )?;
                             let l1_i = lua_to_i64(&line1);
                             let c1_i = lua_to_i64(&col1);
@@ -1800,10 +1740,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                     (l1_i, c1_i, new_text.len() as i64),
                                 )?;
                                 let ov: Vec<LuaValue> = offset.into_vec();
-                                let nl2 =
-                                    ov.first().cloned().unwrap_or(LuaValue::Nil);
-                                let nc2 =
-                                    ov.get(1).cloned().unwrap_or(LuaValue::Nil);
+                                let nl2 = ov.first().cloned().unwrap_or(LuaValue::Nil);
+                                let nc2 = ov.get(1).cloned().unwrap_or(LuaValue::Nil);
                                 this.call_method::<()>(
                                     "set_selections",
                                     (idx, line1, col1, nl2, nc2),
@@ -1877,8 +1815,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             doc.set(
                 "delete_to_cursor",
                 lua.create_function(
-                    |_lua,
-                     (this, idx, args): (LuaTable, LuaValue, LuaMultiValue)| {
+                    |_lua, (this, idx, args): (LuaTable, LuaValue, LuaMultiValue)| {
                         let idx_val = idx.clone();
                         let get_sels: LuaFunction = this.get("get_selections")?;
                         let multi: LuaMultiValue = get_sels.call((
@@ -1908,26 +1845,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             let l2 = iv.get(3).cloned().unwrap_or(LuaValue::Nil);
                             let c2 = iv.get(4).cloned().unwrap_or(LuaValue::Nil);
                             if l1 != l2 || c1 != c2 {
-                                this.call_method::<()>(
-                                    "remove",
-                                    (l1.clone(), c1.clone(), l2, c2),
-                                )?;
+                                this.call_method::<()>("remove", (l1.clone(), c1.clone(), l2, c2))?;
                             } else {
-                                let mut offset_args = vec![
-                                    LuaValue::Table(this.clone()),
-                                    l1.clone(),
-                                    c1.clone(),
-                                ];
+                                let mut offset_args =
+                                    vec![LuaValue::Table(this.clone()), l1.clone(), c1.clone()];
                                 offset_args.extend(extra_args.clone());
-                                let pos_offset: LuaFunction =
-                                    this.get("position_offset")?;
-                                let result: LuaMultiValue = pos_offset
-                                    .call(LuaMultiValue::from_vec(offset_args))?;
+                                let pos_offset: LuaFunction = this.get("position_offset")?;
+                                let result: LuaMultiValue =
+                                    pos_offset.call(LuaMultiValue::from_vec(offset_args))?;
                                 let rv: Vec<LuaValue> = result.into_vec();
-                                let nl2 =
-                                    rv.first().cloned().unwrap_or(LuaValue::Nil);
-                                let nc2 =
-                                    rv.get(1).cloned().unwrap_or(LuaValue::Nil);
+                                let nl2 = rv.first().cloned().unwrap_or(LuaValue::Nil);
+                                let nc2 = rv.get(1).cloned().unwrap_or(LuaValue::Nil);
                                 this.call_method::<()>(
                                     "remove",
                                     (l1.clone(), c1.clone(), nl2.clone(), nc2.clone()),
@@ -1938,16 +1866,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                     lua_to_i64(&nl2),
                                     lua_to_i64(&nc2),
                                 );
-                                this.call_method::<()>(
-                                    "set_selections",
-                                    (sidx, sl1, sc1),
-                                )?;
+                                this.call_method::<()>("set_selections", (sidx, sl1, sc1))?;
                                 continue;
                             }
-                            this.call_method::<()>(
-                                "set_selections",
-                                (sidx, l1, c1),
-                            )?;
+                            this.call_method::<()>("set_selections", (sidx, l1, c1))?;
                         }
                         this.call_method::<()>("merge_cursors", idx)?;
                         Ok(())
@@ -1958,29 +1880,22 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:delete_to(...)
             doc.set(
                 "delete_to",
-                lua.create_function(
-                    |_lua, (this, args): (LuaTable, LuaMultiValue)| {
-                        let mut call_args =
-                            vec![LuaValue::Table(this.clone()), LuaValue::Nil];
-                        call_args.extend(args.into_vec());
-                        let dtc: LuaFunction = this.get("delete_to_cursor")?;
-                        dtc.call::<()>(LuaMultiValue::from_vec(call_args))
-                    },
-                )?,
+                lua.create_function(|_lua, (this, args): (LuaTable, LuaMultiValue)| {
+                    let mut call_args = vec![LuaValue::Table(this.clone()), LuaValue::Nil];
+                    call_args.extend(args.into_vec());
+                    let dtc: LuaFunction = this.get("delete_to_cursor")?;
+                    dtc.call::<()>(LuaMultiValue::from_vec(call_args))
+                })?,
             )?;
 
             // Doc:move_to_cursor(idx, ...)
             doc.set(
                 "move_to_cursor",
                 lua.create_function(
-                    |_lua,
-                     (this, idx, args): (LuaTable, LuaValue, LuaMultiValue)| {
+                    |_lua, (this, idx, args): (LuaTable, LuaValue, LuaMultiValue)| {
                         let get_sels: LuaFunction = this.get("get_selections")?;
-                        let multi: LuaMultiValue = get_sels.call((
-                            this.clone(),
-                            LuaValue::Boolean(false),
-                            idx.clone(),
-                        ))?;
+                        let multi: LuaMultiValue =
+                            get_sels.call((this.clone(), LuaValue::Boolean(false), idx.clone()))?;
                         let vals: Vec<LuaValue> = multi.into_vec();
                         let iter_fn = match vals.first() {
                             Some(LuaValue::Function(f)) => f.clone(),
@@ -2000,22 +1915,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             control = sidx.clone();
                             let line = iv.get(1).cloned().unwrap_or(LuaValue::Nil);
                             let col = iv.get(2).cloned().unwrap_or(LuaValue::Nil);
-                            let mut offset_args =
-                                vec![LuaValue::Table(this.clone()), line, col];
+                            let mut offset_args = vec![LuaValue::Table(this.clone()), line, col];
                             offset_args.extend(extra_args.clone());
-                            let pos_offset: LuaFunction =
-                                this.get("position_offset")?;
-                            let result: LuaMultiValue = pos_offset
-                                .call(LuaMultiValue::from_vec(offset_args))?;
+                            let pos_offset: LuaFunction = this.get("position_offset")?;
+                            let result: LuaMultiValue =
+                                pos_offset.call(LuaMultiValue::from_vec(offset_args))?;
                             let rv: Vec<LuaValue> = result.into_vec();
                             let mut set_args = vec![sidx];
                             set_args.extend(rv);
-                            let set_sels: LuaFunction =
-                                this.get("set_selections")?;
-                            set_sels.call::<()>((
-                                this.clone(),
-                                LuaMultiValue::from_vec(set_args),
-                            ))?;
+                            let set_sels: LuaFunction = this.get("set_selections")?;
+                            set_sels
+                                .call::<()>((this.clone(), LuaMultiValue::from_vec(set_args)))?;
                         }
                         this.call_method::<()>("merge_cursors", idx)?;
                         Ok(())
@@ -2026,29 +1936,22 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:move_to(...)
             doc.set(
                 "move_to",
-                lua.create_function(
-                    |_lua, (this, args): (LuaTable, LuaMultiValue)| {
-                        let mut call_args =
-                            vec![LuaValue::Table(this.clone()), LuaValue::Nil];
-                        call_args.extend(args.into_vec());
-                        let mtc: LuaFunction = this.get("move_to_cursor")?;
-                        mtc.call::<()>(LuaMultiValue::from_vec(call_args))
-                    },
-                )?,
+                lua.create_function(|_lua, (this, args): (LuaTable, LuaMultiValue)| {
+                    let mut call_args = vec![LuaValue::Table(this.clone()), LuaValue::Nil];
+                    call_args.extend(args.into_vec());
+                    let mtc: LuaFunction = this.get("move_to_cursor")?;
+                    mtc.call::<()>(LuaMultiValue::from_vec(call_args))
+                })?,
             )?;
 
             // Doc:select_to_cursor(idx, ...)
             doc.set(
                 "select_to_cursor",
                 lua.create_function(
-                    |_lua,
-                     (this, idx, args): (LuaTable, LuaValue, LuaMultiValue)| {
+                    |_lua, (this, idx, args): (LuaTable, LuaValue, LuaMultiValue)| {
                         let get_sels: LuaFunction = this.get("get_selections")?;
-                        let multi: LuaMultiValue = get_sels.call((
-                            this.clone(),
-                            LuaValue::Boolean(false),
-                            idx.clone(),
-                        ))?;
+                        let multi: LuaMultiValue =
+                            get_sels.call((this.clone(), LuaValue::Boolean(false), idx.clone()))?;
                         let vals: Vec<LuaValue> = multi.into_vec();
                         let iter_fn = match vals.first() {
                             Some(LuaValue::Function(f)) => f.clone(),
@@ -2070,18 +1973,14 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             let col = iv.get(2).cloned().unwrap_or(LuaValue::Nil);
                             let line2 = iv.get(3).cloned().unwrap_or(LuaValue::Nil);
                             let col2 = iv.get(4).cloned().unwrap_or(LuaValue::Nil);
-                            let mut offset_args =
-                                vec![LuaValue::Table(this.clone()), line, col];
+                            let mut offset_args = vec![LuaValue::Table(this.clone()), line, col];
                             offset_args.extend(extra_args.clone());
-                            let pos_offset: LuaFunction =
-                                this.get("position_offset")?;
-                            let result: LuaMultiValue = pos_offset
-                                .call(LuaMultiValue::from_vec(offset_args))?;
+                            let pos_offset: LuaFunction = this.get("position_offset")?;
+                            let result: LuaMultiValue =
+                                pos_offset.call(LuaMultiValue::from_vec(offset_args))?;
                             let rv: Vec<LuaValue> = result.into_vec();
-                            let nline =
-                                rv.first().cloned().unwrap_or(LuaValue::Nil);
-                            let ncol =
-                                rv.get(1).cloned().unwrap_or(LuaValue::Nil);
+                            let nline = rv.first().cloned().unwrap_or(LuaValue::Nil);
+                            let ncol = rv.get(1).cloned().unwrap_or(LuaValue::Nil);
                             this.call_method::<()>(
                                 "set_selections",
                                 (sidx, nline, ncol, line2, col2),
@@ -2096,23 +1995,19 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:select_to(...)
             doc.set(
                 "select_to",
-                lua.create_function(
-                    |_lua, (this, args): (LuaTable, LuaMultiValue)| {
-                        let mut call_args =
-                            vec![LuaValue::Table(this.clone()), LuaValue::Nil];
-                        call_args.extend(args.into_vec());
-                        let stc: LuaFunction = this.get("select_to_cursor")?;
-                        stc.call::<()>(LuaMultiValue::from_vec(call_args))
-                    },
-                )?,
+                lua.create_function(|_lua, (this, args): (LuaTable, LuaMultiValue)| {
+                    let mut call_args = vec![LuaValue::Table(this.clone()), LuaValue::Nil];
+                    call_args.extend(args.into_vec());
+                    let stc: LuaFunction = this.get("select_to_cursor")?;
+                    stc.call::<()>(LuaMultiValue::from_vec(call_args))
+                })?,
             )?;
 
             // Doc:get_indent_string()
             doc.set(
                 "get_indent_string",
                 lua.create_function(|lua, this: LuaTable| {
-                    let result: LuaMultiValue =
-                        this.call_method("get_indent_info", ())?;
+                    let result: LuaMultiValue = this.call_method("get_indent_info", ())?;
                     let rv: Vec<LuaValue> = result.into_vec();
                     let indent_type = match rv.first() {
                         Some(LuaValue::String(s)) => s.to_str()?.to_string(),
@@ -2126,10 +2021,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if indent_type == "hard" {
                         Ok("\t".to_string())
                     } else {
-                        let string_rep: LuaFunction = lua
-                            .globals()
-                            .get::<LuaTable>("string")?
-                            .get("rep")?;
+                        let string_rep: LuaFunction =
+                            lua.globals().get::<LuaTable>("string")?.get("rep")?;
                         string_rep.call((" ", indent_size))
                     }
                 })?,
@@ -2146,22 +2039,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             LuaValue::String(s) => s.to_str()?.to_string(),
                             _ => String::new(),
                         };
-                        let string_find: LuaFunction = lua
-                            .globals()
-                            .get::<LuaTable>("string")?
-                            .get("find")?;
+                        let string_find: LuaFunction =
+                            lua.globals().get::<LuaTable>("string")?.get("find")?;
                         let find_result: LuaMultiValue =
                             string_find.call((line_str.clone(), "^[ \t]+"))?;
                         let fv: Vec<LuaValue> = find_result.into_vec();
-                        let e: LuaValue =
-                            fv.get(1).cloned().unwrap_or(LuaValue::Nil);
+                        let e: LuaValue = fv.get(1).cloned().unwrap_or(LuaValue::Nil);
                         let indent_result: LuaMultiValue =
                             this.call_method("get_indent_info", ())?;
                         let ir: Vec<LuaValue> = indent_result.into_vec();
                         let indent_type = match ir.first() {
-                            Some(LuaValue::String(s)) => {
-                                s.to_str()?.to_string()
-                            }
+                            Some(LuaValue::String(s)) => s.to_str()?.to_string(),
                             _ => "soft".to_string(),
                         };
                         let indent_size = match ir.get(1) {
@@ -2169,44 +2057,28 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             Some(LuaValue::Number(n)) => *n as i64,
                             _ => 2,
                         };
-                        let string_rep: LuaFunction = lua
-                            .globals()
-                            .get::<LuaTable>("string")?
-                            .get("rep")?;
-                        let string_sub: LuaFunction = lua
-                            .globals()
-                            .get::<LuaTable>("string")?
-                            .get("sub")?;
-                        let string_gsub: LuaFunction = lua
-                            .globals()
-                            .get::<LuaTable>("string")?
-                            .get("gsub")?;
-                        let soft_tab: String =
-                            string_rep.call((" ", indent_size))?;
+                        let string_rep: LuaFunction =
+                            lua.globals().get::<LuaTable>("string")?.get("rep")?;
+                        let string_sub: LuaFunction =
+                            lua.globals().get::<LuaTable>("string")?.get("sub")?;
+                        let string_gsub: LuaFunction =
+                            lua.globals().get::<LuaTable>("string")?.get("gsub")?;
+                        let soft_tab: String = string_rep.call((" ", indent_size))?;
                         let is_rnd_up = matches!(rnd_up, LuaValue::Boolean(true));
                         if indent_type == "hard" {
                             let indent: String = if !matches!(e, LuaValue::Nil) {
                                 let e_i = lua_to_i64(&e);
-                                let sub: String = string_sub
-                                    .call((line_str, 1, e_i))?;
+                                let sub: String = string_sub.call((line_str, 1, e_i))?;
                                 string_gsub
-                                    .call::<(String, i64)>((
-                                        sub,
-                                        soft_tab.clone(),
-                                        "\t",
-                                    ))?
+                                    .call::<(String, i64)>((sub, soft_tab.clone(), "\t"))?
                                     .0
                             } else {
                                 String::new()
                             };
                             let result: String = if is_rnd_up {
-                                string_gsub
-                                    .call::<(String, i64)>((indent, " +", "\t"))?
-                                    .0
+                                string_gsub.call::<(String, i64)>((indent, " +", "\t"))?.0
                             } else {
-                                string_gsub
-                                    .call::<(String, i64)>((indent, " +", ""))?
-                                    .0
+                                string_gsub.call::<(String, i64)>((indent, " +", ""))?.0
                             };
                             Ok(LuaMultiValue::from_vec(vec![
                                 e,
@@ -2215,30 +2087,21 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         } else {
                             let indent: String = if !matches!(e, LuaValue::Nil) {
                                 let e_i = lua_to_i64(&e);
-                                let sub: String = string_sub
-                                    .call((line_str, 1, e_i))?;
+                                let sub: String = string_sub.call((line_str, 1, e_i))?;
                                 string_gsub
-                                    .call::<(String, i64)>((
-                                        sub,
-                                        "\t",
-                                        soft_tab.clone(),
-                                    ))?
+                                    .call::<(String, i64)>((sub, "\t", soft_tab.clone()))?
                                     .0
                             } else {
                                 String::new()
                             };
-                            let number = indent.len() as f64
-                                / soft_tab.len().max(1) as f64;
+                            let number = indent.len() as f64 / soft_tab.len().max(1) as f64;
                             let rounded = if is_rnd_up {
                                 number.ceil() as usize
                             } else {
                                 number.floor() as usize
                             };
-                            let result: String = string_sub.call((
-                                indent,
-                                1,
-                                (rounded * soft_tab.len()) as i64,
-                            ))?;
+                            let result: String =
+                                string_sub.call((indent, 1, (rounded * soft_tab.len()) as i64))?;
                             Ok(LuaMultiValue::from_vec(vec![
                                 e,
                                 LuaValue::String(lua.create_string(&result)?),
@@ -2262,19 +2125,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         i64,
                     )|
                      -> LuaResult<LuaMultiValue> {
-                        let text: String =
-                            this.call_method("get_indent_string", ())?;
+                        let text: String = this.call_method("get_indent_string", ())?;
                         let lines: LuaTable = this.get("lines")?;
                         let first_line: String = lines.raw_get(line1)?;
-                        let string_find: LuaFunction = lua
-                            .globals()
-                            .get::<LuaTable>("string")?
-                            .get("find")?;
+                        let string_find: LuaFunction =
+                            lua.globals().get::<LuaTable>("string")?.get("find")?;
                         let find_result: LuaMultiValue =
                             string_find.call((first_line, "^[ \t]+"))?;
                         let fv: Vec<LuaValue> = find_result.into_vec();
-                        let se: LuaValue =
-                            fv.get(1).cloned().unwrap_or(LuaValue::Nil);
+                        let se: LuaValue = fv.get(1).cloned().unwrap_or(LuaValue::Nil);
                         let se_i = if matches!(se, LuaValue::Nil) {
                             None
                         } else {
@@ -2283,10 +2142,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let in_beginning_whitespace =
                             col1 == 1 || se_i.is_some_and(|s| col1 <= s + 1);
                         let has_selection = line1 != line2 || col1 != col2;
-                        let do_unindent =
-                            matches!(unindent, LuaValue::Boolean(true));
-                        if do_unindent || has_selection || in_beginning_whitespace
-                        {
+                        let do_unindent = matches!(unindent, LuaValue::Boolean(true));
+                        if do_unindent || has_selection || in_beginning_whitespace {
                             let lines: LuaTable = this.get("lines")?;
                             let l1d_before: String = lines.raw_get(line1)?;
                             let l2d_before: String = lines.raw_get(line2)?;
@@ -2298,58 +2155,39 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 if has_selection && line_str.len() <= 1 {
                                     continue;
                                 }
-                                let indent_result: LuaMultiValue =
-                                    this.call_method(
-                                        "get_line_indent",
-                                        (
-                                            LuaValue::String(
-                                                lua.create_string(&line_str)?,
-                                            ),
-                                            LuaValue::Boolean(do_unindent),
-                                        ),
-                                    )?;
-                                let ir: Vec<LuaValue> =
-                                    indent_result.into_vec();
-                                let e_val = ir
-                                    .first()
-                                    .cloned()
-                                    .unwrap_or(LuaValue::Integer(0));
+                                let indent_result: LuaMultiValue = this.call_method(
+                                    "get_line_indent",
+                                    (
+                                        LuaValue::String(lua.create_string(&line_str)?),
+                                        LuaValue::Boolean(do_unindent),
+                                    ),
+                                )?;
+                                let ir: Vec<LuaValue> = indent_result.into_vec();
+                                let e_val = ir.first().cloned().unwrap_or(LuaValue::Integer(0));
                                 let rnded = match ir.get(1) {
-                                    Some(LuaValue::String(s)) => {
-                                        s.to_str()?.to_string()
-                                    }
+                                    Some(LuaValue::String(s)) => s.to_str()?.to_string(),
                                     _ => String::new(),
                                 };
                                 let e_i = match &e_val {
                                     LuaValue::Nil => 0,
                                     _ => lua_to_i64(&e_val),
                                 };
-                                this.call_method::<()>(
-                                    "remove",
-                                    (line, 1, line, e_i + 1),
-                                )?;
+                                this.call_method::<()>("remove", (line, 1, line, e_i + 1))?;
                                 let insert_text = if do_unindent {
-                                    let end = (rnded.len() as i64
-                                        - text.len() as i64)
-                                        .max(0)
-                                        as usize;
+                                    let end =
+                                        (rnded.len() as i64 - text.len() as i64).max(0) as usize;
                                     rnded[..end].to_string()
                                 } else {
                                     format!("{rnded}{text}")
                                 };
-                                this.call_method::<()>(
-                                    "insert",
-                                    (line, 1, insert_text),
-                                )?;
+                                this.call_method::<()>("insert", (line, 1, insert_text))?;
                             }
                             let lines: LuaTable = this.get("lines")?;
                             let l1d_after: String = lines.raw_get(line1)?;
                             let l2d_after: String = lines.raw_get(line2)?;
                             let l1d = l1d_after.len() as i64 - l1d_len;
                             let l2d = l2d_after.len() as i64 - l2d_len;
-                            if (do_unindent || in_beginning_whitespace)
-                                && !has_selection
-                            {
+                            if (do_unindent || in_beginning_whitespace) && !has_selection {
                                 let start_cursor = se_i.unwrap_or(0) + 1 + l1d;
                                 return Ok(LuaMultiValue::from_vec(vec![
                                     LuaValue::Integer(line1),
@@ -2365,10 +2203,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 LuaValue::Integer(col2 + l2d),
                             ]));
                         }
-                        this.call_method::<()>(
-                            "insert",
-                            (line1, col1, text.clone()),
-                        )?;
+                        this.call_method::<()>("insert", (line1, col1, text.clone()))?;
                         let new_col = col1 + text.len() as i64;
                         Ok(LuaMultiValue::from_vec(vec![
                             LuaValue::Integer(line1),
@@ -2383,9 +2218,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Doc:on_text_change(type)
             doc.set(
                 "on_text_change",
-                lua.create_function(
-                    |_lua, (_this, _type): (LuaTable, LuaValue)| Ok(()),
-                )?,
+                lua.create_function(|_lua, (_this, _type): (LuaTable, LuaValue)| Ok(()))?,
             )?;
 
             // Doc:on_close()
@@ -2394,17 +2227,13 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 lua.create_function(|lua, this: LuaTable| {
                     let buf_id: LuaValue = this.get("buffer_id")?;
                     if !matches!(buf_id, LuaValue::Nil) {
-                        let doc_native: LuaTable =
-                            require_table(lua, "doc_native")?;
+                        let doc_native: LuaTable = require_table(lua, "doc_native")?;
                         doc_native.call_function::<()>("buffer_free", buf_id)?;
                         this.set("buffer_id", LuaValue::Nil)?;
                     }
                     let core: LuaTable = require_table(lua, "core")?;
                     let name: String = this.call_method("get_name", ())?;
-                    core.call_function::<()>(
-                        "log_quiet",
-                        (format!("Closed doc \"{name}\""),),
-                    )?;
+                    core.call_function::<()>("log_quiet", (format!("Closed doc \"{name}\""),))?;
                     Ok(())
                 })?,
             )?;

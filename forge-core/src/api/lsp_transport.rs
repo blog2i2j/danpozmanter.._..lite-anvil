@@ -127,8 +127,13 @@ fn parse_messages(buffer: &mut Vec<u8>, sender: &Sender<Value>) {
         if buffer.len() < body_end {
             break;
         }
-        if let Ok(value) = serde_json::from_slice::<Value>(&buffer[body_start..body_end]) {
-            let _ = sender.send(value);
+        match serde_json::from_slice::<Value>(&buffer[body_start..body_end]) {
+            Ok(value) => {
+                let _ = sender.send(value);
+            }
+            Err(e) => {
+                log::warn!("LSP: malformed JSON in response, skipping message: {e}");
+            }
         }
         buffer.drain(..body_end);
     }

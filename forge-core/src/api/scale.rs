@@ -641,16 +641,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
                 let sk2 = state_key.clone();
                 let reg_load: LuaFunction = core.get("register_session_load_hook")?;
-                let load_hook = lua.create_function(move |lua, (data, _primary): (LuaValue, LuaValue)| {
-                    if let LuaValue::Number(s) = data {
-                        let state: LuaTable = lua.registry_value(&sk2)?;
-                        let set_scale: LuaFunction = state.get("set_scale")?;
-                        if let Err(e) = set_scale.call::<()>(s) {
-                            log::warn!("failed to set scale from session: {e}");
+                let load_hook =
+                    lua.create_function(move |lua, (data, _primary): (LuaValue, LuaValue)| {
+                        if let LuaValue::Number(s) = data {
+                            let state: LuaTable = lua.registry_value(&sk2)?;
+                            let set_scale: LuaFunction = state.get("set_scale")?;
+                            if let Err(e) = set_scale.call::<()>(s) {
+                                log::warn!("failed to set scale from session: {e}");
+                            }
                         }
-                    }
-                    Ok(())
-                })?;
+                        Ok(())
+                    })?;
                 reg_load.call::<()>(("scale", load_hook))?;
             }
 
@@ -708,33 +709,36 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let old_ctx: LuaValue = docview.get("on_context_menu")?;
                 if let LuaValue::Function(old_fn) = old_ctx {
                     let old_key = Arc::new(lua.create_registry_value(old_fn)?);
-                    docview.set("on_context_menu", lua.create_function(move |lua, this: LuaTable| {
-                        let old: LuaFunction = lua.registry_value(&old_key)?;
-                        let result: LuaMultiValue = old.call(this)?;
-                        let vals: Vec<LuaValue> = result.into_vec();
-                        if let Some(LuaValue::Table(cmds_tbl)) = vals.first() {
-                            let items: LuaTable = cmds_tbl.get("items")?;
-                            let len = items.raw_len();
-                            // Shift items 4..6 to 7..9 and insert scale items
-                            for i in (4..=len.min(6)).rev() {
-                                let v: LuaValue = items.raw_get(i)?;
-                                items.raw_set(i + 3, v)?;
+                    docview.set(
+                        "on_context_menu",
+                        lua.create_function(move |lua, this: LuaTable| {
+                            let old: LuaFunction = lua.registry_value(&old_key)?;
+                            let result: LuaMultiValue = old.call(this)?;
+                            let vals: Vec<LuaValue> = result.into_vec();
+                            if let Some(LuaValue::Table(cmds_tbl)) = vals.first() {
+                                let items: LuaTable = cmds_tbl.get("items")?;
+                                let len = items.raw_len();
+                                // Shift items 4..6 to 7..9 and insert scale items
+                                for i in (4..=len.min(6)).rev() {
+                                    let v: LuaValue = items.raw_get(i)?;
+                                    items.raw_set(i + 3, v)?;
+                                }
+                                let e1 = lua.create_table()?;
+                                e1.set("text", "Font +")?;
+                                e1.set("command", "scale:increase")?;
+                                items.raw_set(4, e1)?;
+                                let e2 = lua.create_table()?;
+                                e2.set("text", "Font -")?;
+                                e2.set("command", "scale:decrease")?;
+                                items.raw_set(5, e2)?;
+                                let e3 = lua.create_table()?;
+                                e3.set("text", "Font Reset")?;
+                                e3.set("command", "scale:reset")?;
+                                items.raw_set(6, e3)?;
                             }
-                            let e1 = lua.create_table()?;
-                            e1.set("text", "Font +")?;
-                            e1.set("command", "scale:increase")?;
-                            items.raw_set(4, e1)?;
-                            let e2 = lua.create_table()?;
-                            e2.set("text", "Font -")?;
-                            e2.set("command", "scale:decrease")?;
-                            items.raw_set(5, e2)?;
-                            let e3 = lua.create_table()?;
-                            e3.set("text", "Font Reset")?;
-                            e3.set("command", "scale:reset")?;
-                            items.raw_set(6, e3)?;
-                        }
-                        Ok(LuaMultiValue::from_vec(vals))
-                    })?)?;
+                            Ok(LuaMultiValue::from_vec(vals))
+                        })?,
+                    )?;
                 }
             }
 

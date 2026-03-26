@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 /// Write content to a temporary file, flush, then rename over the target.
 fn write_atomic(path: &Path, content: &str) -> LuaResult<()> {
     let tmp = path.with_extension("tmp");
-    let mut f =
-        fs::File::create(&tmp).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    let mut f = fs::File::create(&tmp).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
     f.write_all(content.as_bytes())
         .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
     f.sync_all()

@@ -109,7 +109,13 @@ fn inlines_height(_lua: &Lua, inlines: &LuaTable, width: f64, fonts: &LuaTable) 
     Ok(lines * lh)
 }
 
-fn block_height(lua: &Lua, blk: &LuaTable, width: f64, fonts: &LuaTable, gap: f64) -> LuaResult<f64> {
+fn block_height(
+    lua: &Lua,
+    blk: &LuaTable,
+    width: f64,
+    fonts: &LuaTable,
+    gap: f64,
+) -> LuaResult<f64> {
     let body: LuaValue = fonts.get("body")?;
     let code_font: LuaValue = fonts.get("code")?;
     let lh = font_get_height(&body)?;
@@ -122,7 +128,11 @@ fn block_height(lua: &Lua, blk: &LuaTable, width: f64, fonts: &LuaTable, gap: f6
             let level: i64 = blk.get("level")?;
             let hf_key = format!("h{level}");
             let hf: LuaValue = fonts.get(hf_key.as_str())?;
-            let hf_ref = if matches!(hf, LuaValue::Nil) { &body } else { &hf };
+            let hf_ref = if matches!(hf, LuaValue::Nil) {
+                &body
+            } else {
+                &hf
+            };
             let hfh = font_get_height(hf_ref)?;
             Ok(hfh + gap)
         }
@@ -169,7 +179,13 @@ fn block_height(lua: &Lua, blk: &LuaTable, width: f64, fonts: &LuaTable, gap: f6
     }
 }
 
-fn compute_layout(lua: &Lua, view: &LuaTable, fonts: &LuaTable, pad: f64, gap: f64) -> LuaResult<()> {
+fn compute_layout(
+    lua: &Lua,
+    view: &LuaTable,
+    fonts: &LuaTable,
+    pad: f64,
+    gap: f64,
+) -> LuaResult<()> {
     let size: LuaTable = view.get("size")?;
     let size_x: f64 = size.get("x")?;
     let width = size_x - pad * 2.0;
@@ -326,11 +342,25 @@ fn draw_block(
             let hf_key = format!("h{level}");
             let hf: LuaValue = fonts.get(hf_key.as_str())?;
             let body: LuaValue = fonts.get("body")?;
-            let hf_ref = if matches!(hf, LuaValue::Nil) { &body } else { &hf };
+            let hf_ref = if matches!(hf, LuaValue::Nil) {
+                &body
+            } else {
+                &hf
+            };
             let syntax: LuaTable = style.get("syntax")?;
             let kw_color: LuaValue = syntax.get("keyword")?;
             let il: LuaTable = blk.get("inlines")?;
-            draw_inlines(lua, view, &il, x, y, max_x, fonts, Some(hf_ref), Some(&kw_color))?;
+            draw_inlines(
+                lua,
+                view,
+                &il,
+                x,
+                y,
+                max_x,
+                fonts,
+                Some(hf_ref),
+                Some(&kw_color),
+            )?;
         }
         "paragraph" => {
             let il: LuaTable = blk.get("inlines")?;
@@ -366,10 +396,7 @@ fn draw_block(
         "rule" => {
             let mid = (y + lh / 4.0).floor();
             let divider: LuaValue = style.get("divider")?;
-            renderer.call_function::<()>(
-                "draw_rect",
-                (x, mid, max_x - x, 1.0, divider),
-            )?;
+            renderer.call_function::<()>("draw_rect", (x, mid, max_x - x, 1.0, divider))?;
         }
         "blockquote" => {
             let pad = quote_padding(gap);
@@ -488,10 +515,8 @@ fn draw_block(
             if head.raw_len() > 0 {
                 draw_row(&head, cur_y, true)?;
                 cur_y += row_h + 1.0;
-                renderer.call_function::<()>(
-                    "draw_rect",
-                    (x, cur_y, total_w, 2.0, divider.clone()),
-                )?;
+                renderer
+                    .call_function::<()>("draw_rect", (x, cur_y, total_w, 2.0, divider.clone()))?;
                 cur_y += 2.0;
             }
             for pair in rows.sequence_values::<LuaTable>() {
@@ -531,10 +556,11 @@ fn build_markdown_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> 
         let class: LuaTable = lua.registry_value(&ck)?;
         let base_size: LuaValue = class.get("_fonts_base_size")?;
         let cached: LuaValue = class.get("_fonts_cache")?;
-        let needs_rebuild = matches!(cached, LuaValue::Nil) || match &base_size {
-            LuaValue::Number(n) => (*n - sz).abs() > 0.01,
-            _ => true,
-        };
+        let needs_rebuild = matches!(cached, LuaValue::Nil)
+            || match &base_size {
+                LuaValue::Number(n) => (*n - sz).abs() > 0.01,
+                _ => true,
+            };
         if needs_rebuild {
             let cache = lua.create_table()?;
             cache.set("body", font.clone())?;
@@ -641,10 +667,8 @@ fn build_markdown_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> 
                 let changed = !lua_values_equal(&change_id, &last_id);
                 if changed {
                     this.set("last_change_id", change_id)?;
-                    let text: String = doc.call_method(
-                        "get_text",
-                        (1, 1, f64::INFINITY, f64::INFINITY),
-                    )?;
+                    let text: String =
+                        doc.call_method("get_text", (1, 1, f64::INFINITY, f64::INFINITY))?;
                     let markdown = require_table(lua, "markdown")?;
                     let blocks: LuaTable = markdown.call_function("parse", text)?;
                     this.set("blocks", blocks)?;
@@ -658,10 +682,7 @@ fn build_markdown_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> 
                     let size: LuaTable = this.get("size")?;
                     let size_x: f64 = size.get("x")?;
                     let needs_layout = matches!(layout, LuaValue::Nil)
-                        || !lua_values_equal(
-                            &last_w,
-                            &LuaValue::Number(size_x),
-                        );
+                        || !lua_values_equal(&last_w, &LuaValue::Number(size_x));
                     if needs_layout {
                         this.set("last_layout_width", size_x)?;
                         let gf: LuaFunction = lua.registry_value(&gfk)?;
@@ -728,10 +749,7 @@ fn build_markdown_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> 
                 let base_y = pos_y - scroll_y;
 
                 let blocks: LuaTable = this.get("blocks")?;
-                core.call_function::<()>(
-                    "push_clip_rect",
-                    (pos_x, pos_y, size_x, size_y),
-                )?;
+                core.call_function::<()>("push_clip_rect", (pos_x, pos_y, size_x, size_y))?;
                 for i in 1..=blocks.raw_len() as i64 {
                     let blk: LuaTable = blocks.get(i)?;
                     let entry: LuaTable = layout.get(i)?;
@@ -758,32 +776,37 @@ fn build_markdown_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> 
         let ck = Arc::clone(&class_key);
         md_view.set(
             "on_mouse_pressed",
-            lua.create_function(move |lua, (this, button, x, y, clicks): (LuaTable, String, f64, f64, i64)| {
-                let class: LuaTable = lua.registry_value(&ck)?;
-                let super_cls: LuaTable = class.get("super")?;
-                let super_omp: LuaFunction = super_cls.call_method("__index", "on_mouse_pressed")?;
-                let caught: bool = super_omp.call((this.clone(), button.as_str(), x, y, clicks)).unwrap_or(false);
-                if caught {
-                    return Ok(LuaValue::Boolean(true));
-                }
-                if button != "left" {
-                    return Ok(LuaValue::Nil);
-                }
-                let link_regions: LuaTable = this.get("link_regions")?;
-                for pair in link_regions.sequence_values::<LuaTable>() {
-                    let r = pair?;
-                    let x1: f64 = r.get("x1")?;
-                    let x2: f64 = r.get("x2")?;
-                    let y1: f64 = r.get("y1")?;
-                    let y2: f64 = r.get("y2")?;
-                    if x >= x1 && x <= x2 && y >= y1 && y <= y2 {
-                        let href: String = r.get("href")?;
-                        open_url(lua, &href)?;
+            lua.create_function(
+                move |lua, (this, button, x, y, clicks): (LuaTable, String, f64, f64, i64)| {
+                    let class: LuaTable = lua.registry_value(&ck)?;
+                    let super_cls: LuaTable = class.get("super")?;
+                    let super_omp: LuaFunction =
+                        super_cls.call_method("__index", "on_mouse_pressed")?;
+                    let caught: bool = super_omp
+                        .call((this.clone(), button.as_str(), x, y, clicks))
+                        .unwrap_or(false);
+                    if caught {
                         return Ok(LuaValue::Boolean(true));
                     }
-                }
-                Ok(LuaValue::Nil)
-            })?,
+                    if button != "left" {
+                        return Ok(LuaValue::Nil);
+                    }
+                    let link_regions: LuaTable = this.get("link_regions")?;
+                    for pair in link_regions.sequence_values::<LuaTable>() {
+                        let r = pair?;
+                        let x1: f64 = r.get("x1")?;
+                        let x2: f64 = r.get("x2")?;
+                        let y1: f64 = r.get("y1")?;
+                        let y2: f64 = r.get("y2")?;
+                        if x >= x1 && x <= x2 && y >= y1 && y <= y2 {
+                            let href: String = r.get("href")?;
+                            open_url(lua, &href)?;
+                            return Ok(LuaValue::Boolean(true));
+                        }
+                    }
+                    Ok(LuaValue::Nil)
+                },
+            )?,
         )?;
     }
 
@@ -792,26 +815,29 @@ fn build_markdown_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> 
         let ck = Arc::clone(&class_key);
         md_view.set(
             "on_mouse_moved",
-            lua.create_function(move |lua, (this, x, y, dx, dy): (LuaTable, f64, f64, f64, f64)| {
-                let class: LuaTable = lua.registry_value(&ck)?;
-                let super_cls: LuaTable = class.get("super")?;
-                let super_omm: LuaFunction = super_cls.call_method("__index", "on_mouse_moved")?;
-                super_omm.call::<()>((this.clone(), x, y, dx, dy))?;
-                let link_regions: LuaTable = this.get("link_regions")?;
-                for pair in link_regions.sequence_values::<LuaTable>() {
-                    let r = pair?;
-                    let x1: f64 = r.get("x1")?;
-                    let x2: f64 = r.get("x2")?;
-                    let y1: f64 = r.get("y1")?;
-                    let y2: f64 = r.get("y2")?;
-                    if x >= x1 && x <= x2 && y >= y1 && y <= y2 {
-                        this.set("cursor", "hand")?;
-                        return Ok(());
+            lua.create_function(
+                move |lua, (this, x, y, dx, dy): (LuaTable, f64, f64, f64, f64)| {
+                    let class: LuaTable = lua.registry_value(&ck)?;
+                    let super_cls: LuaTable = class.get("super")?;
+                    let super_omm: LuaFunction =
+                        super_cls.call_method("__index", "on_mouse_moved")?;
+                    super_omm.call::<()>((this.clone(), x, y, dx, dy))?;
+                    let link_regions: LuaTable = this.get("link_regions")?;
+                    for pair in link_regions.sequence_values::<LuaTable>() {
+                        let r = pair?;
+                        let x1: f64 = r.get("x1")?;
+                        let x2: f64 = r.get("x2")?;
+                        let y1: f64 = r.get("y1")?;
+                        let y2: f64 = r.get("y2")?;
+                        if x >= x1 && x <= x2 && y >= y1 && y <= y2 {
+                            this.set("cursor", "hand")?;
+                            return Ok(());
+                        }
                     }
-                }
-                this.set("cursor", "arrow")?;
-                Ok(())
-            })?,
+                    this.set("cursor", "arrow")?;
+                    Ok(())
+                },
+            )?,
         )?;
     }
 
@@ -957,7 +983,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let mut previews = Vec::new();
                     for pair in children.sequence_values::<LuaTable>() {
                         let view = pair?;
-                        let is_md_view: bool = view.call_method("is", md_class.clone()).unwrap_or(false);
+                        let is_md_view: bool =
+                            view.call_method("is", md_class.clone()).unwrap_or(false);
                         if is_md_view {
                             let vdoc: LuaValue = view.get("doc")?;
                             if let LuaValue::Table(ref vd) = vdoc {
@@ -973,8 +1000,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if !previews.is_empty() {
                         for (pview, pnode) in previews {
                             let views: LuaTable = pnode.get("views")?;
-                            let is_primary: bool =
-                                pnode.get("is_primary_node").unwrap_or(false);
+                            let is_primary: bool = pnode.get("is_primary_node").unwrap_or(false);
                             if views.raw_len() == 1 && !is_primary {
                                 let parent: LuaValue =
                                     pnode.call_method("get_parent_node", root_node.clone())?;
@@ -991,15 +1017,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                     continue;
                                 }
                             }
-                            pnode.call_method::<()>(
-                                "close_view",
-                                (root_node.clone(), pview),
-                            )?;
+                            pnode.call_method::<()>("close_view", (root_node.clone(), pview))?;
                             core.call_function::<()>("set_active_view", dv.clone())?;
                         }
                     } else {
-                        let src_node: LuaTable =
-                            root_node.call_method("get_node_for_view", dv)?;
+                        let src_node: LuaTable = root_node.call_method("get_node_for_view", dv)?;
                         let new_view: LuaTable = md_class.call(doc)?;
                         src_node.call_method::<()>("split", ("right", new_view))?;
                     }

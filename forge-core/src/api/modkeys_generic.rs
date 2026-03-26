@@ -23,7 +23,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             modkeys.set("map", map)?;
 
             let keys = lua.create_table()?;
-            for (i, key) in ["ctrl", "shift", "alt", "altgr", "super"].iter().enumerate() {
+            for (i, key) in ["ctrl", "shift", "alt", "altgr", "super"]
+                .iter()
+                .enumerate()
+            {
                 keys.set(i + 1, *key)?;
             }
             modkeys.set("keys", keys)?;

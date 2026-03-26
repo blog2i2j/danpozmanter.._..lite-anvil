@@ -43,59 +43,64 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             }
 
             // check_pattern(pattern_type, pattern) -> ok, err
-            let check_pattern = lua.create_function(|lua, (pattern_type, pattern): (String, LuaString)| {
-                let pcall: LuaFunction = lua.globals().get("pcall")?;
-                if pattern_type == "regex" {
-                    let regex: LuaTable = lua.globals().get("regex")?;
-                    let compile: LuaFunction = regex.get("compile")?;
-                    let result: LuaMultiValue = pcall.call((compile, pattern.clone()))?;
-                    let vals: Vec<LuaValue> = result.into_vec();
-                    let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
-                    if !ok {
-                        let err = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                        return Ok((LuaValue::Boolean(false), err));
-                    }
-                    let compiled = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                    let find_offsets: LuaFunction = regex.get("find_offsets")?;
-                    let result2: LuaMultiValue = pcall.call((find_offsets, compiled, ""))?;
-                    let vals2: Vec<LuaValue> = result2.into_vec();
-                    let pcall_ok = matches!(vals2.first(), Some(LuaValue::Boolean(true)));
-                    if pcall_ok {
-                        let mstart = vals2.get(1).cloned().unwrap_or(LuaValue::Nil);
-                        let mend = vals2.get(2).cloned().unwrap_or(LuaValue::Nil);
+            let check_pattern =
+                lua.create_function(|lua, (pattern_type, pattern): (String, LuaString)| {
+                    let pcall: LuaFunction = lua.globals().get("pcall")?;
+                    if pattern_type == "regex" {
+                        let regex: LuaTable = lua.globals().get("regex")?;
+                        let compile: LuaFunction = regex.get("compile")?;
+                        let result: LuaMultiValue = pcall.call((compile, pattern.clone()))?;
+                        let vals: Vec<LuaValue> = result.into_vec();
+                        let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
+                        if !ok {
+                            let err = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                            return Ok((LuaValue::Boolean(false), err));
+                        }
+                        let compiled = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                        let find_offsets: LuaFunction = regex.get("find_offsets")?;
+                        let result2: LuaMultiValue = pcall.call((find_offsets, compiled, ""))?;
+                        let vals2: Vec<LuaValue> = result2.into_vec();
+                        let pcall_ok = matches!(vals2.first(), Some(LuaValue::Boolean(true)));
+                        if pcall_ok {
+                            let mstart = vals2.get(1).cloned().unwrap_or(LuaValue::Nil);
+                            let mend = vals2.get(2).cloned().unwrap_or(LuaValue::Nil);
+                            if let (LuaValue::Integer(s), LuaValue::Integer(e)) = (&mstart, &mend) {
+                                if s > e {
+                                    return Ok((
+                                        LuaValue::Boolean(false),
+                                        LuaValue::String(
+                                            lua.create_string("Regex matches an empty string")?,
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        Ok((LuaValue::Boolean(true), LuaValue::Nil))
+                    } else {
+                        let string_tbl: LuaTable = lua.globals().get("string")?;
+                        let ufind: LuaFunction = string_tbl.get("ufind")?;
+                        let result: LuaMultiValue = pcall.call((ufind, "", pattern))?;
+                        let vals: Vec<LuaValue> = result.into_vec();
+                        let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
+                        if !ok {
+                            let err = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                            return Ok((LuaValue::Boolean(false), err));
+                        }
+                        let mstart = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                        let mend = vals.get(2).cloned().unwrap_or(LuaValue::Nil);
                         if let (LuaValue::Integer(s), LuaValue::Integer(e)) = (&mstart, &mend) {
                             if s > e {
                                 return Ok((
                                     LuaValue::Boolean(false),
-                                    LuaValue::String(lua.create_string("Regex matches an empty string")?),
+                                    LuaValue::String(
+                                        lua.create_string("Pattern matches an empty string")?,
+                                    ),
                                 ));
                             }
                         }
+                        Ok((LuaValue::Boolean(true), LuaValue::Nil))
                     }
-                    Ok((LuaValue::Boolean(true), LuaValue::Nil))
-                } else {
-                    let string_tbl: LuaTable = lua.globals().get("string")?;
-                    let ufind: LuaFunction = string_tbl.get("ufind")?;
-                    let result: LuaMultiValue = pcall.call((ufind, "", pattern))?;
-                    let vals: Vec<LuaValue> = result.into_vec();
-                    let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
-                    if !ok {
-                        let err = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                        return Ok((LuaValue::Boolean(false), err));
-                    }
-                    let mstart = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                    let mend = vals.get(2).cloned().unwrap_or(LuaValue::Nil);
-                    if let (LuaValue::Integer(s), LuaValue::Integer(e)) = (&mstart, &mend) {
-                        if s > e {
-                            return Ok((
-                                LuaValue::Boolean(false),
-                                LuaValue::String(lua.create_string("Pattern matches an empty string")?),
-                            ));
-                        }
-                    }
-                    Ok((LuaValue::Boolean(true), LuaValue::Nil))
-                }
-            })?;
+                })?;
             let check_pattern_key = lua.create_registry_value(check_pattern)?;
 
             // syntax.add(t)
@@ -108,8 +113,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let syntax: LuaTable = lua.registry_value(&syntax_ref)?;
                     let core: LuaTable = lua.registry_value(&core_ref)?;
                     let native_tokenizer: LuaTable = lua.registry_value(&nt_ref)?;
-                    let check_pattern: LuaFunction =
-                        lua.registry_value(&check_pattern_key)?;
+                    let check_pattern: LuaFunction = lua.registry_value(&check_pattern_key)?;
 
                     // Default space_handling to true
                     let space_handling: LuaValue = t.get("space_handling")?;
@@ -137,16 +141,19 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 LuaValue::Table(ref p_tbl) => {
                                     for j in 1..=2i64 {
                                         let pj: LuaValue = p_tbl.raw_get(j)?;
-                                        let result: LuaMultiValue = check_pattern.call((pattern_type, pj.clone()))?;
+                                        let result: LuaMultiValue =
+                                            check_pattern.call((pattern_type, pj.clone()))?;
                                         let vals: Vec<LuaValue> = result.into_vec();
-                                        let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
+                                        let ok =
+                                            matches!(vals.first(), Some(LuaValue::Boolean(true)));
                                         if !ok {
                                             let pj_str = match pj {
                                                 LuaValue::String(s) => s.to_str()?.to_string(),
                                                 _ => String::new(),
                                             };
                                             let err_name = format!("#{i}:{j} <{pj_str}>");
-                                            let err_val = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                                            let err_val =
+                                                vals.get(1).cloned().unwrap_or(LuaValue::Nil);
                                             let warn: LuaFunction = core.get("warn")?;
                                             warn.call::<()>((
                                                 "Malformed pattern %s in %s language plugin: %s",
@@ -159,7 +166,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                     }
                                 }
                                 LuaValue::String(ref s) => {
-                                    let result: LuaMultiValue = check_pattern.call((pattern_type, s.clone()))?;
+                                    let result: LuaMultiValue =
+                                        check_pattern.call((pattern_type, s.clone()))?;
                                     let vals: Vec<LuaValue> = result.into_vec();
                                     let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
                                     if !ok {
@@ -190,7 +198,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             }
                         }
 
-                        let table_insert: LuaFunction = lua.globals().get::<LuaTable>("table")?.get("insert")?;
+                        let table_insert: LuaFunction =
+                            lua.globals().get::<LuaTable>("table")?.get("insert")?;
 
                         if space_handling {
                             let ws_pat = lua.create_table()?;
@@ -206,7 +215,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     }
 
                     let items: LuaTable = syntax.get("items")?;
-                    let table_insert: LuaFunction = lua.globals().get::<LuaTable>("table")?.get("insert")?;
+                    let table_insert: LuaFunction =
+                        lua.globals().get::<LuaTable>("table")?.get("insert")?;
                     table_insert.call::<()>((items, t.clone()))?;
 
                     // Register with native tokenizer
@@ -223,7 +233,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if is_available && !matches!(name, LuaValue::Nil) {
                         let pcall: LuaFunction = lua.globals().get("pcall")?;
                         let register: LuaFunction = native_tokenizer.get("register_syntax")?;
-                        let result: LuaMultiValue = pcall.call((register, name.clone(), t.clone()))?;
+                        let result: LuaMultiValue =
+                            pcall.call((register, name.clone(), t.clone()))?;
                         let vals: Vec<LuaValue> = result.into_vec();
                         let ok = matches!(vals.first(), Some(LuaValue::Boolean(true)));
                         if !ok {
@@ -245,75 +256,81 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             let find_fn = {
                 let syntax_ref2 = lua.create_registry_value(syntax.clone())?;
                 let common_ref = lua.create_registry_value(common.clone())?;
-                lua.create_function(move |lua, (s, field): (String, String)| -> LuaResult<LuaValue> {
-                    let syntax: LuaTable = lua.registry_value(&syntax_ref2)?;
-                    let common: LuaTable = lua.registry_value(&common_ref)?;
-                    let items: LuaTable = syntax.get("items")?;
-                    let match_pattern: LuaFunction = common.get("match_pattern")?;
-                    let mut best_match: i64 = 0;
-                    let mut best_syntax: LuaValue = LuaValue::Nil;
+                lua.create_function(
+                    move |lua, (s, field): (String, String)| -> LuaResult<LuaValue> {
+                        let syntax: LuaTable = lua.registry_value(&syntax_ref2)?;
+                        let common: LuaTable = lua.registry_value(&common_ref)?;
+                        let items: LuaTable = syntax.get("items")?;
+                        let match_pattern: LuaFunction = common.get("match_pattern")?;
+                        let mut best_match: i64 = 0;
+                        let mut best_syntax: LuaValue = LuaValue::Nil;
 
-                    let len = items.raw_len();
-                    for i in (1..=len).rev() {
-                        let t: LuaTable = items.raw_get(i)?;
-                        let field_val: LuaValue = t.get(field.as_str())?;
-                        let patterns = match field_val {
-                            LuaValue::Table(tbl) => tbl,
-                            _ => lua.create_table()?,
-                        };
-                        let result: LuaMultiValue = match_pattern.call((s.as_str(), patterns))?;
-                        let vals: Vec<LuaValue> = result.into_vec();
-                        if let Some(LuaValue::Integer(s_val)) = vals.first() {
-                            if let Some(LuaValue::Integer(e_val)) = vals.get(1) {
-                                let span = e_val - s_val;
-                                if span > best_match {
-                                    best_match = span;
-                                    best_syntax = LuaValue::Table(t);
+                        let len = items.raw_len();
+                        for i in (1..=len).rev() {
+                            let t: LuaTable = items.raw_get(i)?;
+                            let field_val: LuaValue = t.get(field.as_str())?;
+                            let patterns = match field_val {
+                                LuaValue::Table(tbl) => tbl,
+                                _ => lua.create_table()?,
+                            };
+                            let result: LuaMultiValue =
+                                match_pattern.call((s.as_str(), patterns))?;
+                            let vals: Vec<LuaValue> = result.into_vec();
+                            if let Some(LuaValue::Integer(s_val)) = vals.first() {
+                                if let Some(LuaValue::Integer(e_val)) = vals.get(1) {
+                                    let span = e_val - s_val;
+                                    if span > best_match {
+                                        best_match = span;
+                                        best_syntax = LuaValue::Table(t);
+                                    }
                                 }
                             }
                         }
-                    }
-                    Ok(best_syntax)
-                })?
+                        Ok(best_syntax)
+                    },
+                )?
             };
             let find_key = lua.create_registry_value(find_fn)?;
 
             // extract_match_list(source, field) — local helper
-            let extract_match_list_fn = lua.create_function(|lua, (source, field): (LuaString, String)| {
-                let list = lua.create_table()?;
-                let string_tbl: LuaTable = lua.globals().get("string")?;
-                let smatch: LuaFunction = string_tbl.get("match")?;
-                let pattern = format!("{field}%s*=%s*%b{{}}");
-                let block: LuaValue = smatch.call((source, pattern))?;
-                if let LuaValue::String(block_str) = block {
-                    let gmatch: LuaFunction = string_tbl.get("gmatch")?;
-                    let iter: LuaFunction = gmatch.call((block_str, "(['\"])(.-)%1"))?;
-                    loop {
-                        let result: LuaMultiValue = iter.call(())?;
-                        let vals: Vec<LuaValue> = result.into_vec();
-                        if vals.is_empty() || matches!(vals.first(), Some(LuaValue::Nil)) {
-                            break;
-                        }
-                        if let Some(text) = vals.get(1) {
-                            let list_len = list.raw_len();
-                            list.raw_set(list_len + 1, text.clone())?;
+            let extract_match_list_fn =
+                lua.create_function(|lua, (source, field): (LuaString, String)| {
+                    let list = lua.create_table()?;
+                    let string_tbl: LuaTable = lua.globals().get("string")?;
+                    let smatch: LuaFunction = string_tbl.get("match")?;
+                    let pattern = format!("{field}%s*=%s*%b{{}}");
+                    let block: LuaValue = smatch.call((source, pattern))?;
+                    if let LuaValue::String(block_str) = block {
+                        let gmatch: LuaFunction = string_tbl.get("gmatch")?;
+                        let iter: LuaFunction = gmatch.call((block_str, "(['\"])(.-)%1"))?;
+                        loop {
+                            let result: LuaMultiValue = iter.call(())?;
+                            let vals: Vec<LuaValue> = result.into_vec();
+                            if vals.is_empty() || matches!(vals.first(), Some(LuaValue::Nil)) {
+                                break;
+                            }
+                            if let Some(text) = vals.get(1) {
+                                let list_len = list.raw_len();
+                                list.raw_set(list_len + 1, text.clone())?;
+                            }
                         }
                     }
-                }
-                Ok(list)
-            })?;
+                    Ok(list)
+                })?;
             let extract_key = lua.create_registry_value(extract_match_list_fn)?;
 
             // syntax.register_lazy_plugin(plugin)
             let syntax_ref3 = lua.create_registry_value(syntax.clone())?;
-            let extract_key2 = lua.create_registry_value(lua.registry_value::<LuaFunction>(&extract_key)?)?;
+            let extract_key2 =
+                lua.create_registry_value(lua.registry_value::<LuaFunction>(&extract_key)?)?;
             syntax.set(
                 "register_lazy_plugin",
                 lua.create_function(move |lua, plugin: LuaTable| {
                     let syntax: LuaTable = lua.registry_value(&syntax_ref3)?;
                     let extract_match_list: LuaFunction = lua.registry_value(&extract_key2)?;
 
-                    let pkg_loaded: LuaTable = lua.globals().get::<LuaTable>("package")?.get("loaded")?;
+                    let pkg_loaded: LuaTable =
+                        lua.globals().get::<LuaTable>("package")?.get("loaded")?;
                     let json: LuaValue = pkg_loaded.get("plugins.lsp.json")?;
 
                     let mut files = lua.create_table()?;
@@ -386,7 +403,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
             // syntax.get(filename, header)
             let syntax_ref4 = lua.create_registry_value(syntax.clone())?;
-            let find_key2 = lua.create_registry_value(lua.registry_value::<LuaFunction>(&find_key)?)?;
+            let find_key2 =
+                lua.create_registry_value(lua.registry_value::<LuaFunction>(&find_key)?)?;
             let core_ref2 = lua.create_registry_value(core.clone())?;
             let common_ref2 = lua.create_registry_value(common.clone())?;
             syntax.set(
@@ -416,7 +434,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let lazy_items: LuaTable = syntax.get("lazy_items")?;
                     let lazy_loaded: LuaTable = syntax.get("lazy_loaded")?;
                     let try_fn: LuaFunction = core.get("try")?;
-                    let table_remove: LuaFunction = lua.globals().get::<LuaTable>("table")?.get("remove")?;
+                    let table_remove: LuaFunction =
+                        lua.globals().get::<LuaTable>("table")?.get("remove")?;
 
                     let len = lazy_items.raw_len();
                     for i in (1..=len).rev() {
@@ -427,9 +446,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let mut should_load = false;
                         if let LuaValue::String(ref s) = filename {
                             if let LuaValue::Table(ref f) = entry_files {
-                                let result: LuaMultiValue = match_pattern.call((s.clone(), f.clone()))?;
+                                let result: LuaMultiValue =
+                                    match_pattern.call((s.clone(), f.clone()))?;
                                 let vals: Vec<LuaValue> = result.into_vec();
-                                if !vals.is_empty() && !matches!(vals.first(), Some(LuaValue::Nil) | Some(LuaValue::Boolean(false))) {
+                                if !vals.is_empty()
+                                    && !matches!(
+                                        vals.first(),
+                                        Some(LuaValue::Nil) | Some(LuaValue::Boolean(false))
+                                    )
+                                {
                                     should_load = true;
                                 }
                             }
@@ -437,9 +462,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         if !should_load {
                             if let LuaValue::String(ref s) = header {
                                 if let LuaValue::Table(ref h) = entry_headers {
-                                    let result: LuaMultiValue = match_pattern.call((s.clone(), h.clone()))?;
+                                    let result: LuaMultiValue =
+                                        match_pattern.call((s.clone(), h.clone()))?;
                                     let vals: Vec<LuaValue> = result.into_vec();
-                                    if !vals.is_empty() && !matches!(vals.first(), Some(LuaValue::Nil) | Some(LuaValue::Boolean(false))) {
+                                    if !vals.is_empty()
+                                        && !matches!(
+                                            vals.first(),
+                                            Some(LuaValue::Nil) | Some(LuaValue::Boolean(false))
+                                        )
+                                    {
                                         should_load = true;
                                     }
                                 }

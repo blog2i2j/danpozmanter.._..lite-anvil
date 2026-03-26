@@ -41,8 +41,16 @@ fn scroll_snapshot(lua: &Lua, view: &LuaTable) -> LuaResult<LuaTable> {
     let scroll: LuaTable = view.get("scroll")?;
     let to: LuaTable = scroll.get("to")?;
     let out = lua.create_table()?;
-    out.set("x", to.get::<Option<LuaValue>>("x")?.unwrap_or(LuaValue::Integer(0)))?;
-    out.set("y", to.get::<Option<LuaValue>>("y")?.unwrap_or(LuaValue::Integer(0)))?;
+    out.set(
+        "x",
+        to.get::<Option<LuaValue>>("x")?
+            .unwrap_or(LuaValue::Integer(0)),
+    )?;
+    out.set(
+        "y",
+        to.get::<Option<LuaValue>>("y")?
+            .unwrap_or(LuaValue::Integer(0)),
+    )?;
     Ok(out)
 }
 
@@ -225,8 +233,12 @@ fn set_scroll(view: &LuaTable, scroll_src: Option<LuaTable>) -> LuaResult<()> {
         return Ok(());
     };
     let scroll: LuaTable = view.get("scroll")?;
-    let x = scroll_src.get::<Option<LuaValue>>("x")?.unwrap_or(LuaValue::Integer(0));
-    let y = scroll_src.get::<Option<LuaValue>>("y")?.unwrap_or(LuaValue::Integer(0));
+    let x = scroll_src
+        .get::<Option<LuaValue>>("x")?
+        .unwrap_or(LuaValue::Integer(0));
+    let y = scroll_src
+        .get::<Option<LuaValue>>("y")?
+        .unwrap_or(LuaValue::Integer(0));
     scroll.set("x", x.clone())?;
     scroll.set("y", y.clone())?;
     let to: LuaTable = scroll.get("to")?;
@@ -264,7 +276,11 @@ fn load_view(lua: &Lua, core: &LuaTable, spec: &LuaTable) -> LuaResult<Option<Lu
                 }
             }
         };
-        let view = match call_callable(lua, LuaValue::Table(doc_view), LuaMultiValue::from_vec(vec![doc]))? {
+        let view = match call_callable(
+            lua,
+            LuaValue::Table(doc_view),
+            LuaMultiValue::from_vec(vec![doc]),
+        )? {
             LuaValue::Table(t) => t,
             _ => return Ok(None),
         };
@@ -290,7 +306,10 @@ fn load_view(lua: &Lua, core: &LuaTable, spec: &LuaTable) -> LuaResult<Option<Lu
         return Ok(Some(view));
     }
 
-    if spec_type == "terminal" || (spec_type == "view" && spec.get::<Option<String>>("module")? == Some("plugins.terminal.view".to_string())) {
+    if spec_type == "terminal"
+        || (spec_type == "view"
+            && spec.get::<Option<String>>("module")? == Some("plugins.terminal.view".to_string()))
+    {
         let terminal_view = require_table(lua, "plugins.terminal.view")?;
         let opts = lua.create_table()?;
         opts.set("cwd", spec.get::<LuaValue>("cwd")?)?;
@@ -300,7 +319,11 @@ fn load_view(lua: &Lua, core: &LuaTable, spec: &LuaTable) -> LuaResult<Option<Lu
             opts.set("placement", spec.get::<LuaValue>("placement")?)?;
             opts.set("color_scheme", spec.get::<LuaValue>("color_scheme")?)?;
         }
-        let view = match call_callable(lua, LuaValue::Table(terminal_view), LuaMultiValue::from_vec(vec![LuaValue::Table(opts)]))? {
+        let view = match call_callable(
+            lua,
+            LuaValue::Table(terminal_view),
+            LuaMultiValue::from_vec(vec![LuaValue::Table(opts)]),
+        )? {
             LuaValue::Table(t) => t,
             _ => return Ok(None),
         };
@@ -341,7 +364,9 @@ fn load_node(lua: &Lua, node: &LuaTable, spec: &LuaTable) -> LuaResult<Option<Lu
                     active_view = Some(view.clone());
                 }
                 let mt = get_metatable(lua, LuaValue::Table(view.clone()))?;
-                if mt != LuaValue::Table(doc_view.clone()) && value.get::<Option<String>>("type")? != Some("terminal".to_string()) {
+                if mt != LuaValue::Table(doc_view.clone())
+                    && value.get::<Option<String>>("type")? != Some("terminal".to_string())
+                {
                     if let Some(scroll) = value.get::<Option<LuaTable>>("scroll")? {
                         view.set("scroll", scroll)?;
                     }
@@ -354,7 +379,11 @@ fn load_node(lua: &Lua, node: &LuaTable, spec: &LuaTable) -> LuaResult<Option<Lu
         return Ok(result);
     }
 
-    let dir = if spec_type == "hsplit" { "right" } else { "down" };
+    let dir = if spec_type == "hsplit" {
+        "right"
+    } else {
+        "down"
+    };
     node.call_method::<LuaValue>("split", dir)?;
     node.set("divider", spec.get::<LuaValue>("divider")?)?;
     let a: LuaTable = node.get("a")?;
@@ -526,7 +555,10 @@ fn load_workspace(lua: &Lua) -> LuaResult<bool> {
 
 fn install(lua: &Lua) -> LuaResult<LuaTable> {
     let core = require_table(lua, "core")?;
-    if core.get::<Option<bool>>("__workspace_native_installed")?.unwrap_or(false) {
+    if core
+        .get::<Option<bool>>("__workspace_native_installed")?
+        .unwrap_or(false)
+    {
         return lua.create_table();
     }
     core.set("__workspace_native_installed", true)?;

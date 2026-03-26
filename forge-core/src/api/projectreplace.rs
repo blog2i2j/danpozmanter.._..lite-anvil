@@ -65,8 +65,7 @@ fn path_matches_glob_rs(
         let belongs: bool =
             common.call_function("path_belongs_to", (filename, project_path.as_str()))?;
         if belongs {
-            let rel: String =
-                common.call_function("relative_path", (project_path, filename))?;
+            let rel: String = common.call_function("relative_path", (project_path, filename))?;
             let rel_normalized = rel.replace('\\', "/");
             let re: LuaTable = lua.globals().get("regex")?;
             let compiled: LuaValue = re.call_function("compile", pattern)?;
@@ -162,7 +161,9 @@ fn collect_native_files(
         let ps = p.to_str()?.to_owned();
         let system: LuaTable = lua.globals().get("system")?;
         let info: Option<LuaTable> = system.call_function("get_file_info", ps.as_str())?;
-        let is_dir = info.map(|i| i.get::<String>("type").ok() == Some("dir".to_string())).unwrap_or(false);
+        let is_dir = info
+            .map(|i| i.get::<String>("type").ok() == Some("dir".to_string()))
+            .unwrap_or(false);
         if !is_dir {
             let filtered = lua.create_table()?;
             let mut count = 0i64;
@@ -199,10 +200,26 @@ fn build_replace_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> {
             "new",
             lua.create_function(
                 move |lua,
-                      (this, path, search, replace, fn_find, fn_apply, path_glob,
-                       native_search_opts, native_replace_opts): (
-                    LuaTable, LuaValue, String, String, LuaFunction, LuaFunction,
-                    LuaValue, LuaTable, LuaTable,
+                      (
+                    this,
+                    path,
+                    search,
+                    replace,
+                    fn_find,
+                    fn_apply,
+                    path_glob,
+                    native_search_opts,
+                    native_replace_opts,
+                ): (
+                    LuaTable,
+                    LuaValue,
+                    String,
+                    String,
+                    LuaFunction,
+                    LuaFunction,
+                    LuaValue,
+                    LuaTable,
+                    LuaTable,
                 )| {
                     let class: LuaTable = lua.registry_value(&ck)?;
                     let super_tbl: LuaTable = class.get("super")?;
@@ -375,38 +392,40 @@ fn build_replace_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> {
     // on_mouse_moved
     replace_view.set(
         "on_mouse_moved",
-        lua.create_function(|_lua, (this, mx, my, rest): (LuaTable, f64, f64, LuaMultiValue)| {
-            let super_cls: LuaTable = this.get("super")?;
-            let super_omm: LuaFunction = super_cls.get("on_mouse_moved")?;
-            let mut args = LuaMultiValue::new();
-            args.push_back(LuaValue::Table(this.clone()));
-            args.push_back(LuaValue::Number(mx));
-            args.push_back(LuaValue::Number(my));
-            args.extend(rest);
-            super_omm.call::<()>(args)?;
-            this.set("selected_idx", 0)?;
-            let iter: LuaFunction = this.call_method("each_visible_result", ())?;
-            loop {
-                let r: LuaMultiValue = iter.call(())?;
-                let vals: Vec<LuaValue> = r.into_vec();
-                if vals.is_empty() || matches!(vals[0], LuaValue::Nil) {
-                    break;
-                }
-                let rx = lua_f64(vals.get(2));
-                let ry = lua_f64(vals.get(3));
-                let rw = lua_f64(vals.get(4));
-                let rh = lua_f64(vals.get(5));
-                if mx >= rx && my >= ry && mx < rx + rw && my < ry + rh {
-                    if let Some(LuaValue::Integer(i)) = vals.first() {
-                        this.set("selected_idx", *i)?;
-                    } else if let Some(LuaValue::Number(n)) = vals.first() {
-                        this.set("selected_idx", *n as i64)?;
+        lua.create_function(
+            |_lua, (this, mx, my, rest): (LuaTable, f64, f64, LuaMultiValue)| {
+                let super_cls: LuaTable = this.get("super")?;
+                let super_omm: LuaFunction = super_cls.get("on_mouse_moved")?;
+                let mut args = LuaMultiValue::new();
+                args.push_back(LuaValue::Table(this.clone()));
+                args.push_back(LuaValue::Number(mx));
+                args.push_back(LuaValue::Number(my));
+                args.extend(rest);
+                super_omm.call::<()>(args)?;
+                this.set("selected_idx", 0)?;
+                let iter: LuaFunction = this.call_method("each_visible_result", ())?;
+                loop {
+                    let r: LuaMultiValue = iter.call(())?;
+                    let vals: Vec<LuaValue> = r.into_vec();
+                    if vals.is_empty() || matches!(vals[0], LuaValue::Nil) {
+                        break;
                     }
-                    break;
+                    let rx = lua_f64(vals.get(2));
+                    let ry = lua_f64(vals.get(3));
+                    let rw = lua_f64(vals.get(4));
+                    let rh = lua_f64(vals.get(5));
+                    if mx >= rx && my >= ry && mx < rx + rw && my < ry + rh {
+                        if let Some(LuaValue::Integer(i)) = vals.first() {
+                            this.set("selected_idx", *i)?;
+                        } else if let Some(LuaValue::Number(n)) = vals.first() {
+                            this.set("selected_idx", *n as i64)?;
+                        }
+                        break;
+                    }
                 }
-            }
-            Ok(())
-        })?,
+                Ok(())
+            },
+        )?,
     )?;
 
     // on_mouse_pressed

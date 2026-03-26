@@ -144,7 +144,10 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
                     LuaValue::String(s) => s.to_str()?.to_string(),
                     _ => String::new(),
                 };
-                core.call_function::<()>("error", format!("Error while opening dialog: {err_msg}"))?;
+                core.call_function::<()>(
+                    "error",
+                    format!("Error while opening dialog: {err_msg}"),
+                )?;
             }
             Ok(())
         })?;
@@ -190,13 +193,13 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
             let common: LuaTable = require_table(lua, "core.common")?;
             if text.is_empty() {
                 let core: LuaTable = require_table(lua, "core")?;
-                let recent: LuaValue =
-                    core.get::<LuaValue>("recent_files").unwrap_or(LuaValue::Nil);
+                let recent: LuaValue = core
+                    .get::<LuaValue>("recent_files")
+                    .unwrap_or(LuaValue::Nil);
                 if let LuaValue::Table(ref t) = recent {
                     if t.raw_len() > 0 {
                         let ranked = recent_items_fn(lua, recent, String::new())?;
-                        return common
-                            .call_function::<LuaValue>("home_encode_list", ranked);
+                        return common.call_function::<LuaValue>("home_encode_list", ranked);
                     }
                 }
             }
@@ -242,8 +245,7 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
                 (_, LuaValue::String(err)) => {
                     let err_str = err.to_str()?.to_string();
                     if err_str.contains("No such file") {
-                        let dirname: LuaValue =
-                            common.call_function("dirname", filename_str)?;
+                        let dirname: LuaValue = common.call_function("dirname", filename_str)?;
                         if let LuaValue::String(dn) = &dirname {
                             let dn_str = dn.to_str()?.to_string();
                             let dir_info: LuaValue =
@@ -285,7 +287,13 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
 }
 
 /// Opens a directory using either a system dialog or the command view.
-fn open_directory(lua: &Lua, label: &str, use_dialog: bool, allow_many: bool, callback: LuaFunction) -> LuaResult<()> {
+fn open_directory(
+    lua: &Lua,
+    label: &str,
+    use_dialog: bool,
+    allow_many: bool,
+    callback: LuaFunction,
+) -> LuaResult<()> {
     let core: LuaTable = require_table(lua, "core")?;
     let common: LuaTable = require_table(lua, "core.common")?;
 
@@ -442,7 +450,11 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             }
 
             let window: LuaValue = core.get("window")?;
-            let mode = if new_fullscreen { "fullscreen" } else { "normal" };
+            let mode = if new_fullscreen {
+                "fullscreen"
+            } else {
+                "normal"
+            };
             let set_window_mode: LuaFunction = system.get("set_window_mode")?;
             set_window_mode.call::<()>((window, mode))?;
 
@@ -526,7 +538,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     let res = lua.create_table()?;
                     for i in 1..=matched.raw_len() {
                         let name: String = matched.get(i)?;
-                        let pretty: String = command.call_function("prettify_name", name.clone())?;
+                        let pretty: String =
+                            command.call_function("prettify_name", name.clone())?;
                         let bindings: String =
                             keymap.call_function("get_bindings_display", name.clone())?;
                         let entry = lua.create_table()?;
@@ -668,8 +681,9 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 lua.create_function(|lua, text: String| {
                     let core: LuaTable = require_table(lua, "core")?;
                     let common: LuaTable = require_table(lua, "core.common")?;
-                    let recent: LuaValue =
-                        core.get::<LuaValue>("recent_files").unwrap_or(LuaValue::Nil);
+                    let recent: LuaValue = core
+                        .get::<LuaValue>("recent_files")
+                        .unwrap_or(LuaValue::Nil);
                     let items = if matches!(recent, LuaValue::Table(_)) {
                         recent
                     } else {
@@ -718,7 +732,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let log_view_class: LuaTable = require_table(lua, "core.logview")?;
             let root_view: LuaTable = core.get("root_view")?;
             let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
-            let log_view: LuaTable = log_view_class.call_function("__call", log_view_class.clone())?;
+            let log_view: LuaTable =
+                log_view_class.call_function("__call", log_view_class.clone())?;
             node.call_method::<()>("add_view", log_view)
         })?,
     )?;
@@ -759,12 +774,12 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
     // Change/open/add project directory commands
     for suffix in &["", "-picker", "-commandview"] {
         let use_dialog_fn = match *suffix {
-            "" => {
-                lua.create_function(|lua, ()| {
-                    let config: LuaTable = require_table(lua, "core.config")?;
-                    Ok(config.get::<bool>("use_system_file_picker").unwrap_or(false))
-                })?
-            }
+            "" => lua.create_function(|lua, ()| {
+                let config: LuaTable = require_table(lua, "core.config")?;
+                Ok(config
+                    .get::<bool>("use_system_file_picker")
+                    .unwrap_or(false))
+            })?,
             "-picker" => lua.create_function(|_lua, ()| Ok(true))?,
             "-commandview" => lua.create_function(|_lua, ()| Ok(false))?,
             _ => unreachable!(),
@@ -885,8 +900,9 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 lua.create_function(|lua, text: String| {
                     let core: LuaTable = require_table(lua, "core")?;
                     let common: LuaTable = require_table(lua, "core.common")?;
-                    let recent: LuaValue =
-                        core.get::<LuaValue>("recent_projects").unwrap_or(LuaValue::Nil);
+                    let recent: LuaValue = core
+                        .get::<LuaValue>("recent_projects")
+                        .unwrap_or(LuaValue::Nil);
                     let items = if matches!(recent, LuaValue::Table(_)) {
                         recent
                     } else {
@@ -966,7 +982,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                             text
                         };
                         let expanded: String = common.call_function("home_expand", raw)?;
-                        let removed: bool = core.call_function("remove_project", expanded.clone())?;
+                        let removed: bool =
+                            core.call_function("remove_project", expanded.clone())?;
                         if !removed {
                             core.call_function::<()>(
                                 "error",

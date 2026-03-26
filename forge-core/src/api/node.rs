@@ -67,7 +67,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let sup: LuaValue = view_cls.get("super")?;
                         if let LuaValue::Table(ref s) = sup {
                             let mt: LuaValue = s.get("move_towards")?;
-                            if matches!(mt, LuaValue::Function(_)) { mt } else { move_towards }
+                            if matches!(mt, LuaValue::Function(_)) {
+                                mt
+                            } else {
+                                move_towards
+                            }
                         } else {
                             move_towards
                         }
@@ -124,19 +128,21 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Node:propagate(fn_name, ...)
             node.set(
                 "propagate",
-                lua.create_function(|_lua, (this, fn_name, args): (LuaTable, String, LuaMultiValue)| {
-                    let a: LuaTable = this.get("a")?;
-                    let b: LuaTable = this.get("b")?;
-                    let a_fn: LuaFunction = a.get(fn_name.as_str())?;
-                    let b_fn: LuaFunction = b.get(fn_name.as_str())?;
-                    let mut a_args = vec![LuaValue::Table(a.clone())];
-                    a_args.extend(args.iter().cloned());
-                    a_fn.call::<()>(LuaMultiValue::from_vec(a_args))?;
-                    let mut b_args = vec![LuaValue::Table(b.clone())];
-                    b_args.extend(args.iter().cloned());
-                    b_fn.call::<()>(LuaMultiValue::from_vec(b_args))?;
-                    Ok(())
-                })?,
+                lua.create_function(
+                    |_lua, (this, fn_name, args): (LuaTable, String, LuaMultiValue)| {
+                        let a: LuaTable = this.get("a")?;
+                        let b: LuaTable = this.get("b")?;
+                        let a_fn: LuaFunction = a.get(fn_name.as_str())?;
+                        let b_fn: LuaFunction = b.get(fn_name.as_str())?;
+                        let mut a_args = vec![LuaValue::Table(a.clone())];
+                        a_args.extend(args.iter().cloned());
+                        a_fn.call::<()>(LuaMultiValue::from_vec(a_args))?;
+                        let mut b_args = vec![LuaValue::Table(b.clone())];
+                        b_args.extend(args.iter().cloned());
+                        b_fn.call::<()>(LuaMultiValue::from_vec(b_args))?;
+                        Ok(())
+                    },
+                )?,
             )?;
 
             // Node:on_mouse_moved (deprecated)
@@ -154,7 +160,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         f.call::<()>(LuaMultiValue::from_vec(call_args))?;
                     } else {
                         let propagate: LuaFunction = this.get("propagate")?;
-                        let mut call_args = vec![LuaValue::Table(this), LuaValue::String(_lua.create_string("on_mouse_moved")?)];
+                        let mut call_args = vec![
+                            LuaValue::Table(this),
+                            LuaValue::String(_lua.create_string("on_mouse_moved")?),
+                        ];
                         call_args.extend(args.iter().cloned());
                         propagate.call::<()>(LuaMultiValue::from_vec(call_args))?;
                     }
@@ -177,7 +186,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         f.call::<()>(LuaMultiValue::from_vec(call_args))?;
                     } else {
                         let propagate: LuaFunction = this.get("propagate")?;
-                        let mut call_args = vec![LuaValue::Table(this), LuaValue::String(lua.create_string("on_mouse_released")?)];
+                        let mut call_args = vec![
+                            LuaValue::Table(this),
+                            LuaValue::String(lua.create_string("on_mouse_released")?),
+                        ];
                         call_args.extend(args.iter().cloned());
                         propagate.call::<()>(LuaMultiValue::from_vec(call_args))?;
                     }
@@ -217,7 +229,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         f.call::<()>(LuaMultiValue::from_vec(call_args))?;
                     } else {
                         let propagate: LuaFunction = this.get("propagate")?;
-                        let mut call_args = vec![LuaValue::Table(this), LuaValue::String(lua.create_string("on_touch_moved")?)];
+                        let mut call_args = vec![
+                            LuaValue::Table(this),
+                            LuaValue::String(lua.create_string("on_touch_moved")?),
+                        ];
                         call_args.extend(args.iter().cloned());
                         propagate.call::<()>(LuaMultiValue::from_vec(call_args))?;
                     }
@@ -256,180 +271,193 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Node:split(dir, view, locked, resizable)
             node.set("split", {
                 let ck = Arc::clone(&class_key);
-                lua.create_function(move |lua, (this, dir, view, locked, resizable): (LuaTable, String, LuaValue, LuaValue, LuaValue)| {
-                    let ntype: String = this.get("type")?;
-                    if ntype != "leaf" {
-                        return Err(LuaError::runtime("Tried to split non-leaf node"));
-                    }
-                    let node_type = match dir.as_str() {
-                        "up" | "down" => "vsplit",
-                        "left" | "right" => "hsplit",
-                        _ => return Err(LuaError::runtime("Invalid direction")),
-                    };
-
-                    let core: LuaTable = require_table(lua, "core")?;
-                    let last_active: LuaValue = core.get("active_view")?;
-
-                    let node_cls: LuaTable = lua.registry_value(&ck)?;
-                    let child: LuaTable = node_cls.call(())?;
-                    child.call_method::<()>("consume", this.clone())?;
-
-                    let type_node: LuaTable = node_cls.call(node_type)?;
-                    this.call_method::<()>("consume", type_node)?;
-
-                    this.set("a", child.clone())?;
-
-                    let b: LuaTable = node_cls.call(())?;
-                    this.set("b", b.clone())?;
-
-                    if let LuaValue::Table(_) | LuaValue::UserData(_) = &view {
-                        b.call_method::<()>("add_view", view)?;
-                    }
-
-                    if let LuaValue::Table(ref locked_tbl) = locked {
-                        let _ = locked_tbl; // type assertion
-                        b.set("locked", locked.clone())?;
-                        let is_resizable = match &resizable {
-                            LuaValue::Boolean(v) => *v,
-                            _ => false,
+                lua.create_function(
+                    move |lua,
+                          (this, dir, view, locked, resizable): (
+                        LuaTable,
+                        String,
+                        LuaValue,
+                        LuaValue,
+                        LuaValue,
+                    )| {
+                        let ntype: String = this.get("type")?;
+                        if ntype != "leaf" {
+                            return Err(LuaError::runtime("Tried to split non-leaf node"));
+                        }
+                        let node_type = match dir.as_str() {
+                            "up" | "down" => "vsplit",
+                            "left" | "right" => "hsplit",
+                            _ => return Err(LuaError::runtime("Invalid direction")),
                         };
-                        b.set("resizable", is_resizable)?;
-                        let set_active: LuaFunction = core.get("set_active_view")?;
-                        set_active.call::<()>(last_active)?;
-                    }
 
-                    if dir == "up" || dir == "left" {
-                        let a_val: LuaValue = this.get("a")?;
-                        let b_val: LuaValue = this.get("b")?;
-                        this.set("a", b_val)?;
-                        this.set("b", a_val)?;
-                        let a: LuaTable = this.get("a")?;
-                        Ok(LuaValue::Table(a))
-                    } else {
-                        let b: LuaTable = this.get("b")?;
-                        Ok(LuaValue::Table(b))
-                    }
-                })?
+                        let core: LuaTable = require_table(lua, "core")?;
+                        let last_active: LuaValue = core.get("active_view")?;
+
+                        let node_cls: LuaTable = lua.registry_value(&ck)?;
+                        let child: LuaTable = node_cls.call(())?;
+                        child.call_method::<()>("consume", this.clone())?;
+
+                        let type_node: LuaTable = node_cls.call(node_type)?;
+                        this.call_method::<()>("consume", type_node)?;
+
+                        this.set("a", child.clone())?;
+
+                        let b: LuaTable = node_cls.call(())?;
+                        this.set("b", b.clone())?;
+
+                        if let LuaValue::Table(_) | LuaValue::UserData(_) = &view {
+                            b.call_method::<()>("add_view", view)?;
+                        }
+
+                        if let LuaValue::Table(ref locked_tbl) = locked {
+                            let _ = locked_tbl; // type assertion
+                            b.set("locked", locked.clone())?;
+                            let is_resizable = match &resizable {
+                                LuaValue::Boolean(v) => *v,
+                                _ => false,
+                            };
+                            b.set("resizable", is_resizable)?;
+                            let set_active: LuaFunction = core.get("set_active_view")?;
+                            set_active.call::<()>(last_active)?;
+                        }
+
+                        if dir == "up" || dir == "left" {
+                            let a_val: LuaValue = this.get("a")?;
+                            let b_val: LuaValue = this.get("b")?;
+                            this.set("a", b_val)?;
+                            this.set("b", a_val)?;
+                            let a: LuaTable = this.get("a")?;
+                            Ok(LuaValue::Table(a))
+                        } else {
+                            let b: LuaTable = this.get("b")?;
+                            Ok(LuaValue::Table(b))
+                        }
+                    },
+                )?
             })?;
 
             // Node:remove_view(root, view)
             node.set("remove_view", {
                 let ek = Arc::clone(&ev_key);
-                lua.create_function(move |lua, (this, root, view): (LuaTable, LuaTable, LuaTable)| {
-                    let views: LuaTable = this.get("views")?;
-                    let view_count = views.raw_len();
-                    if view_count > 1 {
-                        let idx: LuaValue = this.call_method("get_view_idx", view.clone())?;
-                        if let Some(idx_num) = idx.as_integer() {
-                            let tab_offset: i64 = this.get("tab_offset")?;
-                            if idx_num < tab_offset {
-                                this.set("tab_offset", tab_offset - 1)?;
+                lua.create_function(
+                    move |lua, (this, root, view): (LuaTable, LuaTable, LuaTable)| {
+                        let views: LuaTable = this.get("views")?;
+                        let view_count = views.raw_len();
+                        if view_count > 1 {
+                            let idx: LuaValue = this.call_method("get_view_idx", view.clone())?;
+                            if let Some(idx_num) = idx.as_integer() {
+                                let tab_offset: i64 = this.get("tab_offset")?;
+                                if idx_num < tab_offset {
+                                    this.set("tab_offset", tab_offset - 1)?;
+                                }
+                                lua_table_remove(&views, idx_num)?;
+                                let active_view: LuaTable = this.get("active_view")?;
+                                if active_view == view {
+                                    let new_active: LuaValue = views.raw_get(idx_num)?;
+                                    let fallback = if matches!(new_active, LuaValue::Nil) {
+                                        views.raw_get(views.raw_len() as i64)?
+                                    } else {
+                                        new_active
+                                    };
+                                    this.call_method::<()>("set_active_view", fallback)?;
+                                }
                             }
-                            lua_table_remove(&views, idx_num)?;
-                            let active_view: LuaTable = this.get("active_view")?;
-                            if active_view == view {
-                                let new_active: LuaValue = views.raw_get(idx_num)?;
-                                let fallback = if matches!(new_active, LuaValue::Nil) {
-                                    views.raw_get(views.raw_len() as i64)?
-                                } else {
-                                    new_active
-                                };
-                                this.call_method::<()>("set_active_view", fallback)?;
+                        } else {
+                            if this == root {
+                                let empty_views = lua.create_table()?;
+                                this.set("views", empty_views)?;
+                                let ev_cls: LuaTable = lua.registry_value(&ek)?;
+                                let ev: LuaTable = ev_cls.call(())?;
+                                this.call_method::<()>("add_view", ev)?;
+                                let core: LuaTable = require_table(lua, "core")?;
+                                core.set("last_active_view", LuaValue::Nil)?;
+                                return Ok(());
                             }
-                        }
-                    } else {
-                        if this == root {
-                            let empty_views = lua.create_table()?;
-                            this.set("views", empty_views)?;
-                            let ev_cls: LuaTable = lua.registry_value(&ek)?;
-                            let ev: LuaTable = ev_cls.call(())?;
-                            this.call_method::<()>("add_view", ev)?;
-                            let core: LuaTable = require_table(lua, "core")?;
-                            core.set("last_active_view", LuaValue::Nil)?;
-                            return Ok(());
-                        }
-                        let parent: LuaTable = this.call_method("get_parent_node", root.clone())?;
-                        let a: LuaTable = parent.get("a")?;
-                        let is_a = a == this;
-                        let other: LuaTable = if is_a {
-                            parent.get("b")?
-                        } else {
-                            parent.get("a")?
-                        };
-                        let (locked_size_x, locked_size_y): (LuaValue, LuaValue) =
-                            other.call_method("get_locked_size", ())?;
-                        let parent_type: String = parent.get("type")?;
-                        let locked_size = if parent_type == "hsplit" {
-                            &locked_size_x
-                        } else {
-                            &locked_size_y
-                        };
-                        let has_locked_size = matches!(locked_size, LuaValue::Number(_) | LuaValue::Integer(_));
-
-                        let is_primary: bool = this.get::<LuaValue>("is_primary_node")?
-                            .as_boolean().unwrap_or(false);
-
-                        let next_primary: LuaValue = if is_primary {
-                            let core: LuaTable = require_table(lua, "core")?;
-                            let rv: LuaTable = core.get("root_view")?;
-                            rv.call_method("select_next_primary_node", ())?
-                        } else {
-                            LuaValue::Nil
-                        };
-
-                        let has_next_primary = !matches!(next_primary, LuaValue::Nil | LuaValue::Boolean(false));
-
-                        if has_locked_size || (is_primary && !has_next_primary) {
-                            let empty_views = lua.create_table()?;
-                            this.set("views", empty_views)?;
-                            let ev_cls: LuaTable = lua.registry_value(&ek)?;
-                            let ev: LuaTable = ev_cls.call(())?;
-                            this.call_method::<()>("add_view", ev)?;
-                        } else {
-                            let next_primary_tbl = if let LuaValue::Table(ref t) = next_primary {
-                                Some(t.clone())
+                            let parent: LuaTable =
+                                this.call_method("get_parent_node", root.clone())?;
+                            let a: LuaTable = parent.get("a")?;
+                            let is_a = a == this;
+                            let other: LuaTable = if is_a {
+                                parent.get("b")?
                             } else {
-                                None
+                                parent.get("a")?
+                            };
+                            let (locked_size_x, locked_size_y): (LuaValue, LuaValue) =
+                                other.call_method("get_locked_size", ())?;
+                            let parent_type: String = parent.get("type")?;
+                            let locked_size = if parent_type == "hsplit" {
+                                &locked_size_x
+                            } else {
+                                &locked_size_y
+                            };
+                            let has_locked_size =
+                                matches!(locked_size, LuaValue::Number(_) | LuaValue::Integer(_));
+
+                            let is_primary: bool = this
+                                .get::<LuaValue>("is_primary_node")?
+                                .as_boolean()
+                                .unwrap_or(false);
+
+                            let next_primary: LuaValue = if is_primary {
+                                let core: LuaTable = require_table(lua, "core")?;
+                                let rv: LuaTable = core.get("root_view")?;
+                                rv.call_method("select_next_primary_node", ())?
+                            } else {
+                                LuaValue::Nil
                             };
 
-                            let actual_next_primary = if let Some(ref npt) = next_primary_tbl {
-                                if *npt == other {
-                                    Some(parent.clone())
-                                } else {
-                                    Some(npt.clone())
-                                }
+                            let has_next_primary =
+                                !matches!(next_primary, LuaValue::Nil | LuaValue::Boolean(false));
+
+                            if has_locked_size || (is_primary && !has_next_primary) {
+                                let empty_views = lua.create_table()?;
+                                this.set("views", empty_views)?;
+                                let ev_cls: LuaTable = lua.registry_value(&ek)?;
+                                let ev: LuaTable = ev_cls.call(())?;
+                                this.call_method::<()>("add_view", ev)?;
                             } else {
-                                None
-                            };
-
-                            parent.call_method::<()>("consume", other)?;
-
-                            let mut p: LuaTable = parent.clone();
-                            loop {
-                                let ptype: String = p.get("type")?;
-                                if ptype == "leaf" {
-                                    break;
-                                }
-                                p = if is_a {
-                                    p.get("a")?
+                                let next_primary_tbl = if let LuaValue::Table(ref t) = next_primary
+                                {
+                                    Some(t.clone())
                                 } else {
-                                    p.get("b")?
+                                    None
                                 };
-                            }
-                            let p_av: LuaTable = p.get("active_view")?;
-                            p.call_method::<()>("set_active_view", p_av)?;
 
-                            if is_primary {
-                                if let Some(np) = actual_next_primary {
-                                    np.set("is_primary_node", true)?;
+                                let actual_next_primary = if let Some(ref npt) = next_primary_tbl {
+                                    if *npt == other {
+                                        Some(parent.clone())
+                                    } else {
+                                        Some(npt.clone())
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                parent.call_method::<()>("consume", other)?;
+
+                                let mut p: LuaTable = parent.clone();
+                                loop {
+                                    let ptype: String = p.get("type")?;
+                                    if ptype == "leaf" {
+                                        break;
+                                    }
+                                    p = if is_a { p.get("a")? } else { p.get("b")? };
+                                }
+                                let p_av: LuaTable = p.get("active_view")?;
+                                p.call_method::<()>("set_active_view", p_av)?;
+
+                                if is_primary {
+                                    if let Some(np) = actual_next_primary {
+                                        np.set("is_primary_node", true)?;
+                                    }
                                 }
                             }
                         }
-                    }
-                    let core: LuaTable = require_table(lua, "core")?;
-                    core.set("last_active_view", LuaValue::Nil)?;
-                    Ok(())
-                })?
+                        let core: LuaTable = require_table(lua, "core")?;
+                        core.set("last_active_view", LuaValue::Nil)?;
+                        Ok(())
+                    },
+                )?
             })?;
 
             // Node:close_view(root, view)
@@ -461,40 +489,40 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Node:add_view(view, idx)
             node.set("add_view", {
                 let ek = Arc::clone(&ev_key);
-                lua.create_function(move |lua, (this, view, idx): (LuaTable, LuaValue, Option<i64>)| {
-                    let ntype: String = this.get("type")?;
-                    if ntype != "leaf" {
-                        return Err(LuaError::runtime("Tried to add view to non-leaf node"));
-                    }
-                    let locked: LuaValue = this.get("locked")?;
-                    if matches!(locked, LuaValue::Table(_)) {
-                        return Err(LuaError::runtime("Tried to add view to locked node"));
-                    }
-                    let views: LuaTable = this.get("views")?;
-                    let ev_cls: LuaTable = lua.registry_value(&ek)?;
-                    let first_view: LuaValue = views.raw_get(1)?;
-                    let mut adjusted_idx = idx;
-                    if let LuaValue::Table(ref fv) = first_view {
-                        let is_empty: bool = fv.call_method("is", ev_cls)?;
-                        if is_empty {
-                            lua_table_remove(&views, 1)?;
-                            if let Some(i) = adjusted_idx {
-                                if i > 1 {
-                                    adjusted_idx = Some(i - 1);
+                lua.create_function(
+                    move |lua, (this, view, idx): (LuaTable, LuaValue, Option<i64>)| {
+                        let ntype: String = this.get("type")?;
+                        if ntype != "leaf" {
+                            return Err(LuaError::runtime("Tried to add view to non-leaf node"));
+                        }
+                        let locked: LuaValue = this.get("locked")?;
+                        if matches!(locked, LuaValue::Table(_)) {
+                            return Err(LuaError::runtime("Tried to add view to locked node"));
+                        }
+                        let views: LuaTable = this.get("views")?;
+                        let ev_cls: LuaTable = lua.registry_value(&ek)?;
+                        let first_view: LuaValue = views.raw_get(1)?;
+                        let mut adjusted_idx = idx;
+                        if let LuaValue::Table(ref fv) = first_view {
+                            let is_empty: bool = fv.call_method("is", ev_cls)?;
+                            if is_empty {
+                                lua_table_remove(&views, 1)?;
+                                if let Some(i) = adjusted_idx {
+                                    if i > 1 {
+                                        adjusted_idx = Some(i - 1);
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    let len = views.raw_len() as i64;
-                    let insert_idx = adjusted_idx
-                        .unwrap_or(len + 1)
-                        .max(1)
-                        .min(len + 1) as usize;
-                    lua_table_insert(&views, insert_idx, view.clone())?;
-                    this.call_method::<()>("set_active_view", view)?;
-                    Ok(())
-                })?
+                        let len = views.raw_len() as i64;
+                        let insert_idx =
+                            adjusted_idx.unwrap_or(len + 1).max(1).min(len + 1) as usize;
+                        lua_table_insert(&views, insert_idx, view.clone())?;
+                        this.call_method::<()>("set_active_view", view)?;
+                        Ok(())
+                    },
+                )?
             })?;
 
             // Node:set_active_view(view)
@@ -503,7 +531,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 lua.create_function(|lua, (this, view): (LuaTable, LuaValue)| {
                     let ntype: String = this.get("type")?;
                     if ntype != "leaf" {
-                        return Err(LuaError::runtime("Tried to set active view on non-leaf node"));
+                        return Err(LuaError::runtime(
+                            "Tried to set active view on non-leaf node",
+                        ));
                     }
                     let last_active: LuaValue = this.get("active_view")?;
                     this.set("active_view", view.clone())?;
@@ -662,7 +692,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 return Ok(LuaValue::Table(this));
                             }
                         }
-                        let result: LuaValue = a.call_method("get_divider_overlapping_point", (px, py))?;
+                        let result: LuaValue =
+                            a.call_method("get_divider_overlapping_point", (px, py))?;
                         if !matches!(result, LuaValue::Nil) {
                             return Ok(result);
                         }
@@ -681,7 +712,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let tab_offset: i64 = this.get("tab_offset")?;
                     let config: LuaTable = require_table(lua, "core.config")?;
                     let max_tabs: i64 = config.get("max_tabs")?;
-                    let result: i64 = nm.call_function("visible_tabs", (views.raw_len() as i64, tab_offset, max_tabs))?;
+                    let result: i64 = nm.call_function(
+                        "visible_tabs",
+                        (views.raw_len() as i64, tab_offset, max_tabs),
+                    )?;
                     Ok(result)
                 })?
             })?;
@@ -710,11 +744,18 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let size_x: f64 = size.get("x")?;
                     let position: LuaTable = this.get("position")?;
                     let pos_x: f64 = position.get("x")?;
-                    let idx: i64 = nm.call_function("tab_hit_index", (
-                        views.raw_len() as i64, tab_offset, max_tabs,
-                        tab_width, tab_shift, size_x,
-                        px - pos_x,
-                    ))?;
+                    let idx: i64 = nm.call_function(
+                        "tab_hit_index",
+                        (
+                            views.raw_len() as i64,
+                            tab_offset,
+                            max_tabs,
+                            tab_width,
+                            tab_shift,
+                            size_x,
+                            px - pos_x,
+                        ),
+                    )?;
                     if idx > 0 {
                         Ok(LuaValue::Integer(idx))
                     } else {
@@ -756,8 +797,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         }
                     }
                     let config: LuaTable = require_table(lua, "core.config")?;
-                    let always_show: bool = config.get::<LuaValue>("always_show_tabs")?
-                        .as_boolean().unwrap_or(false);
+                    let always_show: bool = config
+                        .get::<LuaValue>("always_show_tabs")?
+                        .as_boolean()
+                        .unwrap_or(false);
                     if always_show {
                         let first: LuaValue = views.raw_get(1)?;
                         if let LuaValue::Table(ref fv) = first {
@@ -814,7 +857,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         this.set("hovered_scroll_button", 0)?;
                         return Ok(());
                     }
-                    let tab_index: LuaValue = this.call_method("get_tab_overlapping_point", (px, py))?;
+                    let tab_index: LuaValue =
+                        this.call_method("get_tab_overlapping_point", (px, py))?;
                     this.set("hovered_tab", tab_index.clone())?;
                     this.set("hovered_close", 0)?;
                     this.set("hovered_scroll_button", 0)?;
@@ -839,16 +883,20 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let hit_w = (icon_w + pad_x).max(font_h);
                         let cx = x + w - hit_w;
                         let config: LuaTable = require_table(lua, "core.config")?;
-                        let tab_close_button: bool = config.get::<LuaValue>("tab_close_button")?
-                            .as_boolean().unwrap_or(true);
-                        if px >= cx && px < cx + hit_w && py >= y && py < y + h && tab_close_button {
+                        let tab_close_button: bool = config
+                            .get::<LuaValue>("tab_close_button")?
+                            .as_boolean()
+                            .unwrap_or(true);
+                        if px >= cx && px < cx + hit_w && py >= y && py < y + h && tab_close_button
+                        {
                             this.set("hovered_close", tab_idx)?;
                         }
                     } else {
                         let views: LuaTable = this.get("views")?;
                         let visible: i64 = this.call_method("get_visible_tabs_number", ())?;
                         if (views.raw_len() as i64) > visible {
-                            let sb_idx: LuaValue = this.call_method("get_scroll_button_index", (px, py))?;
+                            let sb_idx: LuaValue =
+                                this.call_method("get_scroll_button_index", (px, py))?;
                             let sb_val = sb_idx.as_integer().unwrap_or(0);
                             this.set("hovered_scroll_button", sb_val)?;
                         }
@@ -1013,7 +1061,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if ntype == "hsplit" {
                         let sx = match (&x1, &x2) {
                             (LuaValue::Number(v1), LuaValue::Number(v2)) => {
-                                let dsx = if *v1 < 1.0 || *v2 < 1.0 { 0.0 } else { divider_size };
+                                let dsx = if *v1 < 1.0 || *v2 < 1.0 {
+                                    0.0
+                                } else {
+                                    divider_size
+                                };
                                 LuaValue::Number(v1 + v2 + dsx)
                             }
                             _ => LuaValue::Nil,
@@ -1023,7 +1075,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     } else {
                         let sy = match (&y1, &y2) {
                             (LuaValue::Number(v1), LuaValue::Number(v2)) => {
-                                let dsy = if *v1 < 1.0 || *v2 < 1.0 { 0.0 } else { divider_size };
+                                let dsy = if *v1 < 1.0 || *v2 < 1.0 {
+                                    0.0
+                                } else {
+                                    divider_size
+                                };
                                 LuaValue::Number(v1 + v2 + dsy)
                             }
                             _ => LuaValue::Nil,
@@ -1085,8 +1141,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     } else {
                         let a: LuaTable = this.get("a")?;
                         let b: LuaTable = this.get("b")?;
-                        let (x1, y1): (LuaValue, LuaValue) = a.call_method("get_locked_size", ())?;
-                        let (x2, y2): (LuaValue, LuaValue) = b.call_method("get_locked_size", ())?;
+                        let (x1, y1): (LuaValue, LuaValue) =
+                            a.call_method("get_locked_size", ())?;
+                        let (x2, y2): (LuaValue, LuaValue) =
+                            b.call_method("get_locked_size", ())?;
 
                         let style: LuaTable = require_table(lua, "core.style")?;
                         let divider_size: f64 = style.get("divider_size")?;
@@ -1115,9 +1173,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let tab_offset: i64 = this.get("tab_offset")?;
                         let config: LuaTable = require_table(lua, "core.config")?;
                         let max_tabs: i64 = config.get("max_tabs")?;
-                        let new_offset: i64 = nm.call_function("ensure_visible_tab_offset", (
-                            views.raw_len() as i64, tab_offset, max_tabs, idx,
-                        ))?;
+                        let new_offset: i64 = nm.call_function(
+                            "ensure_visible_tab_offset",
+                            (views.raw_len() as i64, tab_offset, max_tabs, idx),
+                        )?;
                         this.set("tab_offset", new_offset)?;
                     }
                     Ok(())
@@ -1137,11 +1196,21 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let config: LuaTable = require_table(lua, "core.config")?;
                     let max_tabs: i64 = config.get("max_tabs")?;
                     let scroll_dir = if dir == 1 { -1i64 } else { 1i64 };
-                    let (new_offset, new_active): (i64, i64) = nm.call_function("scroll_tab_offset", (
-                        views.raw_len() as i64, tab_offset, max_tabs, view_index, scroll_dir,
-                    ))?;
+                    let (new_offset, new_active): (i64, i64) = nm.call_function(
+                        "scroll_tab_offset",
+                        (
+                            views.raw_len() as i64,
+                            tab_offset,
+                            max_tabs,
+                            view_index,
+                            scroll_dir,
+                        ),
+                    )?;
                     this.set("tab_offset", new_offset)?;
-                    if new_active != view_index && new_active >= 1 && new_active <= views.raw_len() as i64 {
+                    if new_active != view_index
+                        && new_active >= 1
+                        && new_active <= views.raw_len() as i64
+                    {
                         let v: LuaValue = views.raw_get(new_active)?;
                         this.call_method::<()>("set_active_view", v)?;
                     }
@@ -1174,9 +1243,16 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let max_tabs: i64 = config.get("max_tabs")?;
                     let style: LuaTable = require_table(lua, "core.style")?;
                     let style_tab_width: f64 = style.get("tab_width")?;
-                    let result: f64 = nm.call_function("target_tab_width", (
-                        w, views.raw_len() as i64, tab_offset, max_tabs, style_tab_width,
-                    ))?;
+                    let result: f64 = nm.call_function(
+                        "target_tab_width",
+                        (
+                            w,
+                            views.raw_len() as i64,
+                            tab_offset,
+                            max_tabs,
+                            style_tab_width,
+                        ),
+                    )?;
                     Ok(result)
                 })?
             })?;
@@ -1229,222 +1305,333 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Node:get_cached_tab_title(view, font, w)
             node.set(
                 "get_cached_tab_title",
-                lua.create_function(|lua, (this, view, font, w): (LuaTable, LuaTable, LuaValue, f64)| {
-                    let text: String = view.call_method("get_name", ())?;
-                    let doc_val: LuaValue = view.get("doc")?;
-                    let dirty = if let LuaValue::Table(ref doc) = doc_val {
-                        let d: LuaValue = doc.call_method("is_dirty", ())?;
-                        matches!(d, LuaValue::Boolean(true))
-                    } else {
-                        false
-                    };
+                lua.create_function(
+                    |lua, (this, view, font, w): (LuaTable, LuaTable, LuaValue, f64)| {
+                        let text: String = view.call_method("get_name", ())?;
+                        let doc_val: LuaValue = view.get("doc")?;
+                        let dirty = if let LuaValue::Table(ref doc) = doc_val {
+                            let d: LuaValue = doc.call_method("is_dirty", ())?;
+                            matches!(d, LuaValue::Boolean(true))
+                        } else {
+                            false
+                        };
 
-                    let cache_tbl: LuaTable = this.get("tab_title_cache")?;
-                    let cached: LuaValue = cache_tbl.get(view.clone())?;
-                    let width_key = w.floor();
+                        let cache_tbl: LuaTable = this.get("tab_title_cache")?;
+                        let cached: LuaValue = cache_tbl.get(view.clone())?;
+                        let width_key = w.floor();
 
-                    if let LuaValue::Table(ref c) = cached {
-                        let c_text: String = c.get("text")?;
-                        let c_width: f64 = c.get("width")?;
-                        let c_dirty: bool = c.get::<LuaValue>("dirty")?
-                            .as_boolean().unwrap_or(false);
-                        let c_font: LuaValue = c.get("font")?;
-                        if c_text == text && c_width == width_key && c_dirty == dirty && c_font == font {
-                            return Ok(c.clone());
-                        }
-                    }
-
-                    let get_width: LuaFunction = font.as_table()
-                        .ok_or_else(|| LuaError::runtime("font expected"))?
-                        .get("get_width")?;
-                    let dots_width: f64 = get_width.call((font.clone(), "\u{2026}"))?;
-
-                    let mut align = "center".to_string();
-                    let mut display_text = text.clone();
-                    let mut available_w = w;
-
-                    if dirty {
-                        let marker_w: f64 = get_width.call((font.clone(), "\u{2022} "))?;
-                        available_w = (available_w - marker_w).max(0.0);
-                    }
-
-                    let text_w: f64 = get_width.call((font.clone(), display_text.as_str()))?;
-                    if text_w > available_w {
-                        align = "left".to_string();
-                        let chars: Vec<char> = display_text.chars().collect();
-                        for i in 1..=chars.len() {
-                            let reduced: String = chars[..chars.len() - i].iter().collect();
-                            let reduced_w: f64 = get_width.call((font.clone(), reduced.as_str()))?;
-                            if reduced_w + dots_width <= available_w {
-                                display_text = format!("{reduced}\u{2026}");
-                                break;
+                        if let LuaValue::Table(ref c) = cached {
+                            let c_text: String = c.get("text")?;
+                            let c_width: f64 = c.get("width")?;
+                            let c_dirty: bool =
+                                c.get::<LuaValue>("dirty")?.as_boolean().unwrap_or(false);
+                            let c_font: LuaValue = c.get("font")?;
+                            if c_text == text
+                                && c_width == width_key
+                                && c_dirty == dirty
+                                && c_font == font
+                            {
+                                return Ok(c.clone());
                             }
                         }
-                    }
 
-                    let new_cache = lua.create_table()?;
-                    new_cache.set("text", text)?;
-                    new_cache.set("display_text", display_text)?;
-                    new_cache.set("width", width_key)?;
-                    new_cache.set("dirty", dirty)?;
-                    new_cache.set("align", align)?;
-                    new_cache.set("font", font)?;
-                    cache_tbl.set(view, new_cache.clone())?;
-                    Ok(new_cache)
-                })?,
+                        let get_width: LuaFunction = font
+                            .as_table()
+                            .ok_or_else(|| LuaError::runtime("font expected"))?
+                            .get("get_width")?;
+                        let dots_width: f64 = get_width.call((font.clone(), "\u{2026}"))?;
+
+                        let mut align = "center".to_string();
+                        let mut display_text = text.clone();
+                        let mut available_w = w;
+
+                        if dirty {
+                            let marker_w: f64 = get_width.call((font.clone(), "\u{2022} "))?;
+                            available_w = (available_w - marker_w).max(0.0);
+                        }
+
+                        let text_w: f64 = get_width.call((font.clone(), display_text.as_str()))?;
+                        if text_w > available_w {
+                            align = "left".to_string();
+                            let chars: Vec<char> = display_text.chars().collect();
+                            for i in 1..=chars.len() {
+                                let reduced: String = chars[..chars.len() - i].iter().collect();
+                                let reduced_w: f64 =
+                                    get_width.call((font.clone(), reduced.as_str()))?;
+                                if reduced_w + dots_width <= available_w {
+                                    display_text = format!("{reduced}\u{2026}");
+                                    break;
+                                }
+                            }
+                        }
+
+                        let new_cache = lua.create_table()?;
+                        new_cache.set("text", text)?;
+                        new_cache.set("display_text", display_text)?;
+                        new_cache.set("width", width_key)?;
+                        new_cache.set("dirty", dirty)?;
+                        new_cache.set("align", align)?;
+                        new_cache.set("font", font)?;
+                        cache_tbl.set(view, new_cache.clone())?;
+                        Ok(new_cache)
+                    },
+                )?,
             )?;
 
             // Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
             node.set(
                 "draw_tab_title",
-                lua.create_function(|lua, (this, view, font, is_active, is_hovered, x, y, w, h): (LuaTable, LuaTable, LuaValue, bool, bool, f64, f64, f64, f64)| {
-                    let common: LuaTable = require_table(lua, "core.common")?;
-                    let style: LuaTable = require_table(lua, "core.style")?;
-                    let cache: LuaTable = this.call_method("get_cached_tab_title", (view, font.clone(), w))?;
-                    let display_text: String = cache.get("display_text")?;
-                    let align: String = cache.get("align")?;
-                    let is_dirty: bool = cache.get::<LuaValue>("dirty")?.as_boolean().unwrap_or(false);
+                lua.create_function(
+                    |lua,
+                     (this, view, font, is_active, is_hovered, x, y, w, h): (
+                        LuaTable,
+                        LuaTable,
+                        LuaValue,
+                        bool,
+                        bool,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                    )| {
+                        let common: LuaTable = require_table(lua, "core.common")?;
+                        let style: LuaTable = require_table(lua, "core.style")?;
+                        let cache: LuaTable =
+                            this.call_method("get_cached_tab_title", (view, font.clone(), w))?;
+                        let display_text: String = cache.get("display_text")?;
+                        let align: String = cache.get("align")?;
+                        let is_dirty: bool = cache
+                            .get::<LuaValue>("dirty")?
+                            .as_boolean()
+                            .unwrap_or(false);
 
-                    let mut draw_x = x;
-                    let mut draw_w = w;
+                        let mut draw_x = x;
+                        let mut draw_w = w;
 
-                    if is_dirty {
-                        let marker = "\u{2022} ";
-                        let get_width: LuaFunction = font.as_table()
-                            .ok_or_else(|| LuaError::runtime("font expected"))?
-                            .get("get_width")?;
-                        let marker_w: f64 = get_width.call((font.clone(), marker))?;
-                        let modified_color: LuaValue = style.get("modified")?;
-                        let accent_color: LuaValue = style.get("accent")?;
-                        let color = if !matches!(modified_color, LuaValue::Nil) {
-                            modified_color
+                        if is_dirty {
+                            let marker = "\u{2022} ";
+                            let get_width: LuaFunction = font
+                                .as_table()
+                                .ok_or_else(|| LuaError::runtime("font expected"))?
+                                .get("get_width")?;
+                            let marker_w: f64 = get_width.call((font.clone(), marker))?;
+                            let modified_color: LuaValue = style.get("modified")?;
+                            let accent_color: LuaValue = style.get("accent")?;
+                            let color = if !matches!(modified_color, LuaValue::Nil) {
+                                modified_color
+                            } else {
+                                accent_color
+                            };
+                            common.call_function::<()>(
+                                "draw_text",
+                                (font.clone(), color, marker, "left", draw_x, y, marker_w, h),
+                            )?;
+                            draw_x += marker_w;
+                            draw_w = (draw_w - marker_w).max(0.0);
+                        }
+
+                        let color: LuaValue = if is_active || is_hovered {
+                            style.get("text")?
                         } else {
-                            accent_color
+                            style.get("dim")?
                         };
-                        common.call_function::<()>("draw_text", (font.clone(), color, marker, "left", draw_x, y, marker_w, h))?;
-                        draw_x += marker_w;
-                        draw_w = (draw_w - marker_w).max(0.0);
-                    }
-
-                    let color: LuaValue = if is_active || is_hovered {
-                        style.get("text")?
-                    } else {
-                        style.get("dim")?
-                    };
-                    common.call_function::<()>("draw_text", (font, color, display_text, align, draw_x, y, draw_w, h))?;
-                    Ok(())
-                })?,
+                        common.call_function::<()>(
+                            "draw_text",
+                            (font, color, display_text, align, draw_x, y, draw_w, h),
+                        )?;
+                        Ok(())
+                    },
+                )?,
             )?;
 
             // Node:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalone)
             node.set(
                 "draw_tab_borders",
-                lua.create_function(|lua, (this, _view, is_active, _is_hovered, x, y, w, h, standalone): (LuaTable, LuaValue, bool, bool, f64, f64, f64, f64, Option<bool>)| {
-                    let style: LuaTable = require_table(lua, "core.style")?;
-                    let ds: f64 = style.get("divider_size")?;
-                    let style_dim: LuaValue = style.get("dim")?;
-                    let style_padding: LuaTable = style.get("padding")?;
-                    let pad_y: f64 = style_padding.get("y")?;
-                    let padding_y = 2.0_f64.max((pad_y * 0.75).floor());
-                    let renderer: LuaTable = lua.globals().get("renderer")?;
-                    let draw_rect: LuaFunction = renderer.get("draw_rect")?;
-                    draw_rect.call::<()>((x + w, y + padding_y, ds, h - padding_y * 2.0, style_dim))?;
+                lua.create_function(
+                    |lua,
+                     (this, _view, is_active, _is_hovered, x, y, w, h, standalone): (
+                        LuaTable,
+                        LuaValue,
+                        bool,
+                        bool,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                        Option<bool>,
+                    )| {
+                        let style: LuaTable = require_table(lua, "core.style")?;
+                        let ds: f64 = style.get("divider_size")?;
+                        let style_dim: LuaValue = style.get("dim")?;
+                        let style_padding: LuaTable = style.get("padding")?;
+                        let pad_y: f64 = style_padding.get("y")?;
+                        let padding_y = 2.0_f64.max((pad_y * 0.75).floor());
+                        let renderer: LuaTable = lua.globals().get("renderer")?;
+                        let draw_rect: LuaFunction = renderer.get("draw_rect")?;
+                        draw_rect.call::<()>((
+                            x + w,
+                            y + padding_y,
+                            ds,
+                            h - padding_y * 2.0,
+                            style_dim,
+                        ))?;
 
-                    let is_standalone = standalone.unwrap_or(false);
-                    if is_standalone {
-                        let bg2: LuaValue = style.get("background2")?;
-                        draw_rect.call::<()>((x - 1.0, y - 1.0, w + 2.0, h + 2.0, bg2))?;
-                    }
-                    if is_active {
-                        let bg: LuaValue = style.get("background")?;
-                        let divider: LuaValue = style.get("divider")?;
-                        draw_rect.call::<()>((x, y, w, h, bg))?;
-                        draw_rect.call::<()>((x, y, w, ds, divider.clone()))?;
-                        draw_rect.call::<()>((x + w, y, ds, h, divider.clone()))?;
-                        draw_rect.call::<()>((x - ds, y, ds, h, divider))?;
-                    }
-                    let _ = &this;
-                    Ok((x + ds, y, w - ds * 2.0, h))
-                })?,
+                        let is_standalone = standalone.unwrap_or(false);
+                        if is_standalone {
+                            let bg2: LuaValue = style.get("background2")?;
+                            draw_rect.call::<()>((x - 1.0, y - 1.0, w + 2.0, h + 2.0, bg2))?;
+                        }
+                        if is_active {
+                            let bg: LuaValue = style.get("background")?;
+                            let divider: LuaValue = style.get("divider")?;
+                            draw_rect.call::<()>((x, y, w, h, bg))?;
+                            draw_rect.call::<()>((x, y, w, ds, divider.clone()))?;
+                            draw_rect.call::<()>((x + w, y, ds, h, divider.clone()))?;
+                            draw_rect.call::<()>((x - ds, y, ds, h, divider))?;
+                        }
+                        let _ = &this;
+                        Ok((x + ds, y, w - ds * 2.0, h))
+                    },
+                )?,
             )?;
 
             // Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h, standalone)
             #[allow(clippy::too_many_arguments)]
             node.set(
                 "draw_tab",
-                lua.create_function(|lua, (this, view, is_active, is_hovered, is_close_hovered, x, y, w, h, standalone): (LuaTable, LuaTable, bool, bool, bool, f64, f64, f64, f64, Option<bool>)| {
-                    let style: LuaTable = require_table(lua, "core.style")?;
-                    let style_font: LuaValue = style.get("font")?;
-                    let style_padding: LuaTable = style.get("padding")?;
-                    let pad_y: f64 = style_padding.get("y")?;
-                    let pad_x: f64 = style_padding.get("x")?;
-                    let style_margin: LuaTable = style.get("margin")?;
-                    let tab_margin: LuaTable = style_margin.get("tab")?;
-                    let margin_y: f64 = tab_margin.get("top")?;
-                    let _ = pad_y;
+                lua.create_function(
+                    |lua,
+                     (
+                        this,
+                        view,
+                        is_active,
+                        is_hovered,
+                        is_close_hovered,
+                        x,
+                        y,
+                        w,
+                        h,
+                        standalone,
+                    ): (
+                        LuaTable,
+                        LuaTable,
+                        bool,
+                        bool,
+                        bool,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                        Option<bool>,
+                    )| {
+                        let style: LuaTable = require_table(lua, "core.style")?;
+                        let style_font: LuaValue = style.get("font")?;
+                        let style_padding: LuaTable = style.get("padding")?;
+                        let pad_y: f64 = style_padding.get("y")?;
+                        let pad_x: f64 = style_padding.get("x")?;
+                        let style_margin: LuaTable = style.get("margin")?;
+                        let tab_margin: LuaTable = style_margin.get("tab")?;
+                        let margin_y: f64 = tab_margin.get("top")?;
+                        let _ = pad_y;
 
-                    let is_standalone = standalone.unwrap_or(false);
+                        let is_standalone = standalone.unwrap_or(false);
 
-                    let (bx, by, bw, bh): (f64, f64, f64, f64) = this.call_method(
-                        "draw_tab_borders",
-                        (view.clone(), is_active, is_hovered, x, y + margin_y, w, h - margin_y, is_standalone),
-                    )?;
+                        let (bx, by, bw, bh): (f64, f64, f64, f64) = this.call_method(
+                            "draw_tab_borders",
+                            (
+                                view.clone(),
+                                is_active,
+                                is_hovered,
+                                x,
+                                y + margin_y,
+                                w,
+                                h - margin_y,
+                                is_standalone,
+                            ),
+                        )?;
 
-                    // Close button
-                    let icon_font: LuaValue = style.get("icon_font")?;
-                    let icon_w: f64 = match &icon_font {
-                        LuaValue::Table(t) => t.call_method("get_width", "C")?,
-                        LuaValue::UserData(ud) => ud.call_method("get_width", "C")?,
-                        _ => 14.0,
-                    };
-                    let font_h: f64 = match &style_font {
-                        LuaValue::Table(t) => t.call_method("get_height", ())?,
-                        LuaValue::UserData(ud) => ud.call_method("get_height", ())?,
-                        _ => 14.0,
-                    };
-                    let hit_w = (icon_w + pad_x).max(font_h);
-                    let cpad = (pad_x / 2.0).max(((hit_w - icon_w) / 2.0).floor());
-                    let cx = bx + bw - hit_w;
-
-                    let config: LuaTable = require_table(lua, "core.config")?;
-                    let tab_close_button: bool = config.get::<LuaValue>("tab_close_button")?
-                        .as_boolean().unwrap_or(true);
-                    let show_close = (is_active || is_hovered) && !is_standalone && tab_close_button;
-
-                    if show_close {
-                        let renderer: LuaTable = lua.globals().get("renderer")?;
-                        let draw_rect: LuaFunction = renderer.get("draw_rect")?;
-                        let common: LuaTable = require_table(lua, "core.common")?;
-                        let close_style: LuaValue = if is_close_hovered {
-                            style.get("text")?
-                        } else {
-                            style.get("dim")?
+                        // Close button
+                        let icon_font: LuaValue = style.get("icon_font")?;
+                        let icon_w: f64 = match &icon_font {
+                            LuaValue::Table(t) => t.call_method("get_width", "C")?,
+                            LuaValue::UserData(ud) => ud.call_method("get_width", "C")?,
+                            _ => 14.0,
                         };
-                        if is_close_hovered {
-                            let line_hl: LuaTable = style.get("line_highlight")?;
-                            let hover_bg = lua.create_table()?;
-                            for i in 1..=4i64 {
-                                let v: LuaValue = line_hl.raw_get(i)?;
-                                hover_bg.raw_set(i, v)?;
-                            }
-                            hover_bg.raw_set(4, 150)?;
-                            let padding_y_val: f64 = style_padding.get("y")?;
-                            draw_rect.call::<()>((cx, by + padding_y_val / 2.0, hit_w, bh - padding_y_val, hover_bg))?;
-                        }
-                        common.call_function::<()>("draw_text", (icon_font, close_style, "C", LuaValue::Nil, cx + cpad, by, icon_w, bh))?;
-                    }
+                        let font_h: f64 = match &style_font {
+                            LuaValue::Table(t) => t.call_method("get_height", ())?,
+                            LuaValue::UserData(ud) => ud.call_method("get_height", ())?,
+                            _ => 14.0,
+                        };
+                        let hit_w = (icon_w + pad_x).max(font_h);
+                        let cpad = (pad_x / 2.0).max(((hit_w - icon_w) / 2.0).floor());
+                        let cx = bx + bw - hit_w;
 
-                    // Title
-                    let title_x = bx + cpad;
-                    let title_w = cx - title_x;
-                    let core: LuaTable = require_table(lua, "core")?;
-                    let push_clip: LuaFunction = core.get("push_clip_rect")?;
-                    let pop_clip: LuaFunction = core.get("pop_clip_rect")?;
-                    push_clip.call::<()>((title_x, by, title_w, bh))?;
-                    this.call_method::<()>("draw_tab_title", (view, style_font, is_active, is_hovered, title_x, by, title_w, bh))?;
-                    pop_clip.call::<()>(())?;
-                    Ok(())
-                })?,
+                        let config: LuaTable = require_table(lua, "core.config")?;
+                        let tab_close_button: bool = config
+                            .get::<LuaValue>("tab_close_button")?
+                            .as_boolean()
+                            .unwrap_or(true);
+                        let show_close =
+                            (is_active || is_hovered) && !is_standalone && tab_close_button;
+
+                        if show_close {
+                            let renderer: LuaTable = lua.globals().get("renderer")?;
+                            let draw_rect: LuaFunction = renderer.get("draw_rect")?;
+                            let common: LuaTable = require_table(lua, "core.common")?;
+                            let close_style: LuaValue = if is_close_hovered {
+                                style.get("text")?
+                            } else {
+                                style.get("dim")?
+                            };
+                            if is_close_hovered {
+                                let line_hl: LuaTable = style.get("line_highlight")?;
+                                let hover_bg = lua.create_table()?;
+                                for i in 1..=4i64 {
+                                    let v: LuaValue = line_hl.raw_get(i)?;
+                                    hover_bg.raw_set(i, v)?;
+                                }
+                                hover_bg.raw_set(4, 150)?;
+                                let padding_y_val: f64 = style_padding.get("y")?;
+                                draw_rect.call::<()>((
+                                    cx,
+                                    by + padding_y_val / 2.0,
+                                    hit_w,
+                                    bh - padding_y_val,
+                                    hover_bg,
+                                ))?;
+                            }
+                            common.call_function::<()>(
+                                "draw_text",
+                                (
+                                    icon_font,
+                                    close_style,
+                                    "C",
+                                    LuaValue::Nil,
+                                    cx + cpad,
+                                    by,
+                                    icon_w,
+                                    bh,
+                                ),
+                            )?;
+                        }
+
+                        // Title
+                        let title_x = bx + cpad;
+                        let title_w = cx - title_x;
+                        let core: LuaTable = require_table(lua, "core")?;
+                        let push_clip: LuaFunction = core.get("push_clip_rect")?;
+                        let pop_clip: LuaFunction = core.get("pop_clip_rect")?;
+                        push_clip.call::<()>((title_x, by, title_w, bh))?;
+                        this.call_method::<()>(
+                            "draw_tab_title",
+                            (
+                                view, style_font, is_active, is_hovered, title_x, by, title_w, bh,
+                            ),
+                        )?;
+                        pop_clip.call::<()>(())?;
+                        Ok(())
+                    },
+                )?,
             )?;
 
             // Node:draw_tabs()
@@ -1485,10 +1672,19 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let is_active = view == active_view;
                         let is_hovered = hovered_tab.as_integer() == Some(i);
                         let is_close_hovered = hovered_close.as_integer() == Some(i);
-                        this.call_method::<()>("draw_tab", (
-                            view, is_active, is_hovered, is_close_hovered,
-                            tx, ty, tw, th,
-                        ))?;
+                        this.call_method::<()>(
+                            "draw_tab",
+                            (
+                                view,
+                                is_active,
+                                is_hovered,
+                                is_close_hovered,
+                                tx,
+                                ty,
+                                tw,
+                                th,
+                            ),
+                        )?;
                     }
 
                     if (views.raw_len() as i64) > tabs_number {
@@ -1501,26 +1697,60 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let pad = w_char;
                         let (xrb, yrb, wrb, _hrb): (f64, f64, f64, f64) =
                             this.call_method("get_scroll_button_rect", 1)?;
-                        draw_rect.call::<()>((xrb + pad, yrb, wrb * 2.0, h, style.get::<LuaValue>("background2")?))?;
+                        draw_rect.call::<()>((
+                            xrb + pad,
+                            yrb,
+                            wrb * 2.0,
+                            h,
+                            style.get::<LuaValue>("background2")?,
+                        ))?;
 
-                        let hovered_scroll: i64 = this.get::<LuaValue>("hovered_scroll_button")?
-                            .as_integer().unwrap_or(0);
+                        let hovered_scroll: i64 = this
+                            .get::<LuaValue>("hovered_scroll_button")?
+                            .as_integer()
+                            .unwrap_or(0);
                         let left_style: LuaValue = if hovered_scroll == 1 && tab_offset > 1 {
                             style.get("text")?
                         } else {
                             style.get("dim")?
                         };
                         let common: LuaTable = require_table(lua, "core.common")?;
-                        common.call_function::<()>("draw_text", (style_font.clone(), left_style, "<", LuaValue::Nil, xrb + scroll_padding, yrb, 0.0, h))?;
+                        common.call_function::<()>(
+                            "draw_text",
+                            (
+                                style_font.clone(),
+                                left_style,
+                                "<",
+                                LuaValue::Nil,
+                                xrb + scroll_padding,
+                                yrb,
+                                0.0,
+                                h,
+                            ),
+                        )?;
 
                         let (xrb2, yrb2, _wrb2, _hrb2): (f64, f64, f64, f64) =
                             this.call_method("get_scroll_button_rect", 2)?;
-                        let right_style: LuaValue = if hovered_scroll == 2 && (views.raw_len() as i64) > tab_offset + tabs_number - 1 {
+                        let right_style: LuaValue = if hovered_scroll == 2
+                            && (views.raw_len() as i64) > tab_offset + tabs_number - 1
+                        {
                             style.get("text")?
                         } else {
                             style.get("dim")?
                         };
-                        common.call_function::<()>("draw_text", (style_font, right_style, ">", LuaValue::Nil, xrb2 + scroll_padding, yrb2, 0.0, h))?;
+                        common.call_function::<()>(
+                            "draw_text",
+                            (
+                                style_font,
+                                right_style,
+                                ">",
+                                LuaValue::Nil,
+                                xrb2 + scroll_padding,
+                                yrb2,
+                                0.0,
+                                h,
+                            ),
+                        )?;
                     }
 
                     pop_clip.call::<()>(())?;
@@ -1627,7 +1857,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 break;
                             }
                             let view: LuaTable = views.raw_get(i)?;
-                            let ctx: String = view.get::<LuaValue>("context")?
+                            let ctx: String = view
+                                .get::<LuaValue>("context")?
                                 .as_string()
                                 .map(|s| s.to_string_lossy().to_string())
                                 .unwrap_or_default();
@@ -1646,8 +1877,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             }
                         }
                         this.set("tab_offset", 1)?;
-                        let is_primary: bool = this.get::<LuaValue>("is_primary_node")?
-                            .as_boolean().unwrap_or(false);
+                        let is_primary: bool = this
+                            .get::<LuaValue>("is_primary_node")?
+                            .as_boolean()
+                            .unwrap_or(false);
                         let remaining = views.raw_len();
                         if remaining == 0 && is_primary {
                             let ev_cls: LuaTable = lua.registry_value(&ek)?;
@@ -1665,11 +1898,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let a: LuaTable = this.get("a")?;
                         let b: LuaTable = this.get("b")?;
                         let a_empty: bool = a.call_method("is_empty", ())?;
-                        let a_primary: bool = a.get::<LuaValue>("is_primary_node")?
-                            .as_boolean().unwrap_or(false);
+                        let a_primary: bool = a
+                            .get::<LuaValue>("is_primary_node")?
+                            .as_boolean()
+                            .unwrap_or(false);
                         let b_empty: bool = b.call_method("is_empty", ())?;
-                        let b_primary: bool = b.get::<LuaValue>("is_primary_node")?
-                            .as_boolean().unwrap_or(false);
+                        let b_primary: bool = b
+                            .get::<LuaValue>("is_primary_node")?
+                            .as_boolean()
+                            .unwrap_or(false);
                         if a_empty && !a_primary {
                             this.call_method::<()>("consume", b)?;
                         } else if b_empty && !b_primary {
@@ -1690,8 +1927,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         if let LuaValue::Table(ref locked_tbl) = locked {
                             let locked_axis: LuaValue = locked_tbl.get(axis.as_str())?;
                             if matches!(locked_axis, LuaValue::Boolean(true)) {
-                                let resizable: bool = this.get::<LuaValue>("resizable")?
-                                    .as_boolean().unwrap_or(false);
+                                let resizable: bool = this
+                                    .get::<LuaValue>("resizable")?
+                                    .as_boolean()
+                                    .unwrap_or(false);
                                 return Ok(resizable);
                             }
                             return Ok(true);
@@ -1715,8 +1954,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if let LuaValue::Table(ref locked_tbl) = locked {
                         let locked_axis: LuaValue = locked_tbl.get(axis.as_str())?;
                         if matches!(locked_axis, LuaValue::Boolean(true)) {
-                            let resizable: bool = this.get::<LuaValue>("resizable")?
-                                .as_boolean().unwrap_or(false);
+                            let resizable: bool = this
+                                .get::<LuaValue>("resizable")?
+                                .as_boolean()
+                                .unwrap_or(false);
                             return Ok(resizable);
                         }
                     }
@@ -1785,10 +2026,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let position: LuaTable = this.get("position")?;
                     let pos_x: f64 = position.get("x")?;
                     let pos_y: f64 = position.get("y")?;
-                    let result: String = nm.call_function("split_type", (
-                        size_x, size_y, tab_h,
-                        mouse_x - pos_x, mouse_y - pos_y,
-                    ))?;
+                    let result: String = nm.call_function(
+                        "split_type",
+                        (size_x, size_y, tab_h, mouse_x - pos_x, mouse_y - pos_y),
+                    )?;
                     Ok(result)
                 })?
             })?;
@@ -1796,37 +2037,60 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // Node:get_drag_overlay_tab_position(x, y, dragged_node, dragged_index)
             node.set("get_drag_overlay_tab_position", {
                 let nmk = Arc::clone(&nm_key);
-                lua.create_function(move |lua, (this, x, _y, dragged_node, dragged_index): (LuaTable, f64, f64, Option<LuaTable>, Option<i64>)| {
-                    let nm: LuaTable = lua.registry_value(&nmk)?;
-                    let views: LuaTable = this.get("views")?;
-                    let tab_offset: i64 = this.get("tab_offset")?;
-                    let config: LuaTable = require_table(lua, "core.config")?;
-                    let max_tabs: i64 = config.get("max_tabs")?;
-                    let tab_width: f64 = this.get("tab_width")?;
-                    let tab_shift: f64 = this.get("tab_shift")?;
-                    let size: LuaTable = this.get("size")?;
-                    let size_x: f64 = size.get("x")?;
-                    let position: LuaTable = this.get("position")?;
-                    let pos_x: f64 = position.get("x")?;
+                lua.create_function(
+                    move |lua,
+                          (this, x, _y, dragged_node, dragged_index): (
+                        LuaTable,
+                        f64,
+                        f64,
+                        Option<LuaTable>,
+                        Option<i64>,
+                    )| {
+                        let nm: LuaTable = lua.registry_value(&nmk)?;
+                        let views: LuaTable = this.get("views")?;
+                        let tab_offset: i64 = this.get("tab_offset")?;
+                        let config: LuaTable = require_table(lua, "core.config")?;
+                        let max_tabs: i64 = config.get("max_tabs")?;
+                        let tab_width: f64 = this.get("tab_width")?;
+                        let tab_shift: f64 = this.get("tab_shift")?;
+                        let size: LuaTable = this.get("size")?;
+                        let size_x: f64 = size.get("x")?;
+                        let position: LuaTable = this.get("position")?;
+                        let pos_x: f64 = position.get("x")?;
 
-                    let di = if dragged_node.as_ref() == Some(&this) {
-                        dragged_index.unwrap_or(0)
-                    } else {
-                        0
-                    };
+                        let di = if dragged_node.as_ref() == Some(&this) {
+                            dragged_index.unwrap_or(0)
+                        } else {
+                            0
+                        };
 
-                    let (tab_index, tab_x, tab_w): (i64, f64, f64) = nm.call_function("drag_overlay_tab_position", (
-                        views.raw_len() as i64, tab_offset, max_tabs,
-                        tab_width, tab_shift, size_x,
-                        x - pos_x, di,
-                    ))?;
+                        let (tab_index, tab_x, tab_w): (i64, f64, f64) = nm.call_function(
+                            "drag_overlay_tab_position",
+                            (
+                                views.raw_len() as i64,
+                                tab_offset,
+                                max_tabs,
+                                tab_width,
+                                tab_shift,
+                                size_x,
+                                x - pos_x,
+                                di,
+                            ),
+                        )?;
 
-                    let clamped = tab_index.max(1).min(views.raw_len() as i64);
-                    let (_, tab_y, _, tab_h, margin_y): (f64, f64, f64, f64, f64) =
-                        this.call_method("get_tab_rect", clamped)?;
+                        let clamped = tab_index.max(1).min(views.raw_len() as i64);
+                        let (_, tab_y, _, tab_h, margin_y): (f64, f64, f64, f64, f64) =
+                            this.call_method("get_tab_rect", clamped)?;
 
-                    Ok((tab_index, pos_x + tab_x, tab_y + margin_y, tab_w, tab_h - margin_y))
-                })?
+                        Ok((
+                            tab_index,
+                            pos_x + tab_x,
+                            tab_y + margin_y,
+                            tab_w,
+                            tab_h - margin_y,
+                        ))
+                    },
+                )?
             })?;
 
             Ok(LuaValue::Table(node))

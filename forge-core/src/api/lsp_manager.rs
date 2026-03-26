@@ -22,6 +22,7 @@ struct DocState {
     version: Option<i64>,
     last_diagnostic_version: Option<i64>,
     pending_semantic_at: Option<f64>,
+    pending_change_at: Option<f64>,
 }
 
 #[derive(Clone, Default)]
@@ -624,6 +625,49 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 }
             }
             Ok(out)
+        })?,
+    )?;
+
+    module.set(
+        "schedule_change",
+        lua.create_function(|_, (uri, now, delay): (String, f64, Option<f64>)| {
+            let mut state = STATE.lock();
+            let doc_state = state.docs.entry(uri).or_default();
+            doc_state.pending_change_at = Some(now + delay.unwrap_or(0.15));
+            Ok(true)
+        })?,
+    )?;
+
+    module.set(
+        "take_due_changes",
+        lua.create_function(|lua, now: f64| {
+            let mut state = STATE.lock();
+            let out = lua.create_table()?;
+            let mut idx = 1i64;
+            for (uri, doc_state) in &mut state.docs {
+                if let Some(when) = doc_state.pending_change_at {
+                    if when <= now {
+                        doc_state.pending_change_at = None;
+                        out.raw_set(idx, uri.as_str())?;
+                        idx += 1;
+                    }
+                }
+            }
+            Ok(out)
+        })?,
+    )?;
+
+    // Forces any pending change for a URI to be considered due immediately.
+    module.set(
+        "flush_change",
+        lua.create_function(|_, uri: String| {
+            let mut state = STATE.lock();
+            if let Some(doc_state) = state.docs.get_mut(&uri) {
+                if doc_state.pending_change_at.is_some() {
+                    doc_state.pending_change_at = Some(0.0);
+                }
+            }
+            Ok(true)
         })?,
     )?;
 

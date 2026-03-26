@@ -94,11 +94,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let exit_code: Option<i64> = proc.call_method("wait", timeout)?;
                 let stdout_stream: LuaTable = proc.get("stdout")?;
                 let stderr_stream: LuaTable = proc.get("stderr")?;
-                let stdout: String =
-                    stdout_stream.call_method::<Option<String>>("read", "all")?
+                let stdout: String = stdout_stream
+                    .call_method::<Option<String>>("read", "all")?
                     .unwrap_or_default();
-                let stderr: String =
-                    stderr_stream.call_method::<Option<String>>("read", "all")?
+                let stderr: String = stderr_stream
+                    .call_method::<Option<String>>("read", "all")?
                     .unwrap_or_default();
                 if exit_code != Some(0) {
                     let msg = if !stderr.trim().is_empty() {
@@ -142,7 +142,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if let LuaValue::String(ref err) = vals[1] {
                         let err_str = err.to_str().map(|s| s.to_owned()).unwrap_or_default();
                         if !err_str.is_empty() && err_str != "path exists" {
-                            let path_str = vals.get(2)
+                            let path_str = vals
+                                .get(2)
                                 .and_then(|v| v.as_string().map(|s| s.to_string_lossy()))
                                 .unwrap_or_else(|| mount_root.clone());
                             return Ok((
@@ -163,8 +164,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let dirname = format!("{}-{:04}", sanitize_mount_name(&spec), counter);
                 let mountpoint = format!("{mount_root}{pathsep}{dirname}");
 
-                let _: LuaMultiValue =
-                    common.call_function("mkdirp", mountpoint.as_str())?;
+                let _: LuaMultiValue = common.call_function("mkdirp", mountpoint.as_str())?;
 
                 // Build sshfs command
                 let argv = lua.create_table()?;
@@ -188,10 +188,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
                 if let Some(err) = mount_err {
                     common.call_function::<()>("rm", (mountpoint.as_str(), false))?;
-                    return Ok((
-                        LuaValue::Nil,
-                        LuaValue::String(lua.create_string(&err)?),
-                    ));
+                    return Ok((LuaValue::Nil, LuaValue::String(lua.create_string(&err)?)));
                 }
 
                 mounts_by_spec.set(spec.as_str(), mountpoint.as_str())?;
@@ -247,8 +244,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 }
 
                 let run_cmd: LuaFunction = lua.registry_value(&rck)?;
-                let (_, err): (LuaValue, Option<String>) =
-                    run_cmd.call((argv, unmount_timeout))?;
+                let (_, err): (LuaValue, Option<String>) = run_cmd.call((argv, unmount_timeout))?;
                 if let Some(err) = err {
                     return Ok((false, LuaValue::String(lua.create_string(&err)?)));
                 }
@@ -276,18 +272,18 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             let _sk = state_key.clone();
             let mrk = Arc::clone(&mount_remote_key);
             let ak = Arc::clone(&attach_key);
-            let connect_fn = lua.create_function(move |lua, (spec, add_only): (String, bool)| {
-                let core = require_table(lua, "core")?;
-                let mount_fn: LuaFunction = lua.registry_value(&mrk)?;
-                let attach: LuaFunction = lua.registry_value(&ak)?;
-                let spec_clone = spec.clone();
+            let connect_fn =
+                lua.create_function(move |lua, (spec, add_only): (String, bool)| {
+                    let core = require_table(lua, "core")?;
+                    let mount_fn: LuaFunction = lua.registry_value(&mrk)?;
+                    let attach: LuaFunction = lua.registry_value(&ak)?;
+                    let spec_clone = spec.clone();
 
-                // Build thread body as Lua function wrapping Rust tick
-                // (coroutine.yield cannot be called from Rust closures)
-                let mount_key = lua.create_registry_value(mount_fn)?;
-                let attach_key_inner = lua.create_registry_value(attach)?;
-                let tick = lua.create_function(
-                    move |lua, ()| -> LuaResult<()> {
+                    // Build thread body as Lua function wrapping Rust tick
+                    // (coroutine.yield cannot be called from Rust closures)
+                    let mount_key = lua.create_registry_value(mount_fn)?;
+                    let attach_key_inner = lua.create_registry_value(attach)?;
+                    let tick = lua.create_function(move |lua, ()| -> LuaResult<()> {
                         let mount_fn: LuaFunction = lua.registry_value(&mount_key)?;
                         let (result, err): (LuaValue, LuaValue) =
                             mount_fn.call(spec_clone.as_str())?;
@@ -327,12 +323,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             format!("Mounted remote project {:?}", spec),
                         )?;
                         Ok(())
-                    },
-                )?;
+                    })?;
 
-                core.call_function::<()>("add_thread", tick)?;
-                Ok(())
-            })?;
+                    core.call_function::<()>("add_thread", tick)?;
+                    Ok(())
+                })?;
             let connect_key = Arc::new(lua.create_registry_value(connect_fn)?);
 
             // Patch core.add_project

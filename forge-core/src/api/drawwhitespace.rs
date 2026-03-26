@@ -82,11 +82,7 @@ fn settings_changed(lua: &Lua, state: &LuaTable) -> LuaResult<bool> {
     Ok(false)
 }
 
-fn get_or_create_hl_cache(
-    lua: &Lua,
-    ws_cache: &LuaTable,
-    hl: &LuaTable,
-) -> LuaResult<LuaTable> {
+fn get_or_create_hl_cache(lua: &Lua, ws_cache: &LuaTable, hl: &LuaTable) -> LuaResult<LuaTable> {
     match ws_cache.raw_get::<LuaValue>(hl.clone())? {
         LuaValue::Table(t) => Ok(t),
         _ => {
@@ -170,21 +166,52 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
     let spec = lua.create_table()?;
     spec.set("name", "Draw Whitespace")?;
 
-    let mk_toggle = |lua: &Lua, label: &str, desc: &str, path: &str, default: bool| -> LuaResult<LuaTable> {
-        let e = lua.create_table()?;
-        e.set("label", label)?;
-        e.set("description", desc)?;
-        e.set("path", path)?;
-        e.set("type", "toggle")?;
-        e.set("default", default)?;
-        Ok(e)
-    };
+    let mk_toggle =
+        |lua: &Lua, label: &str, desc: &str, path: &str, default: bool| -> LuaResult<LuaTable> {
+            let e = lua.create_table()?;
+            e.set("label", label)?;
+            e.set("description", desc)?;
+            e.set("path", path)?;
+            e.set("type", "toggle")?;
+            e.set("default", default)?;
+            Ok(e)
+        };
 
-    spec.push(mk_toggle(lua, "Enabled", "Disable or enable the drawing of white spaces.", "enabled", false)?)?;
-    spec.push(mk_toggle(lua, "Show Leading", "Draw whitespaces starting at the beginning of a line.", "show_leading", true)?)?;
-    spec.push(mk_toggle(lua, "Show Middle", "Draw whitespaces on the middle of a line.", "show_middle", true)?)?;
-    spec.push(mk_toggle(lua, "Show Trailing", "Draw whitespaces on the end of a line.", "show_trailing", true)?)?;
-    spec.push(mk_toggle(lua, "Show Selected Only", "Only draw whitespaces if it is within a selection.", "show_selected_only", false)?)?;
+    spec.push(mk_toggle(
+        lua,
+        "Enabled",
+        "Disable or enable the drawing of white spaces.",
+        "enabled",
+        false,
+    )?)?;
+    spec.push(mk_toggle(
+        lua,
+        "Show Leading",
+        "Draw whitespaces starting at the beginning of a line.",
+        "show_leading",
+        true,
+    )?)?;
+    spec.push(mk_toggle(
+        lua,
+        "Show Middle",
+        "Draw whitespaces on the middle of a line.",
+        "show_middle",
+        true,
+    )?)?;
+    spec.push(mk_toggle(
+        lua,
+        "Show Trailing",
+        "Draw whitespaces on the end of a line.",
+        "show_trailing",
+        true,
+    )?)?;
+    spec.push(mk_toggle(
+        lua,
+        "Show Selected Only",
+        "Only draw whitespaces if it is within a selection.",
+        "show_selected_only",
+        false,
+    )?)?;
 
     let trailing_error_entry = lua.create_table()?;
     trailing_error_entry.set("label", "Show Trailing as Error")?;
@@ -237,8 +264,10 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
     spec.push(trailing_error_entry)?;
     defaults.set("config_spec", spec)?;
 
-    let merged: LuaTable =
-        common.call_function("merge", (defaults, plugins.get::<LuaValue>("drawwhitespace")?))?;
+    let merged: LuaTable = common.call_function(
+        "merge",
+        (defaults, plugins.get::<LuaValue>("drawwhitespace")?),
+    )?;
     plugins.set("drawwhitespace", merged)?;
     Ok(())
 }
@@ -462,9 +491,11 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
                     let show_trailing = get_option_bool(&dw, &sub_entry, "show_trailing")?;
                     let show_middle_min = get_option_i64(&dw, &sub_entry, "show_middle_min")?;
                     let base_color = get_option_value(&dw, &sub_entry, "color")?;
-                    let leading_color = get_option_or(&dw, &sub_entry, "leading_color", &base_color)?;
+                    let leading_color =
+                        get_option_or(&dw, &sub_entry, "leading_color", &base_color)?;
                     let middle_color = get_option_or(&dw, &sub_entry, "middle_color", &base_color)?;
-                    let trailing_color = get_option_or(&dw, &sub_entry, "trailing_color", &base_color)?;
+                    let trailing_color =
+                        get_option_or(&dw, &sub_entry, "trailing_color", &base_color)?;
 
                     for (s, e) in find_byte_runs(&text, ch) {
                         let (should_draw, color) = if e >= text_len.saturating_sub(1) {
@@ -472,7 +503,10 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
                         } else if s == 1 {
                             (show_leading, leading_color.clone())
                         } else {
-                            (show_middle && (e - s + 1) as i64 >= show_middle_min, middle_color.clone())
+                            (
+                                show_middle && (e - s + 1) as i64 >= show_middle_min,
+                                middle_color.clone(),
+                            )
                         };
 
                         if !should_draw {
@@ -482,7 +516,8 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
                         let tx: f64 = this.call_method("get_col_x_offset", (idx, s as i64))?;
                         if ch == b'\t' {
                             for i in s..=e {
-                                let itx: f64 = this.call_method("get_col_x_offset", (idx, i as i64))?;
+                                let itx: f64 =
+                                    this.call_method("get_col_x_offset", (idx, i as i64))?;
                                 let tw = font_get_width(&font, &sub_str)?;
                                 cache.set(cache_idx, sub_str.as_str())?;
                                 cache.set(cache_idx + 1, itx)?;
@@ -508,16 +543,26 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
 
             // Draw from cache.
             let bounds: LuaMultiValue = this.call_method("get_content_bounds", ())?;
-            let x1 = bounds.iter().next().map(|v| match v {
-                LuaValue::Number(n) => *n,
-                LuaValue::Integer(n) => *n as f64,
-                _ => 0.0,
-            }).unwrap_or(0.0) + x;
-            let x2 = bounds.iter().nth(2).map(|v| match v {
-                LuaValue::Number(n) => *n,
-                LuaValue::Integer(n) => *n as f64,
-                _ => 0.0,
-            }).unwrap_or(0.0) + x;
+            let x1 = bounds
+                .iter()
+                .next()
+                .map(|v| match v {
+                    LuaValue::Number(n) => *n,
+                    LuaValue::Integer(n) => *n as f64,
+                    _ => 0.0,
+                })
+                .unwrap_or(0.0)
+                + x;
+            let x2 = bounds
+                .iter()
+                .nth(2)
+                .map(|v| match v {
+                    LuaValue::Number(n) => *n,
+                    LuaValue::Integer(n) => *n as f64,
+                    _ => 0.0,
+                })
+                .unwrap_or(0.0)
+                + x;
             let ty_offset: f64 = this.call_method("get_line_text_y_offset", ())?;
             let ty = y + ty_offset;
 
@@ -565,10 +610,10 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
                                 if idx > l1 && idx < l2 {
                                     partials.push(None); // entire line selected
                                 } else if idx == l1 && idx == l2 {
-                                    let col_x1: f64 = this
-                                        .call_method("get_col_x_offset", (idx, c1))?;
-                                    let col_x2: f64 = this
-                                        .call_method("get_col_x_offset", (idx, c2))?;
+                                    let col_x1: f64 =
+                                        this.call_method("get_col_x_offset", (idx, c1))?;
+                                    let col_x2: f64 =
+                                        this.call_method("get_col_x_offset", (idx, c2))?;
                                     let rx1 = tx.max(col_x1 + x);
                                     let rx2 = (tx + tw).min(col_x2 + x);
                                     if rx1 < rx2 {
@@ -579,7 +624,12 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
                                         let col_x: f64 =
                                             this.call_method("get_col_x_offset", (idx, c1))?;
                                         let rx = tx.max(col_x + x);
-                                        partials.push(Some((rx, 0.0, f64::INFINITY, f64::INFINITY)));
+                                        partials.push(Some((
+                                            rx,
+                                            0.0,
+                                            f64::INFINITY,
+                                            f64::INFINITY,
+                                        )));
                                     } else {
                                         let col_x: f64 =
                                             this.call_method("get_col_x_offset", (idx, c2))?;
@@ -600,10 +650,7 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
                 } else {
                     for p in &partials {
                         if let Some((px, py, pw, ph)) = p {
-                            core.call_function::<()>(
-                                "push_clip_rect",
-                                (*px, *py, *pw, *ph),
-                            )?;
+                            core.call_function::<()>("push_clip_rect", (*px, *py, *pw, *ph))?;
                         }
                         renderer.call_function::<LuaValue>(
                             "draw_text",
@@ -627,7 +674,11 @@ fn patch_draw_line_text(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<
 
 fn get_option_value(dw: &LuaTable, sub: &LuaTable, key: &str) -> LuaResult<LuaValue> {
     let v: LuaValue = sub.get(key)?;
-    if matches!(v, LuaValue::Nil) { dw.get(key) } else { Ok(v) }
+    if matches!(v, LuaValue::Nil) {
+        dw.get(key)
+    } else {
+        Ok(v)
+    }
 }
 
 fn get_option_bool(dw: &LuaTable, sub: &LuaTable, key: &str) -> LuaResult<bool> {
@@ -649,7 +700,12 @@ fn get_option_i64(dw: &LuaTable, sub: &LuaTable, key: &str) -> LuaResult<i64> {
     }
 }
 
-fn get_option_or(dw: &LuaTable, sub: &LuaTable, key: &str, default: &LuaValue) -> LuaResult<LuaValue> {
+fn get_option_or(
+    dw: &LuaTable,
+    sub: &LuaTable,
+    key: &str,
+    default: &LuaValue,
+) -> LuaResult<LuaValue> {
     let v = get_option_value(dw, sub, key)?;
     if matches!(v, LuaValue::Nil) {
         Ok(default.clone())

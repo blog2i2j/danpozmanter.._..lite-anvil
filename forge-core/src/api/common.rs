@@ -26,10 +26,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             common.set(
                 "utf8_chars",
                 lua.create_function(|lua, text: LuaString| {
-                    let gmatch: LuaFunction = lua
-                        .globals()
-                        .get::<LuaTable>("string")?
-                        .get("gmatch")?;
+                    let gmatch: LuaFunction =
+                        lua.globals().get::<LuaTable>("string")?.get("gmatch")?;
                     gmatch.call::<LuaValue>((
                         text,
                         lua.create_string(b"[\0-\x7f\xc2-\xf4][\x80-\xbf]*")?,
@@ -109,86 +107,89 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // common.splice(t, at, remove, insert?)
             common.set(
                 "splice",
-                lua.create_function(|lua, (t, at, remove, insert): (LuaTable, i64, i64, Option<LuaTable>)| {
-                    if remove < 0 {
-                        return Err(LuaError::runtime(
-                            "bad argument #3 to 'splice' (non-negative value expected)",
-                        ));
-                    }
-                    let insert_tbl = insert.unwrap_or(lua.create_table()?);
-                    let table_move: LuaFunction =
-                        lua.globals().get::<LuaTable>("table")?.get("move")?;
-                    let len: i64 = insert_tbl.raw_len() as i64;
-                    let t_len = t.raw_len() as i64;
-                    if remove != len {
-                        table_move.call::<()>((
-                            t.clone(),
-                            at + remove,
-                            t_len + remove,
-                            at + len,
-                        ))?;
-                    }
-                    table_move.call::<()>((insert_tbl, 1, len, at, t))?;
-                    Ok(())
-                })?,
+                lua.create_function(
+                    |lua, (t, at, remove, insert): (LuaTable, i64, i64, Option<LuaTable>)| {
+                        if remove < 0 {
+                            return Err(LuaError::runtime(
+                                "bad argument #3 to 'splice' (non-negative value expected)",
+                            ));
+                        }
+                        let insert_tbl = insert.unwrap_or(lua.create_table()?);
+                        let table_move: LuaFunction =
+                            lua.globals().get::<LuaTable>("table")?.get("move")?;
+                        let len: i64 = insert_tbl.raw_len() as i64;
+                        let t_len = t.raw_len() as i64;
+                        if remove != len {
+                            table_move.call::<()>((
+                                t.clone(),
+                                at + remove,
+                                t_len + remove,
+                                at + len,
+                            ))?;
+                        }
+                        table_move.call::<()>((insert_tbl, 1, len, at, t))?;
+                        Ok(())
+                    },
+                )?,
             )?;
 
             // common.fuzzy_match(haystack, needle, files?)
             // When haystack is a table, filters + sorts; when a string, delegates to system.fuzzy_match
             common.set(
                 "fuzzy_match",
-                lua.create_function(|lua, (haystack, needle, files): (LuaValue, LuaString, Option<bool>)| {
-                    let needle_str = needle.to_str()?.to_string();
-                    let files = files.unwrap_or(false);
-                    match haystack {
-                        LuaValue::Table(items) => {
-                            fuzzy_match_items(lua, &items, &needle_str, files)
-                                .map(LuaValue::Table)
+                lua.create_function(
+                    |lua, (haystack, needle, files): (LuaValue, LuaString, Option<bool>)| {
+                        let needle_str = needle.to_str()?.to_string();
+                        let files = files.unwrap_or(false);
+                        match haystack {
+                            LuaValue::Table(items) => {
+                                fuzzy_match_items(lua, &items, &needle_str, files)
+                                    .map(LuaValue::Table)
+                            }
+                            _ => {
+                                let system: LuaTable = lua.globals().get("system")?;
+                                let fm: LuaFunction = system.get("fuzzy_match")?;
+                                fm.call::<LuaValue>((haystack, needle, files))
+                            }
                         }
-                        _ => {
-                            let system: LuaTable = lua.globals().get("system")?;
-                            let fm: LuaFunction = system.get("fuzzy_match")?;
-                            fm.call::<LuaValue>((haystack, needle, files))
-                        }
-                    }
-                })?,
+                    },
+                )?,
             )?;
 
             // common.fuzzy_match_with_recents(haystack, recents, needle)
             common.set(
                 "fuzzy_match_with_recents",
-                lua.create_function(|lua, (haystack, recents, needle): (LuaTable, LuaTable, LuaString)| {
-                    let needle_str = needle.to_str()?.to_string();
-                    if needle_str.is_empty() {
-                        let result = lua.create_table()?;
-                        let recents_len = recents.raw_len();
-                        // add recents[2..n], then recents[1]
-                        for i in 2..=recents_len {
-                            let v: LuaValue = recents.get(i)?;
-                            result.push(v)?;
+                lua.create_function(
+                    |lua, (haystack, recents, needle): (LuaTable, LuaTable, LuaString)| {
+                        let needle_str = needle.to_str()?.to_string();
+                        if needle_str.is_empty() {
+                            let result = lua.create_table()?;
+                            let recents_len = recents.raw_len();
+                            // add recents[2..n], then recents[1]
+                            for i in 2..=recents_len {
+                                let v: LuaValue = recents.get(i)?;
+                                result.push(v)?;
+                            }
+                            if recents_len >= 1 {
+                                let first: LuaValue = recents.get(1)?;
+                                result.push(first)?;
+                            }
+                            // common.fuzzy_match(haystack, "", true) -> others
+                            let others = fuzzy_match_items(lua, &haystack, "", true)?;
+                            for i in 1..=others.raw_len() {
+                                let v: LuaValue = others.get(i)?;
+                                result.push(v)?;
+                            }
+                            Ok(result)
+                        } else {
+                            fuzzy_match_items(lua, &haystack, &needle_str, true)
                         }
-                        if recents_len >= 1 {
-                            let first: LuaValue = recents.get(1)?;
-                            result.push(first)?;
-                        }
-                        // common.fuzzy_match(haystack, "", true) -> others
-                        let others = fuzzy_match_items(lua, &haystack, "", true)?;
-                        for i in 1..=others.raw_len() {
-                            let v: LuaValue = others.get(i)?;
-                            result.push(v)?;
-                        }
-                        Ok(result)
-                    } else {
-                        fuzzy_match_items(lua, &haystack, &needle_str, true)
-                    }
-                })?,
+                    },
+                )?,
             )?;
 
             // common.path_suggest(text, root?)
-            common.set(
-                "path_suggest",
-                lua.create_function(path_suggest)?,
-            )?;
+            common.set("path_suggest", lua.create_function(path_suggest)?)?;
 
             // common.dir_path_suggest(text, root)
             common.set(
@@ -288,13 +289,12 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         }
                         LuaValue::Table(patterns) => {
                             // Recursive: try each pattern
-                            let common_ref: LuaTable =
-                                lua.globals()
-                                    .get::<LuaTable>("package")?
-                                    .get::<LuaTable>("loaded")?
-                                    .get("core.common")?;
-                            let match_pattern_fn: LuaFunction =
-                                common_ref.get("match_pattern")?;
+                            let common_ref: LuaTable = lua
+                                .globals()
+                                .get::<LuaTable>("package")?
+                                .get::<LuaTable>("loaded")?
+                                .get("core.common")?;
+                            let match_pattern_fn: LuaFunction = common_ref.get("match_pattern")?;
                             for val in patterns.sequence_values::<LuaValue>() {
                                 let p = val?;
                                 let mut call_args = vec![text.clone(), p];
@@ -316,66 +316,80 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // common.draw_text(font, color, text, align, x, y, w, h)
             common.set(
                 "draw_text",
-                lua.create_function(|lua, (font, color, text, align, x, y, w, h): (LuaValue, LuaValue, LuaString, Option<LuaString>, f64, f64, f64, f64)| {
-                    let common_ref: LuaTable = lua
-                        .globals()
-                        .get::<LuaTable>("package")?
-                        .get::<LuaTable>("loaded")?
-                        .get("core.common")?;
-                    let round_fn: LuaFunction = common_ref.get("round")?;
+                lua.create_function(
+                    |lua,
+                     (font, color, text, align, x, y, w, h): (
+                        LuaValue,
+                        LuaValue,
+                        LuaString,
+                        Option<LuaString>,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                    )| {
+                        let common_ref: LuaTable = lua
+                            .globals()
+                            .get::<LuaTable>("package")?
+                            .get::<LuaTable>("loaded")?
+                            .get("core.common")?;
+                        let round_fn: LuaFunction = common_ref.get("round")?;
 
-                    let get_width: LuaFunction = font
-                        .as_table()
-                        .ok_or_else(|| LuaError::runtime("font expected"))?
-                        .get("get_width")?;
-                    let get_height: LuaFunction = font
-                        .as_table()
-                        .ok_or_else(|| LuaError::runtime("font expected"))?
-                        .get("get_height")?;
-                    let tw: f64 = get_width.call((font.clone(), text.clone()))?;
-                    let th: f64 = get_height.call(font.clone())?;
+                        let get_width: LuaFunction = font
+                            .as_table()
+                            .ok_or_else(|| LuaError::runtime("font expected"))?
+                            .get("get_width")?;
+                        let get_height: LuaFunction = font
+                            .as_table()
+                            .ok_or_else(|| LuaError::runtime("font expected"))?
+                            .get("get_height")?;
+                        let tw: f64 = get_width.call((font.clone(), text.clone()))?;
+                        let th: f64 = get_height.call(font.clone())?;
 
-                    let align_str = match align {
-                        Some(s) => s.to_str()?.to_string(),
-                        None => String::new(),
-                    };
-                    let draw_x = match align_str.as_str() {
-                        "center" => x + (w - tw) / 2.0,
-                        "right" => x + (w - tw),
-                        _ => x,
-                    };
-                    let draw_y: f64 = round_fn.call(y + (h - th) / 2.0)?;
+                        let align_str = match align {
+                            Some(s) => s.to_str()?.to_string(),
+                            None => String::new(),
+                        };
+                        let draw_x = match align_str.as_str() {
+                            "center" => x + (w - tw) / 2.0,
+                            "right" => x + (w - tw),
+                            _ => x,
+                        };
+                        let draw_y: f64 = round_fn.call(y + (h - th) / 2.0)?;
 
-                    let renderer: LuaTable = lua.globals().get("renderer")?;
-                    let draw_text_fn: LuaFunction = renderer.get("draw_text")?;
-                    let x_advance: f64 =
-                        draw_text_fn.call((font, text, draw_x, draw_y, color))?;
+                        let renderer: LuaTable = lua.globals().get("renderer")?;
+                        let draw_text_fn: LuaFunction = renderer.get("draw_text")?;
+                        let x_advance: f64 =
+                            draw_text_fn.call((font, text, draw_x, draw_y, color))?;
 
-                    Ok((x_advance, draw_y + th))
-                })?,
+                        Ok((x_advance, draw_y + th))
+                    },
+                )?,
             )?;
 
             // common.bench(name, fn, ...)
             common.set(
                 "bench",
-                lua.create_function(|lua, (name, func, args): (LuaString, LuaFunction, LuaMultiValue)| {
-                    let system: LuaTable = lua.globals().get("system")?;
-                    let get_time: LuaFunction = system.get("get_time")?;
-                    let start: f64 = get_time.call(())?;
-                    let res: LuaMultiValue = func.call(args)?;
-                    let end_time: f64 = get_time.call(())?;
-                    let t = end_time - start;
-                    let ms = t * 1000.0;
-                    let per = (t / (1.0 / 60.0)) * 100.0;
-                    let print_fn: LuaFunction = lua.globals().get("print")?;
-                    print_fn.call::<()>(format!(
-                        "*** {:<16} : {:>8.3}ms {:>6.2}%",
-                        name.to_str()?,
-                        ms,
-                        per
-                    ))?;
-                    Ok(res)
-                })?,
+                lua.create_function(
+                    |lua, (name, func, args): (LuaString, LuaFunction, LuaMultiValue)| {
+                        let system: LuaTable = lua.globals().get("system")?;
+                        let get_time: LuaFunction = system.get("get_time")?;
+                        let start: f64 = get_time.call(())?;
+                        let res: LuaMultiValue = func.call(args)?;
+                        let end_time: f64 = get_time.call(())?;
+                        let t = end_time - start;
+                        let ms = t * 1000.0;
+                        let per = (t / (1.0 / 60.0)) * 100.0;
+                        let print_fn: LuaFunction = lua.globals().get("print")?;
+                        print_fn.call::<()>(format!(
+                            "*** {:<16} : {:>8.3}ms {:>6.2}%",
+                            name.to_str()?,
+                            ms,
+                            per
+                        ))?;
+                        Ok(res)
+                    },
+                )?,
             )?;
 
             // common.serialize(val, opts?)
@@ -407,9 +421,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         if after.is_empty() || after.chars().all(|c| pathsep.contains(c)) {
                             return Ok(LuaNil);
                         }
-                        return Ok(LuaValue::String(
-                            lua.create_string(&s[..pos])?,
-                        ));
+                        return Ok(LuaValue::String(lua.create_string(&s[..pos])?));
                     }
                     Ok(LuaNil)
                 })?,
@@ -494,10 +506,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             )?;
 
             // common.normalize_path(filename)
-            common.set(
-                "normalize_path",
-                lua.create_function(normalize_path)?,
-            )?;
+            common.set("normalize_path", lua.create_function(normalize_path)?)?;
 
             // common.is_absolute_path(path)
             common.set(
@@ -534,10 +543,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             )?;
 
             // common.relative_path(ref_dir, dir)
-            common.set(
-                "relative_path",
-                lua.create_function(relative_path)?,
-            )?;
+            common.set("relative_path", lua.create_function(relative_path)?)?;
 
             // common.mkdirp(path)
             common.set(
@@ -551,7 +557,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             common.set(
                 "rm",
                 lua.create_function(|lua, (path, recursively): (LuaString, Option<bool>)| {
-                    rm(lua, path.to_str()?.to_string(), recursively.unwrap_or(false))
+                    rm(
+                        lua,
+                        path.to_str()?.to_string(),
+                        recursively.unwrap_or(false),
+                    )
                 })?,
             )?;
 
@@ -610,7 +620,7 @@ fn lerp(lua: &Lua, (a, b, t): (LuaValue, LuaValue, f64)) -> LuaResult<LuaValue> 
                 _ => {
                     return Err(LuaError::runtime(
                         "bad argument to 'lerp' (number or table expected)",
-                    ))
+                    ));
                 }
             };
             let b_f: f64 = match &b {
@@ -619,7 +629,7 @@ fn lerp(lua: &Lua, (a, b, t): (LuaValue, LuaValue, f64)) -> LuaResult<LuaValue> 
                 _ => {
                     return Err(LuaError::runtime(
                         "bad argument to 'lerp' (number or table expected)",
-                    ))
+                    ));
                 }
             };
             Ok(LuaValue::Number(a_f + (b_f - a_f) * t))
@@ -635,24 +645,23 @@ fn color(_lua: &Lua, s: LuaString) -> LuaResult<LuaMultiValue> {
     // Try #rrggbb or #rrggbbaa
     if let Some(hex) = input.strip_prefix('#') {
         if (hex.len() == 6 || hex.len() == 8) && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-                let r = u8::from_str_radix(&hex[0..2], 16)
-                    .map_err(|e| LuaError::runtime(e.to_string()))?;
-                let g = u8::from_str_radix(&hex[2..4], 16)
-                    .map_err(|e| LuaError::runtime(e.to_string()))?;
-                let b = u8::from_str_radix(&hex[4..6], 16)
-                    .map_err(|e| LuaError::runtime(e.to_string()))?;
-                let a = if hex.len() == 8 {
-                    u8::from_str_radix(&hex[6..8], 16)
-                        .map_err(|e| LuaError::runtime(e.to_string()))?
-                } else {
-                    0xff
-                };
-                return Ok(LuaMultiValue::from_vec(vec![
-                    LuaValue::Number(r as f64),
-                    LuaValue::Number(g as f64),
-                    LuaValue::Number(b as f64),
-                    LuaValue::Number(a as f64),
-                ]));
+            let r =
+                u8::from_str_radix(&hex[0..2], 16).map_err(|e| LuaError::runtime(e.to_string()))?;
+            let g =
+                u8::from_str_radix(&hex[2..4], 16).map_err(|e| LuaError::runtime(e.to_string()))?;
+            let b =
+                u8::from_str_radix(&hex[4..6], 16).map_err(|e| LuaError::runtime(e.to_string()))?;
+            let a = if hex.len() == 8 {
+                u8::from_str_radix(&hex[6..8], 16).map_err(|e| LuaError::runtime(e.to_string()))?
+            } else {
+                0xff
+            };
+            return Ok(LuaMultiValue::from_vec(vec![
+                LuaValue::Number(r as f64),
+                LuaValue::Number(g as f64),
+                LuaValue::Number(b as f64),
+                LuaValue::Number(a as f64),
+            ]));
         }
     }
 
@@ -753,10 +762,7 @@ fn fuzzy_match_items(
 }
 
 /// Implements common.path_suggest(text, root?).
-fn path_suggest(
-    lua: &Lua,
-    (text, root): (LuaString, Option<LuaString>),
-) -> LuaResult<LuaTable> {
+fn path_suggest(lua: &Lua, (text, root): (LuaString, Option<LuaString>)) -> LuaResult<LuaTable> {
     let pathsep = get_pathsep(lua)?;
     let platform: String = lua
         .globals()
@@ -886,9 +892,7 @@ fn serialize(lua: &Lua, (val, opts): (LuaValue, Option<LuaTable>)) -> LuaResult<
         .unwrap_or_else(|_| "  ".to_string());
     let escape: bool = opts.get("escape").unwrap_or(false);
     let sort: bool = opts.get("sort").unwrap_or(false);
-    let initial_indent: usize = opts
-        .get::<usize>("initial_indent")
-        .unwrap_or(0);
+    let initial_indent: usize = opts.get::<usize>("initial_indent").unwrap_or(0);
     let limit_opt: LuaValue = opts.get("limit")?;
     let limit: usize = match limit_opt {
         LuaValue::Integer(n) => n as usize + initial_indent,
@@ -929,7 +933,13 @@ fn serialize_value(
     level: usize,
     out: &mut String,
 ) -> LuaResult<()> {
-    let SerOpts { pretty, indent_str, escape, sort, limit } = *opts;
+    let SerOpts {
+        pretty,
+        indent_str,
+        escape,
+        sort,
+        limit,
+    } = *opts;
     let space = if pretty { " " } else { "" };
     let indent = if pretty {
         indent_str.repeat(level)
@@ -1128,13 +1138,10 @@ fn normalize_path(lua: &Lua, filename: LuaValue) -> LuaResult<LuaValue> {
             filename_str = filename_str[3..].to_string();
         } else if filename_str.starts_with("\\\\") {
             // UNC path: \\server\share\
-            if let Some(end) = filename_str[2..]
-                .find('\\')
-                .and_then(|first_sep| {
-                    let after = first_sep + 3;
-                    filename_str[after..].find('\\').map(|s| after + s + 1)
-                })
-            {
+            if let Some(end) = filename_str[2..].find('\\').and_then(|first_sep| {
+                let after = first_sep + 3;
+                filename_str[after..].find('\\').map(|s| after + s + 1)
+            }) {
                 volume = filename_str[..end].to_string();
                 filename_str = filename_str[end..].to_string();
             }
@@ -1241,7 +1248,10 @@ fn mkdirp(lua: &Lua, path: String) -> LuaResult<LuaMultiValue> {
     let mut subdirs: Vec<String> = Vec::new();
     let mut current = path.clone();
     while !current.is_empty() {
-        let success: bool = mkdir.call::<LuaValue>(current.clone())?.as_boolean().unwrap_or(false);
+        let success: bool = mkdir
+            .call::<LuaValue>(current.clone())?
+            .as_boolean()
+            .unwrap_or(false);
         if success {
             break;
         }
@@ -1262,7 +1272,10 @@ fn mkdirp(lua: &Lua, path: String) -> LuaResult<LuaMultiValue> {
         } else {
             format!("{current}{pathsep}{dirname}")
         };
-        let success: bool = mkdir.call::<LuaValue>(current.clone())?.as_boolean().unwrap_or(false);
+        let success: bool = mkdir
+            .call::<LuaValue>(current.clone())?
+            .as_boolean()
+            .unwrap_or(false);
         if !success {
             return Ok(LuaMultiValue::from_vec(vec![
                 LuaValue::Boolean(false),
@@ -1371,9 +1384,9 @@ fn rm(lua: &Lua, path: String, recursively: bool) -> LuaResult<LuaMultiValue> {
                 let err_msg = rv
                     .get(1)
                     .and_then(|v| match v {
-                    LuaValue::String(s) => s.to_str().ok().map(|s| s.to_string()),
-                    _ => None,
-                })
+                        LuaValue::String(s) => s.to_str().ok().map(|s| s.to_string()),
+                        _ => None,
+                    })
                     .unwrap_or_default();
                 return Ok(LuaMultiValue::from_vec(vec![
                     LuaValue::Boolean(false),
@@ -1391,9 +1404,9 @@ fn rm(lua: &Lua, path: String, recursively: bool) -> LuaResult<LuaMultiValue> {
         let err_msg = rv
             .get(1)
             .and_then(|v| match v {
-                    LuaValue::String(s) => s.to_str().ok().map(|s| s.to_string()),
-                    _ => None,
-                })
+                LuaValue::String(s) => s.to_str().ok().map(|s| s.to_string()),
+                _ => None,
+            })
             .unwrap_or_default();
         return Ok(LuaMultiValue::from_vec(vec![
             LuaValue::Boolean(false),

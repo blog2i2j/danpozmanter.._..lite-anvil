@@ -126,10 +126,16 @@ fn trim_empty_end_lines(lua: &Lua, doc: &LuaTable, raw_remove: bool) -> LuaResul
         if !raw_remove {
             doc.call_method::<()>(
                 "remove",
-                (l - 1, LuaValue::Number(math_huge), l, LuaValue::Number(math_huge)),
+                (
+                    l - 1,
+                    LuaValue::Number(math_huge),
+                    l,
+                    LuaValue::Number(math_huge),
+                ),
             )?;
         } else {
-            let table_remove: LuaFunction = lua.globals().get::<LuaTable>("table")?.get("remove")?;
+            let table_remove: LuaFunction =
+                lua.globals().get::<LuaTable>("table")?.get("remove")?;
             table_remove.call::<()>((doc_lines, l))?;
         }
     }
@@ -201,9 +207,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             let result = lua.create_table()?;
             result.set(
                 "disable",
-                lua.create_function(|_, doc: LuaTable| {
-                    doc.set("disable_trim_whitespace", true)
-                })?,
+                lua.create_function(|_, doc: LuaTable| doc.set("disable_trim_whitespace", true))?,
             )?;
             result.set(
                 "enable",

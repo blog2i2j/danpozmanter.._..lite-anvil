@@ -253,30 +253,29 @@ pub(crate) fn shared_file_list(root: &str, max_size_bytes: Option<u64>) -> Arc<M
                 let config_changed = entry.max_size_bytes != max_size_bytes;
                 let is_dirty = entry.dirty.load(Ordering::Relaxed);
                 let files_arc = Arc::clone(&entry.files);
-                let work = if entry.rebuilding.load(Ordering::Relaxed)
-                    || (!config_changed && !is_dirty)
-                {
-                    Work::None
-                } else {
-                    if is_dirty && !config_changed {
-                        let elapsed = entry
-                            .last_event
-                            .lock()
-                            .as_ref()
-                            .map(|t| t.elapsed())
-                            .unwrap_or(Duration::MAX);
-                        if elapsed < SHARED_REBUILD_DEBOUNCE {
-                            return files_arc;
+                let work =
+                    if entry.rebuilding.load(Ordering::Relaxed) || (!config_changed && !is_dirty) {
+                        Work::None
+                    } else {
+                        if is_dirty && !config_changed {
+                            let elapsed = entry
+                                .last_event
+                                .lock()
+                                .as_ref()
+                                .map(|t| t.elapsed())
+                                .unwrap_or(Duration::MAX);
+                            if elapsed < SHARED_REBUILD_DEBOUNCE {
+                                return files_arc;
+                            }
                         }
-                    }
-                    entry.dirty.store(false, Ordering::Relaxed);
-                    entry.rebuilding.store(true, Ordering::Relaxed);
-                    entry.max_size_bytes = max_size_bytes;
-                    Work::Rebuild {
-                        files: Arc::clone(&entry.files),
-                        rebuilding: Arc::clone(&entry.rebuilding),
-                    }
-                };
+                        entry.dirty.store(false, Ordering::Relaxed);
+                        entry.rebuilding.store(true, Ordering::Relaxed);
+                        entry.max_size_bytes = max_size_bytes;
+                        Work::Rebuild {
+                            files: Arc::clone(&entry.files),
+                            rebuilding: Arc::clone(&entry.rebuilding),
+                        }
+                    };
                 (files_arc, work)
             }
             None => {

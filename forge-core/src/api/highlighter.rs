@@ -160,96 +160,98 @@ fn build_overlay_positioned(lua: &Lua) -> LuaResult<LuaFunction> {
     let merge_adj = build_merge_adjacent(lua)?;
     let merge_key = lua.create_registry_value(merge_adj)?;
 
-    lua.create_function(move |lua, (base_tokens, overlay_tokens): (LuaTable, LuaValue)| {
-        let clone_positioned: LuaFunction = lua.registry_value(&clone_key)?;
-        let merge_adjacent: LuaFunction = lua.registry_value(&merge_key)?;
+    lua.create_function(
+        move |lua, (base_tokens, overlay_tokens): (LuaTable, LuaValue)| {
+            let clone_positioned: LuaFunction = lua.registry_value(&clone_key)?;
+            let merge_adjacent: LuaFunction = lua.registry_value(&merge_key)?;
 
-        let overlay_tbl = match overlay_tokens {
-            LuaValue::Table(ref t) if t.raw_len() > 0 => t.clone(),
-            _ => {
-                let cloned: LuaTable = clone_positioned.call(base_tokens)?;
-                return Ok(cloned);
-            }
-        };
-
-        let result = lua.create_table()?;
-        let mut overlay_idx: i64 = 1;
-        let overlay_len = overlay_tbl.raw_len() as i64;
-        let base_len = base_tokens.raw_len();
-        let mut result_len: i64 = 0;
-
-        for i in 1..=base_len {
-            let base: LuaTable = base_tokens.raw_get(i)?;
-            let base_pos: i64 = base.get("pos")?;
-            let base_token_len: i64 = base.get("len")?;
-            let base_end = base_pos + base_token_len;
-            let mut cursor = base_pos;
-
-            // Advance overlay_idx past tokens that end before cursor
-            while overlay_idx <= overlay_len {
-                let ov: LuaTable = overlay_tbl.raw_get(overlay_idx)?;
-                let ov_pos: i64 = ov.get("pos")?;
-                let ov_len: i64 = ov.get("len")?;
-                if ov_pos + ov_len <= cursor {
-                    overlay_idx += 1;
-                } else {
-                    break;
+            let overlay_tbl = match overlay_tokens {
+                LuaValue::Table(ref t) if t.raw_len() > 0 => t.clone(),
+                _ => {
+                    let cloned: LuaTable = clone_positioned.call(base_tokens)?;
+                    return Ok(cloned);
                 }
-            }
+            };
 
-            let mut scan_idx = overlay_idx;
-            while cursor < base_end {
-                if scan_idx > overlay_len {
-                    let entry = lua.create_table()?;
-                    entry.set("type", base.get::<LuaValue>("type")?)?;
-                    entry.set("pos", cursor)?;
-                    entry.set("len", base_end - cursor)?;
-                    result_len += 1;
-                    result.raw_set(result_len, entry)?;
-                    cursor = base_end;
-                    continue;
+            let result = lua.create_table()?;
+            let mut overlay_idx: i64 = 1;
+            let overlay_len = overlay_tbl.raw_len() as i64;
+            let base_len = base_tokens.raw_len();
+            let mut result_len: i64 = 0;
+
+            for i in 1..=base_len {
+                let base: LuaTable = base_tokens.raw_get(i)?;
+                let base_pos: i64 = base.get("pos")?;
+                let base_token_len: i64 = base.get("len")?;
+                let base_end = base_pos + base_token_len;
+                let mut cursor = base_pos;
+
+                // Advance overlay_idx past tokens that end before cursor
+                while overlay_idx <= overlay_len {
+                    let ov: LuaTable = overlay_tbl.raw_get(overlay_idx)?;
+                    let ov_pos: i64 = ov.get("pos")?;
+                    let ov_len: i64 = ov.get("len")?;
+                    if ov_pos + ov_len <= cursor {
+                        overlay_idx += 1;
+                    } else {
+                        break;
+                    }
                 }
 
-                let overlay: LuaTable = overlay_tbl.raw_get(scan_idx)?;
-                let ov_pos: i64 = overlay.get("pos")?;
-                let ov_len: i64 = overlay.get("len")?;
-
-                if ov_pos >= base_end {
-                    let entry = lua.create_table()?;
-                    entry.set("type", base.get::<LuaValue>("type")?)?;
-                    entry.set("pos", cursor)?;
-                    entry.set("len", base_end - cursor)?;
-                    result_len += 1;
-                    result.raw_set(result_len, entry)?;
-                    cursor = base_end;
-                } else if ov_pos > cursor {
-                    let entry = lua.create_table()?;
-                    entry.set("type", base.get::<LuaValue>("type")?)?;
-                    entry.set("pos", cursor)?;
-                    entry.set("len", ov_pos - cursor)?;
-                    result_len += 1;
-                    result.raw_set(result_len, entry)?;
-                    cursor = ov_pos;
-                } else {
-                    let overlay_end = (base_end).min(ov_pos + ov_len);
-                    if overlay_end > cursor {
+                let mut scan_idx = overlay_idx;
+                while cursor < base_end {
+                    if scan_idx > overlay_len {
                         let entry = lua.create_table()?;
-                        entry.set("type", overlay.get::<LuaValue>("type")?)?;
+                        entry.set("type", base.get::<LuaValue>("type")?)?;
                         entry.set("pos", cursor)?;
-                        entry.set("len", overlay_end - cursor)?;
+                        entry.set("len", base_end - cursor)?;
                         result_len += 1;
                         result.raw_set(result_len, entry)?;
-                        cursor = overlay_end;
+                        cursor = base_end;
+                        continue;
+                    }
+
+                    let overlay: LuaTable = overlay_tbl.raw_get(scan_idx)?;
+                    let ov_pos: i64 = overlay.get("pos")?;
+                    let ov_len: i64 = overlay.get("len")?;
+
+                    if ov_pos >= base_end {
+                        let entry = lua.create_table()?;
+                        entry.set("type", base.get::<LuaValue>("type")?)?;
+                        entry.set("pos", cursor)?;
+                        entry.set("len", base_end - cursor)?;
+                        result_len += 1;
+                        result.raw_set(result_len, entry)?;
+                        cursor = base_end;
+                    } else if ov_pos > cursor {
+                        let entry = lua.create_table()?;
+                        entry.set("type", base.get::<LuaValue>("type")?)?;
+                        entry.set("pos", cursor)?;
+                        entry.set("len", ov_pos - cursor)?;
+                        result_len += 1;
+                        result.raw_set(result_len, entry)?;
+                        cursor = ov_pos;
                     } else {
-                        scan_idx += 1;
+                        let overlay_end = (base_end).min(ov_pos + ov_len);
+                        if overlay_end > cursor {
+                            let entry = lua.create_table()?;
+                            entry.set("type", overlay.get::<LuaValue>("type")?)?;
+                            entry.set("pos", cursor)?;
+                            entry.set("len", overlay_end - cursor)?;
+                            result_len += 1;
+                            result.raw_set(result_len, entry)?;
+                            cursor = overlay_end;
+                        } else {
+                            scan_idx += 1;
+                        }
                     }
                 }
             }
-        }
 
-        let merged: LuaTable = merge_adjacent.call(result)?;
-        Ok(merged)
-    })
+            let merged: LuaTable = merge_adjacent.call(result)?;
+            Ok(merged)
+        },
+    )
 }
 
 /// Registers `core.doc.highlighter` as a pure Rust preload.

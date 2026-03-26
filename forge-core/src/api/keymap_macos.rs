@@ -149,7 +149,10 @@ fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         ("backspace", &["doc:backspace"]),
         ("shift+backspace", &["doc:backspace"]),
         ("option+backspace", &["doc:delete-to-previous-word-start"]),
-        ("cmd+shift+backspace", &["doc:delete-to-previous-word-start"]),
+        (
+            "cmd+shift+backspace",
+            &["doc:delete-to-previous-word-start"],
+        ),
         ("cmd+backspace", &["doc:delete-to-start-of-indentation"]),
         ("delete", &["doc:delete"]),
         ("shift+delete", &["doc:delete"]),
@@ -168,7 +171,10 @@ fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         ("cmd+shift+return", &["doc:newline-above"]),
         ("cmd+j", &["doc:join-lines"]),
         ("cmd+a", &["doc:select-all"]),
-        ("cmd+d", &["find-replace:select-add-next", "doc:select-word"]),
+        (
+            "cmd+d",
+            &["find-replace:select-add-next", "doc:select-word"],
+        ),
         ("cmd+option+l", &["find-replace:select-all-found"]),
         ("cmd+f3", &["find-replace:select-next"]),
         ("cmd+l", &["doc:select-lines"]),
@@ -182,7 +188,10 @@ fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         ("cmd+shift+d", &["doc:duplicate-lines"]),
         ("cmd+shift+k", &["doc:delete-lines"]),
         ("cmd+option+[", &["fold:toggle"]),
-        ("left", &["doc:move-to-previous-char", "dialog:previous-entry"]),
+        (
+            "left",
+            &["doc:move-to-previous-char", "dialog:previous-entry"],
+        ),
         ("right", &["doc:move-to-next-char", "dialog:next-entry"]),
         (
             "up",

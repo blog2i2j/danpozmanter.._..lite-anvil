@@ -35,9 +35,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
             let quote_fn = lua.create_function(|lua, dv: LuaTable| {
                 let doc: LuaTable = dv.get("doc")?;
-                let replace_fn = lua.create_function(|_lua, text: String| {
-                    Ok(escape_for_quote(&text))
-                })?;
+                let replace_fn =
+                    lua.create_function(|_lua, text: String| Ok(escape_for_quote(&text)))?;
                 doc.call_method::<()>("replace", replace_fn)
             })?;
 

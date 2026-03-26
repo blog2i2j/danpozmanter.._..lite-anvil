@@ -170,7 +170,12 @@ fn build_default_fonts(lua: &Lua, datadir: &str) -> LuaResult<LuaTable> {
 }
 
 /// Load a single font via `renderer.font.load(path, size, options)`.
-fn load_single_font(lua: &Lua, path: &str, size: f64, options: LuaTable) -> LuaResult<Option<LuaValue>> {
+fn load_single_font(
+    lua: &Lua,
+    path: &str,
+    size: f64,
+    options: LuaTable,
+) -> LuaResult<Option<LuaValue>> {
     let renderer: LuaTable = lua.globals().get("renderer")?;
     let font_mod: LuaTable = renderer.get("font")?;
     let load_fn: LuaFunction = font_mod.get("load")?;
@@ -305,11 +310,31 @@ fn get_lazy_font(lua: &Lua, style: &LuaTable, name: &str) -> LuaResult<LuaValue>
 }
 
 const STYLE_COLOR_KEYS: &[&str] = &[
-    "background", "background2", "background3", "text", "caret", "accent", "dim",
-    "divider", "selection", "line_number", "line_number2", "line_highlight",
-    "scrollbar", "scrollbar2", "scrollbar_track", "nagbar", "nagbar_text",
-    "nagbar_dim", "drag_overlay", "drag_overlay_tab", "good", "warn", "error",
-    "modified", "guide",
+    "background",
+    "background2",
+    "background3",
+    "text",
+    "caret",
+    "accent",
+    "dim",
+    "divider",
+    "selection",
+    "line_number",
+    "line_number2",
+    "line_highlight",
+    "scrollbar",
+    "scrollbar2",
+    "scrollbar_track",
+    "nagbar",
+    "nagbar_text",
+    "nagbar_dim",
+    "drag_overlay",
+    "drag_overlay_tab",
+    "good",
+    "warn",
+    "error",
+    "modified",
+    "guide",
 ];
 
 /// Apply theme colors to the style table from config and registered themes.
@@ -339,11 +364,7 @@ fn apply_theme_colors(lua: &Lua, style: &LuaTable) -> LuaResult<()> {
 
     let default_palette: LuaValue = themes.get("default")?;
     let theme_palette: LuaValue = themes.get(effective_name.as_str())?;
-    let palette = merge_tables(
-        lua,
-        default_palette,
-        theme_palette,
-    )?;
+    let palette = merge_tables(lua, default_palette, theme_palette)?;
 
     let config_colors: LuaValue = config.get("colors")?;
     let colors = merge_tables(lua, LuaValue::Table(palette), config_colors)?;
@@ -402,7 +423,9 @@ fn apply_theme_colors(lua: &Lua, style: &LuaTable) -> LuaResult<()> {
 
         let entry = merge_tables(lua, LuaValue::Table(default_entry), override_entry)?;
         let result = lua.create_table()?;
-        let icon: String = entry.get::<Option<String>>("icon")?.unwrap_or_else(|| default_icon.to_string());
+        let icon: String = entry
+            .get::<Option<String>>("icon")?
+            .unwrap_or_else(|| default_icon.to_string());
         let entry_color: LuaValue = entry.get("color")?;
         let resolved_color = color_value(lua, entry_color)?
             .map(LuaValue::Table)
@@ -421,7 +444,9 @@ fn apply_theme_colors(lua: &Lua, style: &LuaTable) -> LuaResult<()> {
             }
             if let LuaValue::Table(entry) = entry_val {
                 let result = lua.create_table()?;
-                let icon: String = entry.get::<Option<String>>("icon")?.unwrap_or_else(|| "?".to_string());
+                let icon: String = entry
+                    .get::<Option<String>>("icon")?
+                    .unwrap_or_else(|| "?".to_string());
                 let entry_color: LuaValue = entry.get("color")?;
                 let resolved_color = color_value(lua, entry_color)?
                     .map(LuaValue::Table)
@@ -515,35 +540,62 @@ fn loader(lua: &Lua, _: ()) -> LuaResult<LuaValue> {
             let divider_size_raw: f64 = ui.get::<Option<f64>>("divider_size")?.unwrap_or(1.0);
             let divider_size = round_scaled(divider_size_raw, scale);
             style_ref.set("divider_size", divider_size)?;
-            style_ref.set("scrollbar_size", round_scaled(
-                ui.get::<Option<f64>>("scrollbar_size")?.unwrap_or(4.0), scale,
-            ))?;
-            style_ref.set("expanded_scrollbar_size", round_scaled(
-                ui.get::<Option<f64>>("expanded_scrollbar_size")?.unwrap_or(12.0), scale,
-            ))?;
-            style_ref.set("minimum_thumb_size", round_scaled(
-                ui.get::<Option<f64>>("minimum_thumb_size")?.unwrap_or(20.0), scale,
-            ))?;
-            style_ref.set("contracted_scrollbar_margin", round_scaled(
-                ui.get::<Option<f64>>("contracted_scrollbar_margin")?.unwrap_or(8.0), scale,
-            ))?;
-            style_ref.set("expanded_scrollbar_margin", round_scaled(
-                ui.get::<Option<f64>>("expanded_scrollbar_margin")?.unwrap_or(12.0), scale,
-            ))?;
-            style_ref.set("caret_width", round_scaled(
-                ui.get::<Option<f64>>("caret_width")?.unwrap_or(2.0), scale,
-            ))?;
-            style_ref.set("tab_width", round_scaled(
-                ui.get::<Option<f64>>("tab_width")?.unwrap_or(170.0), scale,
-            ))?;
+            style_ref.set(
+                "scrollbar_size",
+                round_scaled(
+                    ui.get::<Option<f64>>("scrollbar_size")?.unwrap_or(4.0),
+                    scale,
+                ),
+            )?;
+            style_ref.set(
+                "expanded_scrollbar_size",
+                round_scaled(
+                    ui.get::<Option<f64>>("expanded_scrollbar_size")?
+                        .unwrap_or(12.0),
+                    scale,
+                ),
+            )?;
+            style_ref.set(
+                "minimum_thumb_size",
+                round_scaled(
+                    ui.get::<Option<f64>>("minimum_thumb_size")?.unwrap_or(20.0),
+                    scale,
+                ),
+            )?;
+            style_ref.set(
+                "contracted_scrollbar_margin",
+                round_scaled(
+                    ui.get::<Option<f64>>("contracted_scrollbar_margin")?
+                        .unwrap_or(8.0),
+                    scale,
+                ),
+            )?;
+            style_ref.set(
+                "expanded_scrollbar_margin",
+                round_scaled(
+                    ui.get::<Option<f64>>("expanded_scrollbar_margin")?
+                        .unwrap_or(12.0),
+                    scale,
+                ),
+            )?;
+            style_ref.set(
+                "caret_width",
+                round_scaled(ui.get::<Option<f64>>("caret_width")?.unwrap_or(2.0), scale),
+            )?;
+            style_ref.set(
+                "tab_width",
+                round_scaled(ui.get::<Option<f64>>("tab_width")?.unwrap_or(170.0), scale),
+            )?;
 
             let padding = lua.create_table()?;
-            padding.set("x", round_scaled(
-                ui.get::<Option<f64>>("padding_x")?.unwrap_or(14.0), scale,
-            ))?;
-            padding.set("y", round_scaled(
-                ui.get::<Option<f64>>("padding_y")?.unwrap_or(7.0), scale,
-            ))?;
+            padding.set(
+                "x",
+                round_scaled(ui.get::<Option<f64>>("padding_x")?.unwrap_or(14.0), scale),
+            )?;
+            padding.set(
+                "y",
+                round_scaled(ui.get::<Option<f64>>("padding_y")?.unwrap_or(7.0), scale),
+            )?;
             style_ref.set("padding", padding)?;
 
             let margin = lua.create_table()?;
@@ -561,11 +613,7 @@ fn loader(lua: &Lua, _: ()) -> LuaResult<LuaValue> {
             // Fonts
             let default_fonts: LuaTable = lua.registry_value(&default_fonts_key)?;
             let config_fonts: LuaValue = config.get("fonts")?;
-            let fonts = merge_tables(
-                lua,
-                LuaValue::Table(default_fonts.clone()),
-                config_fonts,
-            )?;
+            let fonts = merge_tables(lua, LuaValue::Table(default_fonts.clone()), config_fonts)?;
 
             let fonts_ui: LuaValue = fonts.get("ui")?;
             let default_ui_font: LuaValue = default_fonts.get("ui")?;
@@ -573,11 +621,17 @@ fn loader(lua: &Lua, _: ()) -> LuaResult<LuaValue> {
 
             let fonts_code: LuaValue = fonts.get("code")?;
             let default_code_font: LuaValue = default_fonts.get("code")?;
-            style_ref.set("code_font", load_font_from_spec(lua, fonts_code, default_code_font)?)?;
+            style_ref.set(
+                "code_font",
+                load_font_from_spec(lua, fonts_code, default_code_font)?,
+            )?;
 
             let fonts_icon: LuaValue = fonts.get("icon")?;
             let default_icon_font: LuaValue = default_fonts.get("icon")?;
-            style_ref.set("icon_font", load_font_from_spec(lua, fonts_icon, default_icon_font)?)?;
+            style_ref.set(
+                "icon_font",
+                load_font_from_spec(lua, fonts_icon, default_icon_font)?,
+            )?;
 
             style_ref.set("big_font", LuaValue::Nil)?;
             style_ref.set("icon_big_font", LuaValue::Nil)?;

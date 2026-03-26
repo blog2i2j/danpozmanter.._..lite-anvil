@@ -45,7 +45,10 @@ fn default_cwd(lua: &Lua) -> LuaResult<String> {
             }
         }
     }
-    normalize_path(lua, &std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
+    normalize_path(
+        lua,
+        &std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+    )
 }
 
 fn hex_to_rgba(lua: &Lua, hex: String) -> LuaResult<LuaTable> {
@@ -79,12 +82,7 @@ fn make_palette(lua: &Lua, name: Option<String>) -> LuaResult<(LuaTable, LuaTabl
     let requested = name.or(configured).unwrap_or_else(|| "eterm".to_string());
     let scheme = schemes
         .get::<Option<LuaTable>>(requested.clone())?
-        .or_else(|| {
-            schemes
-                .get::<Option<LuaTable>>("eterm")
-                .ok()
-                .flatten()
-        })
+        .or_else(|| schemes.get::<Option<LuaTable>>("eterm").ok().flatten())
         .ok_or_else(|| LuaError::RuntimeError("missing terminal color schemes".into()))?;
     let out = lua.create_table()?;
     if let Some(palette) = scheme.get::<Option<LuaTable>>("palette")? {
@@ -195,12 +193,24 @@ fn init(lua: &Lua, (view, options): (LuaTable, LuaTable)) -> LuaResult<()> {
     };
     let color_scheme = options
         .get::<Option<String>>("color_scheme")?
-        .or_else(|| terminal_cfg.get::<Option<String>>("color_scheme").ok().flatten())
+        .or_else(|| {
+            terminal_cfg
+                .get::<Option<String>>("color_scheme")
+                .ok()
+                .flatten()
+        })
         .unwrap_or_else(|| "eterm".to_string());
-    let scrollback = terminal_cfg.get::<Option<i64>>("scrollback")?.unwrap_or(5000);
+    let scrollback = terminal_cfg
+        .get::<Option<i64>>("scrollback")?
+        .unwrap_or(5000);
     let placement = options
         .get::<Option<String>>("placement")?
-        .or_else(|| terminal_cfg.get::<Option<String>>("open_position").ok().flatten())
+        .or_else(|| {
+            terminal_cfg
+                .get::<Option<String>>("open_position")
+                .ok()
+                .flatten()
+        })
         .unwrap_or_else(|| "bottom".to_string());
     let pending_command = match options.get::<Option<LuaTable>>("command")? {
         Some(command) => command,
@@ -220,7 +230,9 @@ fn init(lua: &Lua, (view, options): (LuaTable, LuaTable)) -> LuaResult<()> {
     view.set("exit_notified", false)?;
     view.set(
         "spawned_at",
-        require_table(lua, "system")?.get::<LuaFunction>("get_time")?.call::<f64>(())?,
+        require_table(lua, "system")?
+            .get::<LuaFunction>("get_time")?
+            .call::<f64>(())?,
     )?;
     let restored = options.get::<Option<bool>>("restored")?.unwrap_or(false);
     view.set("allow_close_on_exit", !restored)?;
@@ -234,13 +246,7 @@ fn init(lua: &Lua, (view, options): (LuaTable, LuaTable)) -> LuaResult<()> {
     let new_fn: LuaFunction = terminal_buffer.get("new")?;
     let palette = palette_table(lua, &view)?;
     let default_fg: LuaTable = view.get("default_fg")?;
-    let buffer: LuaAnyUserData = new_fn.call((
-        80,
-        24,
-        scrollback,
-        palette,
-        default_fg,
-    ))?;
+    let buffer: LuaAnyUserData = new_fn.call((80, 24, scrollback, palette, default_fg))?;
     view.set("buffer", buffer)?;
     resize_screen(&view, 80, 24)?;
     Ok(())
@@ -292,9 +298,15 @@ fn get_dimensions(lua: &Lua, view: &LuaTable) -> LuaResult<(i64, i64)> {
     let size: LuaTable = view.get("size")?;
     let char_w: f64 = get_char_width.call(view.clone())?;
     let line_h: f64 = get_line_height.call(view.clone())?;
-    let cols = (((size.get::<f64>("x").unwrap_or(0.0) - padding.get::<f64>("x").unwrap_or(0.0) * 2.0) / char_w).floor() as i64)
+    let cols = (((size.get::<f64>("x").unwrap_or(0.0)
+        - padding.get::<f64>("x").unwrap_or(0.0) * 2.0)
+        / char_w)
+        .floor() as i64)
         .max(1);
-    let rows = (((size.get::<f64>("y").unwrap_or(0.0) - padding.get::<f64>("y").unwrap_or(0.0) * 2.0) / line_h).floor() as i64)
+    let rows = (((size.get::<f64>("y").unwrap_or(0.0)
+        - padding.get::<f64>("y").unwrap_or(0.0) * 2.0)
+        / line_h)
+        .floor() as i64)
         .max(1);
     Ok((cols, rows))
 }
@@ -345,7 +357,9 @@ fn terminal_matches(
     }
     if reuse_mode == "project" {
         let lhs = view.get::<Option<String>>("cwd")?.unwrap_or_default();
-        return Ok(normalize_project_path(lua, lhs)? == normalize_project_path(lua, cwd.to_string())?);
+        return Ok(
+            normalize_project_path(lua, lhs)? == normalize_project_path(lua, cwd.to_string())?
+        );
     }
     Ok(true)
 }
@@ -474,14 +488,30 @@ fn add_view_in_workspace(lua: &Lua, view: LuaTable, placement: &str) -> LuaResul
     }
 
     let node_ctor = require_table(lua, "core.node")?;
-    let existing = match call_callable(lua, LuaValue::Table(node_ctor.clone()), LuaMultiValue::new())? {
+    let existing = match call_callable(
+        lua,
+        LuaValue::Table(node_ctor.clone()),
+        LuaMultiValue::new(),
+    )? {
         LuaValue::Table(t) => t,
-        _ => return Err(LuaError::RuntimeError("failed to create terminal split node".into())),
+        _ => {
+            return Err(LuaError::RuntimeError(
+                "failed to create terminal split node".into(),
+            ));
+        }
     };
     existing.call_method::<()>("consume", workspace_root.clone())?;
-    let sibling = match call_callable(lua, LuaValue::Table(node_ctor.clone()), LuaMultiValue::new())? {
+    let sibling = match call_callable(
+        lua,
+        LuaValue::Table(node_ctor.clone()),
+        LuaMultiValue::new(),
+    )? {
         LuaValue::Table(t) => t,
-        _ => return Err(LuaError::RuntimeError("failed to create terminal sibling node".into())),
+        _ => {
+            return Err(LuaError::RuntimeError(
+                "failed to create terminal sibling node".into(),
+            ));
+        }
     };
     let views = lua.create_table()?;
     sibling.set("views", views)?;
@@ -489,10 +519,14 @@ fn add_view_in_workspace(lua: &Lua, view: LuaTable, placement: &str) -> LuaResul
     let new_root = match call_callable(
         lua,
         LuaValue::Table(node_ctor),
-        LuaMultiValue::from_vec(vec![LuaValue::String(lua.create_string(split_type)?)])
+        LuaMultiValue::from_vec(vec![LuaValue::String(lua.create_string(split_type)?)]),
     )? {
         LuaValue::Table(t) => t,
-        _ => return Err(LuaError::RuntimeError("failed to create terminal root node".into())),
+        _ => {
+            return Err(LuaError::RuntimeError(
+                "failed to create terminal root node".into(),
+            ));
+        }
     };
     new_root.set("a", existing.clone())?;
     new_root.set("b", sibling.clone())?;
@@ -525,7 +559,12 @@ fn open(
         None => default_cwd(lua)?,
     };
     let placement = placement
-        .or_else(|| terminal_cfg.get::<Option<String>>("open_position").ok().flatten())
+        .or_else(|| {
+            terminal_cfg
+                .get::<Option<String>>("open_position")
+                .ok()
+                .flatten()
+        })
         .unwrap_or_else(|| "bottom".to_string());
     let reuse_mode = terminal_cfg
         .get::<Option<String>>("reuse_mode")?
@@ -554,7 +593,11 @@ fn open(
                 LuaMultiValue::from_vec(vec![LuaValue::Table(opts)]),
             )? {
                 LuaValue::Table(t) => t,
-                _ => return Err(LuaError::RuntimeError("failed to instantiate TerminalView".into())),
+                _ => {
+                    return Err(LuaError::RuntimeError(
+                        "failed to instantiate TerminalView".into(),
+                    ));
+                }
             };
             reuse_node.call_method::<()>("add_view", view.clone())?;
             let core = require_table(lua, "core")?;
@@ -579,7 +622,11 @@ fn open(
         LuaMultiValue::from_vec(vec![LuaValue::Table(opts)]),
     )? {
         LuaValue::Table(t) => t,
-        _ => return Err(LuaError::RuntimeError("failed to instantiate TerminalView".into())),
+        _ => {
+            return Err(LuaError::RuntimeError(
+                "failed to instantiate TerminalView".into(),
+            ));
+        }
     };
     add_view_in_workspace(lua, view, &placement)
 }
@@ -645,7 +692,9 @@ fn update(lua: &Lua, view: LuaTable) -> LuaResult<()> {
 
         if !view.get::<bool>("allow_close_on_exit")? && handle.call_method::<bool>("running", ())? {
             let spawned_at = view.get::<f64>("spawned_at")?;
-            let now: f64 = require_table(lua, "system")?.get::<LuaFunction>("get_time")?.call(())?;
+            let now: f64 = require_table(lua, "system")?
+                .get::<LuaFunction>("get_time")?
+                .call(())?;
             if now - spawned_at > 1.0 {
                 view.set("allow_close_on_exit", true)?;
             }
@@ -656,12 +705,16 @@ fn update(lua: &Lua, view: LuaTable) -> LuaResult<()> {
             let config = require_table(lua, "core.config")?;
             let plugins: LuaTable = config.get("plugins")?;
             let terminal_cfg: LuaTable = plugins.get("terminal")?;
-            let close_on_exit = terminal_cfg.get::<Option<bool>>("close_on_exit")?.unwrap_or(true);
+            let close_on_exit = terminal_cfg
+                .get::<Option<bool>>("close_on_exit")?
+                .unwrap_or(true);
             if close_on_exit && view.get::<bool>("allow_close_on_exit")? {
                 let core = require_table(lua, "core")?;
                 let root_view: LuaTable = core.get("root_view")?;
                 let root_node: LuaTable = root_view.get("root_node")?;
-                if let Some(node) = root_node.call_method::<Option<LuaTable>>("get_node_for_view", view.clone())? {
+                if let Some(node) =
+                    root_node.call_method::<Option<LuaTable>>("get_node_for_view", view.clone())?
+                {
                     node.call_method::<()>("close_view", (root_node, view.clone()))?;
                     return Ok(());
                 }
@@ -679,7 +732,11 @@ fn update(lua: &Lua, view: LuaTable) -> LuaResult<()> {
                 };
                 status_view.call_method::<()>(
                     "show_message",
-                    ("i", text_color, format!("Terminal exited with code {code_text}")),
+                    (
+                        "i",
+                        text_color,
+                        format!("Terminal exited with code {code_text}"),
+                    ),
                 )?;
             }
             let core = require_table(lua, "core")?;
@@ -704,7 +761,9 @@ fn draw_cursor(lua: &Lua, view: LuaTable) -> LuaResult<()> {
         return Ok(());
     }
     let config = require_table(lua, "core.config")?;
-    let disable_blink = config.get::<Option<bool>>("disable_blink")?.unwrap_or(false);
+    let disable_blink = config
+        .get::<Option<bool>>("disable_blink")?
+        .unwrap_or(false);
     let blink_period = config.get::<Option<f64>>("blink_period")?.unwrap_or(0.8);
     let get_time: LuaFunction = system.get("get_time")?;
     let now: f64 = get_time.call(())?;
@@ -731,7 +790,9 @@ fn draw_cursor(lua: &Lua, view: LuaTable) -> LuaResult<()> {
         + padding.get::<f64>("y").unwrap_or(0.0)
         + (row_index as f64 - 1.0) * line_height
         - scroll.get::<f64>("y").unwrap_or(0.0);
-    if y + line_height < position.get::<f64>("y").unwrap_or(0.0) || y > position.get::<f64>("y").unwrap_or(0.0) + size.get::<f64>("y").unwrap_or(0.0) {
+    if y + line_height < position.get::<f64>("y").unwrap_or(0.0)
+        || y > position.get::<f64>("y").unwrap_or(0.0) + size.get::<f64>("y").unwrap_or(0.0)
+    {
         return Ok(());
     }
     let x = position.get::<f64>("x").unwrap_or(0.0)
@@ -739,7 +800,10 @@ fn draw_cursor(lua: &Lua, view: LuaTable) -> LuaResult<()> {
         + (cursor.get::<i64>("col")? as f64 - 1.0) * char_width;
     let renderer = require_table(lua, "renderer")?;
     let draw_rect: LuaFunction = renderer.get("draw_rect")?;
-    let caret_width = style.get::<Option<f64>>("caret_width")?.unwrap_or(1.0).max(1.0);
+    let caret_width = style
+        .get::<Option<f64>>("caret_width")?
+        .unwrap_or(1.0)
+        .max(1.0);
     draw_rect.call::<()>((
         x,
         y,
@@ -761,8 +825,13 @@ fn switch_color_scheme(lua: &Lua, (view, direction): (LuaTable, i64)) -> LuaResu
     if names.is_empty() {
         return Ok(());
     }
-    let current_name = view.get::<Option<String>>("color_scheme")?.unwrap_or_else(|| names[0].clone());
-    let current_idx = names.iter().position(|name| name == &current_name).unwrap_or(0) as i64;
+    let current_name = view
+        .get::<Option<String>>("color_scheme")?
+        .unwrap_or_else(|| names[0].clone());
+    let current_idx = names
+        .iter()
+        .position(|name| name == &current_name)
+        .unwrap_or(0) as i64;
     let next_idx = ((current_idx + direction).rem_euclid(names.len() as i64)) as usize;
     let next_name = names[next_idx].clone();
     apply_color_scheme(lua, &view, Some(next_name.clone()))?;
@@ -805,182 +874,236 @@ fn populate_class(lua: &Lua, class: &LuaTable) -> LuaResult<()> {
     })?;
 
     // get_name(self)
-    class.set("get_name", lua.create_function(|_lua, this: LuaTable| {
-        let title: String = this.get("title")?;
-        let suffix = if let Some(handle) = this.get::<Option<LuaAnyUserData>>("handle")? {
-            if handle.call_method::<bool>("running", ())? { "" } else { " [done]" }
-        } else {
-            " [done]"
-        };
-        Ok(format!("{title}{suffix}"))
-    })?)?;
+    class.set(
+        "get_name",
+        lua.create_function(|_lua, this: LuaTable| {
+            let title: String = this.get("title")?;
+            let suffix = if let Some(handle) = this.get::<Option<LuaAnyUserData>>("handle")? {
+                if handle.call_method::<bool>("running", ())? {
+                    ""
+                } else {
+                    " [done]"
+                }
+            } else {
+                " [done]"
+            };
+            Ok(format!("{title}{suffix}"))
+        })?,
+    )?;
 
     // get_line_height(self)
-    class.set("get_line_height", lua.create_function(|lua, this: LuaTable| {
-        let font: LuaValue = this.get("font")?;
-        let font_h: f64 = match &font {
-            LuaValue::Table(t) => t.call_method("get_height", ())?,
-            LuaValue::UserData(ud) => ud.call_method("get_height", ())?,
-            _ => return Err(LuaError::RuntimeError("expected font".into())),
-        };
-        let config: LuaTable = require_table(lua, "core.config")?;
-        let line_height: f64 = config.get("line_height")?;
-        Ok((font_h * line_height).floor())
-    })?)?;
+    class.set(
+        "get_line_height",
+        lua.create_function(|lua, this: LuaTable| {
+            let font: LuaValue = this.get("font")?;
+            let font_h: f64 = match &font {
+                LuaValue::Table(t) => t.call_method("get_height", ())?,
+                LuaValue::UserData(ud) => ud.call_method("get_height", ())?,
+                _ => return Err(LuaError::RuntimeError("expected font".into())),
+            };
+            let config: LuaTable = require_table(lua, "core.config")?;
+            let line_height: f64 = config.get("line_height")?;
+            Ok((font_h * line_height).floor())
+        })?,
+    )?;
 
     // get_char_width(self)
-    class.set("get_char_width", lua.create_function(|_lua, this: LuaTable| {
-        let font: LuaValue = this.get("font")?;
-        let w: f64 = match &font {
-            LuaValue::Table(t) => t.call_method("get_width", "M".to_owned())?,
-            LuaValue::UserData(ud) => ud.call_method("get_width", "M".to_owned())?,
-            _ => return Err(LuaError::RuntimeError("expected font".into())),
-        };
-        Ok(w)
-    })?)?;
+    class.set(
+        "get_char_width",
+        lua.create_function(|_lua, this: LuaTable| {
+            let font: LuaValue = this.get("font")?;
+            let w: f64 = match &font {
+                LuaValue::Table(t) => t.call_method("get_width", "M".to_owned())?,
+                LuaValue::UserData(ud) => ud.call_method("get_width", "M".to_owned())?,
+                _ => return Err(LuaError::RuntimeError("expected font".into())),
+            };
+            Ok(w)
+        })?,
+    )?;
 
     // get_line_text_y_offset(self)
-    class.set("get_line_text_y_offset", lua.create_function(|_lua, this: LuaTable| {
-        let lh: f64 = this.call_method("get_line_height", ())?;
-        let font: LuaValue = this.get("font")?;
-        let th: f64 = match &font {
-            LuaValue::Table(t) => t.call_method("get_height", ())?,
-            LuaValue::UserData(ud) => ud.call_method("get_height", ())?,
-            _ => return Err(LuaError::RuntimeError("expected font".into())),
-        };
-        Ok((lh - th) / 2.0)
-    })?)?;
+    class.set(
+        "get_line_text_y_offset",
+        lua.create_function(|_lua, this: LuaTable| {
+            let lh: f64 = this.call_method("get_line_height", ())?;
+            let font: LuaValue = this.get("font")?;
+            let th: f64 = match &font {
+                LuaValue::Table(t) => t.call_method("get_height", ())?,
+                LuaValue::UserData(ud) => ud.call_method("get_height", ())?,
+                _ => return Err(LuaError::RuntimeError("expected font".into())),
+            };
+            Ok((lh - th) / 2.0)
+        })?,
+    )?;
 
     // get_content_size(self)
-    class.set("get_content_size", lua.create_function(|_lua, this: LuaTable| {
-        let cols: f64 = this.get("cols")?;
-        let rows: f64 = this.get("rows")?;
-        let char_w: f64 = this.call_method("get_char_width", ())?;
-        let line_h: f64 = this.call_method("get_line_height", ())?;
-        Ok((cols * char_w, rows * line_h))
-    })?)?;
+    class.set(
+        "get_content_size",
+        lua.create_function(|_lua, this: LuaTable| {
+            let cols: f64 = this.get("cols")?;
+            let rows: f64 = this.get("rows")?;
+            let char_w: f64 = this.call_method("get_char_width", ())?;
+            let line_h: f64 = this.call_method("get_line_height", ())?;
+            Ok((cols * char_w, rows * line_h))
+        })?,
+    )?;
 
     // get_scrollable_size(self)
-    class.set("get_scrollable_size", lua.create_function(|lua, this: LuaTable| {
-        let buffer: LuaAnyUserData = this.get("buffer")?;
-        let total_rows: f64 = buffer.call_method("total_rows", ())?;
-        let line_h: f64 = this.call_method("get_line_height", ())?;
-        let style: LuaTable = require_table(lua, "core.style")?;
-        let padding: LuaTable = style.get("padding")?;
-        let py: f64 = padding.get("y")?;
-        Ok(total_rows * line_h + py * 2.0)
-    })?)?;
+    class.set(
+        "get_scrollable_size",
+        lua.create_function(|lua, this: LuaTable| {
+            let buffer: LuaAnyUserData = this.get("buffer")?;
+            let total_rows: f64 = buffer.call_method("total_rows", ())?;
+            let line_h: f64 = this.call_method("get_line_height", ())?;
+            let style: LuaTable = require_table(lua, "core.style")?;
+            let padding: LuaTable = style.get("padding")?;
+            let py: f64 = padding.get("y")?;
+            Ok(total_rows * line_h + py * 2.0)
+        })?,
+    )?;
 
     // supports_text_input(self)
-    class.set("supports_text_input", lua.create_function(|_lua, _this: LuaTable| {
-        Ok(true)
-    })?)?;
+    class.set(
+        "supports_text_input",
+        lua.create_function(|_lua, _this: LuaTable| Ok(true))?,
+    )?;
 
     // resize_screen(self, cols, rows)
-    class.set("resize_screen", lua.create_function(|_lua, (this, cols, rows): (LuaTable, i64, i64)| {
-        resize_screen(&this, cols, rows)
-    })?)?;
+    class.set(
+        "resize_screen",
+        lua.create_function(|_lua, (this, cols, rows): (LuaTable, i64, i64)| {
+            resize_screen(&this, cols, rows)
+        })?,
+    )?;
 
     // spawn(self, command_argv)
-    class.set("spawn", lua.create_function(|lua, (this, command_argv): (LuaTable, LuaTable)| {
-        spawn(lua, (this, command_argv))
-    })?)?;
+    class.set(
+        "spawn",
+        lua.create_function(|lua, (this, command_argv): (LuaTable, LuaTable)| {
+            spawn(lua, (this, command_argv))
+        })?,
+    )?;
 
     // try_close(self, do_close)
-    class.set("try_close", lua.create_function(|lua, (this, do_close): (LuaTable, LuaFunction)| {
-        if let Some(handle) = this.get::<Option<LuaAnyUserData>>("handle")? {
-            if handle.call_method::<bool>("running", ())? {
-                let core: LuaTable = require_table(lua, "core")?;
-                let nag_view: LuaTable = core.get("nag_view")?;
-                let choices = lua.create_table()?;
-                let yes = lua.create_table()?;
-                yes.set("text", "Terminate")?;
-                yes.set("default_yes", true)?;
-                choices.push(yes)?;
-                let no = lua.create_table()?;
-                no.set("text", "Cancel")?;
-                no.set("default_no", true)?;
-                choices.push(no)?;
-                let handle_ref = Arc::new(lua.create_registry_value(handle)?);
-                let close_ref = Arc::new(lua.create_registry_value(do_close)?);
-                let callback = lua.create_function(move |lua, item: LuaTable| {
-                    let text: String = item.get("text")?;
-                    if text == "Terminate" {
-                        let h: LuaAnyUserData = lua.registry_value(&handle_ref)?;
-                        if let Err(e) = h.call_method::<()>("terminate", ()) {
-                            log::warn!("terminal terminate failed: {e}");
+    class.set(
+        "try_close",
+        lua.create_function(|lua, (this, do_close): (LuaTable, LuaFunction)| {
+            if let Some(handle) = this.get::<Option<LuaAnyUserData>>("handle")? {
+                if handle.call_method::<bool>("running", ())? {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let nag_view: LuaTable = core.get("nag_view")?;
+                    let choices = lua.create_table()?;
+                    let yes = lua.create_table()?;
+                    yes.set("text", "Terminate")?;
+                    yes.set("default_yes", true)?;
+                    choices.push(yes)?;
+                    let no = lua.create_table()?;
+                    no.set("text", "Cancel")?;
+                    no.set("default_no", true)?;
+                    choices.push(no)?;
+                    let handle_ref = Arc::new(lua.create_registry_value(handle)?);
+                    let close_ref = Arc::new(lua.create_registry_value(do_close)?);
+                    let callback = lua.create_function(move |lua, item: LuaTable| {
+                        let text: String = item.get("text")?;
+                        if text == "Terminate" {
+                            let h: LuaAnyUserData = lua.registry_value(&handle_ref)?;
+                            if let Err(e) = h.call_method::<()>("terminate", ()) {
+                                log::warn!("terminal terminate failed: {e}");
+                            }
+                            let close_fn: LuaFunction = lua.registry_value(&close_ref)?;
+                            close_fn.call::<()>(())?;
                         }
-                        let close_fn: LuaFunction = lua.registry_value(&close_ref)?;
-                        close_fn.call::<()>(())?;
-                    }
-                    Ok(())
-                })?;
-                nag_view.call_method::<()>("show", (
-                    "Close Terminal",
-                    "This terminal is still running. Terminate it and close the tab?",
-                    choices,
-                    callback,
-                ))?;
-                return Ok(());
+                        Ok(())
+                    })?;
+                    nag_view.call_method::<()>(
+                        "show",
+                        (
+                            "Close Terminal",
+                            "This terminal is still running. Terminate it and close the tab?",
+                            choices,
+                            callback,
+                        ),
+                    )?;
+                    return Ok(());
+                }
             }
-        }
-        do_close.call::<()>(())
-    })?)?;
+            do_close.call::<()>(())
+        })?,
+    )?;
 
     // send_input(self, text)
-    class.set("send_input", lua.create_function(|lua, (this, text): (LuaTable, String)| {
-        if let Some(handle) = this.get::<Option<LuaAnyUserData>>("handle")? {
-            if handle.call_method::<bool>("running", ())? {
-                let core: LuaTable = require_table(lua, "core")?;
-                core.call_function::<()>("blink_reset", ())?;
-                handle.call_method::<()>("write", text)?;
+    class.set(
+        "send_input",
+        lua.create_function(|lua, (this, text): (LuaTable, String)| {
+            if let Some(handle) = this.get::<Option<LuaAnyUserData>>("handle")? {
+                if handle.call_method::<bool>("running", ())? {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    core.call_function::<()>("blink_reset", ())?;
+                    handle.call_method::<()>("write", text)?;
+                }
             }
-        }
-        Ok(())
-    })?)?;
+            Ok(())
+        })?,
+    )?;
 
     // on_text_input(self, text)
-    class.set("on_text_input", lua.create_function(|_lua, this: LuaTable| {
-        // Delegate to send_input; on_text_input receives text as second arg
-        // but mlua calls it with (self, text), so we call send_input via the table
-        Ok(this)
-    })?)?;
+    class.set(
+        "on_text_input",
+        lua.create_function(|_lua, this: LuaTable| {
+            // Delegate to send_input; on_text_input receives text as second arg
+            // but mlua calls it with (self, text), so we call send_input via the table
+            Ok(this)
+        })?,
+    )?;
 
     // Actually, on_text_input needs to forward text to send_input properly
-    class.set("on_text_input", lua.create_function(|_lua, (this, text): (LuaTable, String)| {
-        this.call_method::<()>("send_input", text)
-    })?)?;
+    class.set(
+        "on_text_input",
+        lua.create_function(|_lua, (this, text): (LuaTable, String)| {
+            this.call_method::<()>("send_input", text)
+        })?,
+    )?;
 
     // on_mouse_wheel(self, dy, dx)
-    class.set("on_mouse_wheel", lua.create_function(|_lua, (this, dy): (LuaTable, f64)| {
-        let scroll: LuaTable = this.get("scroll")?;
-        let to: LuaTable = scroll.get("to")?;
-        let current_y: f64 = to.get("y")?;
-        let line_h: f64 = this.call_method("get_line_height", ())?;
-        let new_y = (current_y - dy * line_h * 3.0).max(0.0);
-        to.set("y", new_y)?;
-        Ok(true)
-    })?)?;
+    class.set(
+        "on_mouse_wheel",
+        lua.create_function(|_lua, (this, dy): (LuaTable, f64)| {
+            let scroll: LuaTable = this.get("scroll")?;
+            let to: LuaTable = scroll.get("to")?;
+            let current_y: f64 = to.get("y")?;
+            let line_h: f64 = this.call_method("get_line_height", ())?;
+            let new_y = (current_y - dy * line_h * 3.0).max(0.0);
+            to.set("y", new_y)?;
+            Ok(true)
+        })?,
+    )?;
 
     // clear(self)
-    class.set("clear", lua.create_function(|_lua, this: LuaTable| {
-        let buffer: LuaAnyUserData = this.get("buffer")?;
-        buffer.call_method::<()>("clear", ())?;
-        let cols: i64 = this.get("cols")?;
-        let rows: i64 = this.get("rows")?;
-        resize_screen(&this, cols, rows)?;
-        scroll_to_bottom(&this, true)
-    })?)?;
+    class.set(
+        "clear",
+        lua.create_function(|_lua, this: LuaTable| {
+            let buffer: LuaAnyUserData = this.get("buffer")?;
+            buffer.call_method::<()>("clear", ())?;
+            let cols: i64 = this.get("cols")?;
+            let rows: i64 = this.get("rows")?;
+            resize_screen(&this, cols, rows)?;
+            scroll_to_bottom(&this, true)
+        })?,
+    )?;
 
     // scroll_to_bottom(self, force)
-    class.set("scroll_to_bottom", lua.create_function(|_lua, (this, force): (LuaTable, Option<bool>)| {
-        scroll_to_bottom(&this, force.unwrap_or(false))
-    })?)?;
+    class.set(
+        "scroll_to_bottom",
+        lua.create_function(|_lua, (this, force): (LuaTable, Option<bool>)| {
+            scroll_to_bottom(&this, force.unwrap_or(false))
+        })?,
+    )?;
 
     // get_dimensions(self)
-    class.set("get_dimensions", lua.create_function(|lua, this: LuaTable| {
-        get_dimensions(lua, &this)
-    })?)?;
+    class.set(
+        "get_dimensions",
+        lua.create_function(|lua, this: LuaTable| get_dimensions(lua, &this))?,
+    )?;
 
     // update(self)
     class.set("update", {
@@ -995,148 +1118,178 @@ fn populate_class(lua: &Lua, class: &LuaTable) -> LuaResult<()> {
     })?;
 
     // draw_row(self, row, x, y)
-    class.set("draw_row", lua.create_function(|lua, (this, row, x, y): (LuaTable, LuaTable, f64, f64)| {
-        let cell_w: f64 = this.call_method("get_char_width", ())?;
-        let cell_h: f64 = this.call_method("get_line_height", ())?;
-        let renderer: LuaTable = lua.globals().get("renderer")?;
-        let draw_rect: LuaFunction = renderer.get("draw_rect")?;
-        let draw_text: LuaFunction = renderer.get("draw_text")?;
-        let runs: LuaTable = row.get::<Option<LuaTable>>("runs")?.unwrap_or(lua.create_table()?);
+    class.set(
+        "draw_row",
+        lua.create_function(|lua, (this, row, x, y): (LuaTable, LuaTable, f64, f64)| {
+            let cell_w: f64 = this.call_method("get_char_width", ())?;
+            let cell_h: f64 = this.call_method("get_line_height", ())?;
+            let renderer: LuaTable = lua.globals().get("renderer")?;
+            let draw_rect: LuaFunction = renderer.get("draw_rect")?;
+            let draw_text: LuaFunction = renderer.get("draw_text")?;
+            let runs: LuaTable = row
+                .get::<Option<LuaTable>>("runs")?
+                .unwrap_or(lua.create_table()?);
 
-        // Draw backgrounds first
-        for run in runs.sequence_values::<LuaTable>() {
-            let run = run?;
-            if let Some(bg) = run.get::<Option<LuaValue>>("bg")? {
-                if !matches!(bg, LuaValue::Nil | LuaValue::Boolean(false)) {
-                    let start_col: f64 = run.get("start_col")?;
-                    let end_col: f64 = run.get("end_col")?;
-                    draw_rect.call::<()>((
-                        x + (start_col - 1.0) * cell_w,
-                        y,
-                        (end_col - start_col + 1.0) * cell_w,
-                        cell_h,
-                        bg,
-                    ))?;
+            // Draw backgrounds first
+            for run in runs.sequence_values::<LuaTable>() {
+                let run = run?;
+                if let Some(bg) = run.get::<Option<LuaValue>>("bg")? {
+                    if !matches!(bg, LuaValue::Nil | LuaValue::Boolean(false)) {
+                        let start_col: f64 = run.get("start_col")?;
+                        let end_col: f64 = run.get("end_col")?;
+                        draw_rect.call::<()>((
+                            x + (start_col - 1.0) * cell_w,
+                            y,
+                            (end_col - start_col + 1.0) * cell_w,
+                            cell_h,
+                            bg,
+                        ))?;
+                    }
                 }
             }
-        }
 
-        // Draw text
-        let runs: LuaTable = row.get::<Option<LuaTable>>("runs")?.unwrap_or(lua.create_table()?);
-        let y_offset: f64 = this.call_method("get_line_text_y_offset", ())?;
-        let default_fg: LuaValue = this.get("default_fg")?;
-        let font: LuaValue = this.get("font")?;
-        for run in runs.sequence_values::<LuaTable>() {
-            let run = run?;
-            let text: String = run.get("text")?;
-            let start_col: f64 = run.get("start_col")?;
-            let fg: LuaValue = run.get::<Option<LuaValue>>("fg")?.unwrap_or(default_fg.clone());
-            let fg = if matches!(fg, LuaValue::Nil | LuaValue::Boolean(false)) {
-                default_fg.clone()
-            } else {
-                fg
-            };
-            draw_text.call::<()>((
-                font.clone(),
-                text,
-                x + (start_col - 1.0) * cell_w,
-                y + y_offset,
-                fg,
-            ))?;
-        }
-        Ok(())
-    })?)?;
+            // Draw text
+            let runs: LuaTable = row
+                .get::<Option<LuaTable>>("runs")?
+                .unwrap_or(lua.create_table()?);
+            let y_offset: f64 = this.call_method("get_line_text_y_offset", ())?;
+            let default_fg: LuaValue = this.get("default_fg")?;
+            let font: LuaValue = this.get("font")?;
+            for run in runs.sequence_values::<LuaTable>() {
+                let run = run?;
+                let text: String = run.get("text")?;
+                let start_col: f64 = run.get("start_col")?;
+                let fg: LuaValue = run
+                    .get::<Option<LuaValue>>("fg")?
+                    .unwrap_or(default_fg.clone());
+                let fg = if matches!(fg, LuaValue::Nil | LuaValue::Boolean(false)) {
+                    default_fg.clone()
+                } else {
+                    fg
+                };
+                draw_text.call::<()>((
+                    font.clone(),
+                    text,
+                    x + (start_col - 1.0) * cell_w,
+                    y + y_offset,
+                    fg,
+                ))?;
+            }
+            Ok(())
+        })?,
+    )?;
 
     // draw_cursor(self)
-    class.set("draw_cursor", lua.create_function(|lua, this: LuaTable| {
-        draw_cursor(lua, this)
-    })?)?;
+    class.set(
+        "draw_cursor",
+        lua.create_function(|lua, this: LuaTable| draw_cursor(lua, this))?,
+    )?;
 
     // draw(self)
-    class.set("draw", lua.create_function(|lua, this: LuaTable| {
-        let style: LuaTable = require_table(lua, "core.style")?;
-        let bg: LuaValue = style.get("background")?;
-        this.call_method::<()>("draw_background", bg)?;
+    class.set(
+        "draw",
+        lua.create_function(|lua, this: LuaTable| {
+            let style: LuaTable = require_table(lua, "core.style")?;
+            let bg: LuaValue = style.get("background")?;
+            this.call_method::<()>("draw_background", bg)?;
 
-        let renderer: LuaTable = lua.globals().get("renderer")?;
-        let draw_rect: LuaFunction = renderer.get("draw_rect")?;
-        let position: LuaTable = this.get("position")?;
-        let size: LuaTable = this.get("size")?;
-        let pos_x: f64 = position.get("x")?;
-        let pos_y: f64 = position.get("y")?;
-        let size_x: f64 = size.get("x")?;
-        let size_y: f64 = size.get("y")?;
-        let default_bg: LuaValue = this.get("default_bg")?;
-        draw_rect.call::<()>((pos_x, pos_y, size_x, size_y, default_bg))?;
+            let renderer: LuaTable = lua.globals().get("renderer")?;
+            let draw_rect: LuaFunction = renderer.get("draw_rect")?;
+            let position: LuaTable = this.get("position")?;
+            let size: LuaTable = this.get("size")?;
+            let pos_x: f64 = position.get("x")?;
+            let pos_y: f64 = position.get("y")?;
+            let size_x: f64 = size.get("x")?;
+            let size_y: f64 = size.get("y")?;
+            let default_bg: LuaValue = this.get("default_bg")?;
+            draw_rect.call::<()>((pos_x, pos_y, size_x, size_y, default_bg))?;
 
-        let buffer: LuaAnyUserData = this.get("buffer")?;
-        let total_rows: i64 = buffer.call_method("total_rows", ())?;
-        let line_h: f64 = this.call_method("get_line_height", ())?;
-        let scroll: LuaTable = this.get("scroll")?;
-        let scroll_y: f64 = scroll.get("y")?;
-        let first_row = ((scroll_y / line_h).floor() as i64 + 1).max(1);
-        let last_row = (((scroll_y + size_y) / line_h).ceil() as i64 + 1).min(total_rows);
-        let padding: LuaTable = style.get("padding")?;
-        let pad_x: f64 = padding.get("x")?;
-        let pad_y: f64 = padding.get("y")?;
-        let x = pos_x + pad_x;
+            let buffer: LuaAnyUserData = this.get("buffer")?;
+            let total_rows: i64 = buffer.call_method("total_rows", ())?;
+            let line_h: f64 = this.call_method("get_line_height", ())?;
+            let scroll: LuaTable = this.get("scroll")?;
+            let scroll_y: f64 = scroll.get("y")?;
+            let first_row = ((scroll_y / line_h).floor() as i64 + 1).max(1);
+            let last_row = (((scroll_y + size_y) / line_h).ceil() as i64 + 1).min(total_rows);
+            let padding: LuaTable = style.get("padding")?;
+            let pad_x: f64 = padding.get("x")?;
+            let pad_y: f64 = padding.get("y")?;
+            let x = pos_x + pad_x;
 
-        let core: LuaTable = require_table(lua, "core")?;
-        core.call_function::<()>("push_clip_rect", (pos_x, pos_y, size_x, size_y))?;
+            let core: LuaTable = require_table(lua, "core")?;
+            core.call_function::<()>("push_clip_rect", (pos_x, pos_y, size_x, size_y))?;
 
-        let rows: LuaTable = buffer.call_method("render_rows", (first_row, last_row))?;
-        for row in rows.sequence_values::<LuaTable>() {
-            let row = row?;
-            let index: f64 = row.get("index")?;
-            let y = pos_y + pad_y + (index - 1.0) * line_h - scroll_y;
-            this.call_method::<()>("draw_row", (row, x, y))?;
-        }
-        this.call_method::<()>("draw_cursor", ())?;
+            let rows: LuaTable = buffer.call_method("render_rows", (first_row, last_row))?;
+            for row in rows.sequence_values::<LuaTable>() {
+                let row = row?;
+                let index: f64 = row.get("index")?;
+                let y = pos_y + pad_y + (index - 1.0) * line_h - scroll_y;
+                this.call_method::<()>("draw_row", (row, x, y))?;
+            }
+            this.call_method::<()>("draw_cursor", ())?;
 
-        core.call_function::<()>("pop_clip_rect", ())?;
-        this.call_method::<()>("draw_scrollbar", ())
-    })?)?;
+            core.call_function::<()>("pop_clip_rect", ())?;
+            this.call_method::<()>("draw_scrollbar", ())
+        })?,
+    )?;
 
     // open(cwd, command_argv, title, placement) — static method
     class.set("open", {
         let k = Arc::clone(&class_key);
-        lua.create_function(move |lua, (cwd, command_argv, title, placement): (Option<String>, Option<LuaTable>, Option<String>, Option<String>)| {
-            let class: LuaTable = lua.registry_value(&k)?;
-            open(lua, (class, cwd, command_argv, title, placement))
-        })?
+        lua.create_function(
+            move |lua,
+                  (cwd, command_argv, title, placement): (
+                Option<String>,
+                Option<LuaTable>,
+                Option<String>,
+                Option<String>,
+            )| {
+                let class: LuaTable = lua.registry_value(&k)?;
+                open(lua, (class, cwd, command_argv, title, placement))
+            },
+        )?
     })?;
 
     // rename(self)
-    class.set("rename", lua.create_function(|lua, this: LuaTable| {
-        let core: LuaTable = require_table(lua, "core")?;
-        let command_view: LuaTable = core.get("command_view")?;
-        let title: String = this.get("title")?;
-        // Strip "Terminal: " prefix if present
-        let default_text = title
-            .strip_prefix("Terminal: ")
-            .or_else(|| title.strip_prefix("Terminal:"))
-            .map(|s| s.trim_start().to_string())
-            .unwrap_or_else(|| title.clone());
-        let this_key = Arc::new(lua.create_registry_value(this)?);
-        let opts = lua.create_table()?;
-        opts.set("text", default_text)?;
-        opts.set("submit", lua.create_function(move |lua, text: String| {
-            if text.is_empty() {
-                return Ok(());
-            }
-            let this: LuaTable = lua.registry_value(&this_key)?;
-            this.set("title", text)?;
+    class.set(
+        "rename",
+        lua.create_function(|lua, this: LuaTable| {
             let core: LuaTable = require_table(lua, "core")?;
-            core.set("redraw", true)?;
-            Ok(())
-        })?)?;
-        command_view.call_method::<()>("enter", ("Rename Terminal", opts))
-    })?)?;
+            let command_view: LuaTable = core.get("command_view")?;
+            let title: String = this.get("title")?;
+            // Strip "Terminal: " prefix if present
+            let default_text = title
+                .strip_prefix("Terminal: ")
+                .or_else(|| title.strip_prefix("Terminal:"))
+                .map(|s| s.trim_start().to_string())
+                .unwrap_or_else(|| title.clone());
+            let this_key = Arc::new(lua.create_registry_value(this)?);
+            let opts = lua.create_table()?;
+            opts.set("text", default_text)?;
+            opts.set(
+                "submit",
+                lua.create_function(move |lua, text: String| {
+                    if text.is_empty() {
+                        return Ok(());
+                    }
+                    let this: LuaTable = lua.registry_value(&this_key)?;
+                    this.set("title", text)?;
+                    let core: LuaTable = require_table(lua, "core")?;
+                    core.set("redraw", true)?;
+                    Ok(())
+                })?,
+            )?;
+            command_view.call_method::<()>("enter", ("Rename Terminal", opts))
+        })?,
+    )?;
 
     // switch_color_scheme(self, direction)
-    class.set("switch_color_scheme", lua.create_function(|lua, (this, direction): (LuaTable, i64)| {
-        switch_color_scheme(lua, (this, direction))
-    })?)?;
+    class.set(
+        "switch_color_scheme",
+        lua.create_function(|lua, (this, direction): (LuaTable, i64)| {
+            switch_color_scheme(lua, (this, direction))
+        })?,
+    )?;
 
     Ok(())
 }
@@ -1169,22 +1322,32 @@ fn register_commands_and_keymaps(lua: &Lua, class: &LuaTable) -> LuaResult<()> {
     cmds.set("terminal:send-eof", send("\x04")?)?;
     cmds.set("terminal:suspend", send("\x1a")?)?;
 
-    cmds.set("terminal:clear", lua.create_function(|_lua, view: LuaTable| {
-        view.call_method::<()>("clear", ())?;
-        view.call_method::<()>("send_input", "\x0c".to_string())
-    })?)?;
+    cmds.set(
+        "terminal:clear",
+        lua.create_function(|_lua, view: LuaTable| {
+            view.call_method::<()>("clear", ())?;
+            view.call_method::<()>("send_input", "\x0c".to_string())
+        })?,
+    )?;
 
-    cmds.set("terminal:rename", lua.create_function(|_lua, view: LuaTable| {
-        view.call_method::<()>("rename", ())
-    })?)?;
+    cmds.set(
+        "terminal:rename",
+        lua.create_function(|_lua, view: LuaTable| view.call_method::<()>("rename", ()))?,
+    )?;
 
-    cmds.set("terminal:next-colorscheme", lua.create_function(|_lua, view: LuaTable| {
-        view.call_method::<()>("switch_color_scheme", 1)
-    })?)?;
+    cmds.set(
+        "terminal:next-colorscheme",
+        lua.create_function(|_lua, view: LuaTable| {
+            view.call_method::<()>("switch_color_scheme", 1)
+        })?,
+    )?;
 
-    cmds.set("terminal:previous-colorscheme", lua.create_function(|_lua, view: LuaTable| {
-        view.call_method::<()>("switch_color_scheme", -1)
-    })?)?;
+    cmds.set(
+        "terminal:previous-colorscheme",
+        lua.create_function(|_lua, view: LuaTable| {
+            view.call_method::<()>("switch_color_scheme", -1)
+        })?,
+    )?;
 
     let add_fn: LuaFunction = command.get("add")?;
     add_fn.call::<()>((class.clone(), cmds))?;
@@ -1260,10 +1423,8 @@ mod tests {
         let eterm = lua.create_table()?;
         let palette = lua.create_table()?;
         for (idx, color) in [
-            "#000000", "#111111", "#222222", "#333333",
-            "#444444", "#555555", "#666666", "#777777",
-            "#888888", "#999999", "#aaaaaa", "#bbbbbb",
-            "#cccccc", "#dddddd", "#eeeeee", "#ffffff",
+            "#000000", "#111111", "#222222", "#333333", "#444444", "#555555", "#666666", "#777777",
+            "#888888", "#999999", "#aaaaaa", "#bbbbbb", "#cccccc", "#dddddd", "#eeeeee", "#ffffff",
         ]
         .into_iter()
         .enumerate()
@@ -1285,7 +1446,10 @@ mod tests {
         common.set(
             "dirname",
             lua.create_function(|_, path: String| {
-                Ok(path.rsplit_once('/').map(|(dir, _)| dir.to_string()).unwrap_or(path))
+                Ok(path
+                    .rsplit_once('/')
+                    .map(|(dir, _)| dir.to_string())
+                    .unwrap_or(path))
             })?,
         )?;
         common.set(
@@ -1299,7 +1463,12 @@ mod tests {
                 let bytes = |s: &str| i64::from_str_radix(s, 16).unwrap_or(0);
                 let (r, g, b, a) = match hex.len() {
                     6 => (bytes(&hex[0..2]), bytes(&hex[2..4]), bytes(&hex[4..6]), 255),
-                    8 => (bytes(&hex[0..2]), bytes(&hex[2..4]), bytes(&hex[4..6]), bytes(&hex[6..8])),
+                    8 => (
+                        bytes(&hex[0..2]),
+                        bytes(&hex[2..4]),
+                        bytes(&hex[4..6]),
+                        bytes(&hex[6..8]),
+                    ),
                     _ => (0, 0, 0, 255),
                 };
                 Ok((r, g, b, a))
@@ -1358,7 +1527,8 @@ mod tests {
     fn init_builds_full_terminal_palette_and_buffer() {
         let lua = Lua::new();
         stub_require(&lua).expect("stub_require");
-        let (_, built_palette) = make_palette(&lua, Some("eterm".to_string())).expect("make_palette");
+        let (_, built_palette) =
+            make_palette(&lua, Some("eterm".to_string())).expect("make_palette");
         assert_eq!(built_palette.raw_len(), 16);
         for i in 1..=16 {
             let value: LuaValue = built_palette.raw_get(i).expect("palette slot");
@@ -1373,8 +1543,11 @@ mod tests {
         }
         let view = lua.create_table().expect("view");
         let style = require_table(&lua, "core.style").expect("style");
-        view.set("font", style.get::<LuaValue>("code_font").expect("code_font"))
-            .expect("set font");
+        view.set(
+            "font",
+            style.get::<LuaValue>("code_font").expect("code_font"),
+        )
+        .expect("set font");
         view.set("cwd", "/tmp").expect("set cwd");
         view.set("title", "Terminal: /tmp").expect("set title");
         view.set("scrollback", 5000).expect("set scrollback");

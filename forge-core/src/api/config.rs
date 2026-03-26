@@ -3,10 +3,7 @@ use mlua::prelude::*;
 /// Register `core.config` as a native Rust preload that builds the config table directly.
 pub fn register_preload(lua: &Lua) -> LuaResult<()> {
     let preload: LuaTable = lua.globals().get::<LuaTable>("package")?.get("preload")?;
-    preload.set(
-        "core.config",
-        lua.create_function(loader)?,
-    )
+    preload.set("core.config", lua.create_function(loader)?)
 }
 
 fn loader(lua: &Lua, _: ()) -> LuaResult<LuaValue> {
@@ -266,10 +263,7 @@ fn build_plugins_table(lua: &Lua, config: &LuaTable) -> LuaResult<()> {
 
             if v == LuaValue::Boolean(false) {
                 // check if plugin is already loaded
-                let loaded: LuaTable = lua
-                    .globals()
-                    .get::<LuaTable>("package")?
-                    .get("loaded")?;
+                let loaded: LuaTable = lua.globals().get::<LuaTable>("package")?.get("loaded")?;
                 let key = format!("plugins.{k}");
                 if !loaded.get::<LuaValue>(key.as_str())?.is_nil() {
                     let core: LuaTable = lua
@@ -278,11 +272,9 @@ fn build_plugins_table(lua: &Lua, config: &LuaTable) -> LuaResult<()> {
                         .get::<LuaTable>("loaded")?
                         .get("core")?;
                     let warn: LuaFunction = core.get("warn")?;
-                    warn.call::<()>((
-                        format!(
-                            "[{k}] is already enabled, restart the editor for the change to take effect"
-                        ),
-                    ))?;
+                    warn.call::<()>((format!(
+                        "[{k}] is already enabled, restart the editor for the change to take effect"
+                    ),))?;
                     return Ok(());
                 }
                 entry.set("enabled", false)?;
@@ -326,10 +318,7 @@ fn build_plugins_table(lua: &Lua, config: &LuaTable) -> LuaResult<()> {
                     return Ok(LuaMultiValue::from_vec(vec![LuaValue::Nil]));
                 }
                 let value = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                lua.replace_registry_value(
-                    &mut next_key_reg.borrow_mut(),
-                    key.clone(),
-                )?;
+                lua.replace_registry_value(&mut next_key_reg.borrow_mut(), key.clone())?;
                 let config: LuaValue = if let LuaValue::Table(ref entry) = value {
                     entry.get("config")?
                 } else {

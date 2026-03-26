@@ -210,7 +210,10 @@ fn collect_dirs(lua: &Lua, root: &str, path: &str) -> LuaResult<Vec<String>> {
 
     let common = require_table(lua, "core.common")?;
     loop {
-        let belongs: bool = common.call_function("path_belongs_to", (current.clone(), root_normalized.clone()))?;
+        let belongs: bool = common.call_function(
+            "path_belongs_to",
+            (current.clone(), root_normalized.clone()),
+        )?;
         if !belongs {
             break;
         }
@@ -295,8 +298,7 @@ fn match_impl(
         .eval()?;
 
     for dir in &dirs {
-        let rel: String =
-            common.call_function("relative_path", (dir.clone(), path_n.clone()))?;
+        let rel: String = common.call_function("relative_path", (dir.clone(), path_n.clone()))?;
         let rel = rel.replace('\\', "/");
 
         let rules = load_rules(lua, dir, cache)?;
@@ -334,8 +336,7 @@ fn match_impl(
     if let LuaValue::Table(ref gi_t) = gi_config {
         let additional: LuaValue = gi_t.get("additional_patterns")?;
         if let LuaValue::Table(ref patterns) = additional {
-            let rel: String =
-                common.call_function("relative_path", (root_n, path_n.clone()))?;
+            let rel: String = common.call_function("relative_path", (root_n, path_n.clone()))?;
             let basename: String = common.call_function("basename", path_n)?;
             let len = patterns.len()?;
             for i in 1..=len {
@@ -375,10 +376,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             let cache_key = lua.create_registry_value(cache)?;
             module.set(
                 "match",
-                lua.create_function(move |lua, (root, path, info): (Option<String>, Option<String>, Option<LuaTable>)| {
-                    let cache: LuaTable = lua.registry_value(&cache_key)?;
-                    match_impl(lua, root, path, info, &cache)
-                })?,
+                lua.create_function(
+                    move |lua,
+                          (root, path, info): (
+                        Option<String>,
+                        Option<String>,
+                        Option<LuaTable>,
+                    )| {
+                        let cache: LuaTable = lua.registry_value(&cache_key)?;
+                        match_impl(lua, root, path, info, &cache)
+                    },
+                )?,
             )?;
 
             Ok(LuaValue::Table(module))

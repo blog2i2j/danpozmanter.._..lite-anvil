@@ -28,8 +28,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         };
 
         let root_node: LuaTable = root_view.get("root_node")?;
-        let child: LuaTable =
-            root_node.call_method("get_child_overlapping_point", (mx, my))?;
+        let child: LuaTable = root_node.call_method("get_child_overlapping_point", (mx, my))?;
         let view: LuaValue = child.get("active_view")?;
         let view = match view {
             LuaValue::Table(v) => v,
@@ -84,10 +83,12 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 _ => return Ok(()),
             };
 
-            let show_x: f64 = results.get::<LuaValue>("x")
+            let show_x: f64 = results
+                .get::<LuaValue>("x")
                 .and_then(|v| lua.unpack(v))
                 .unwrap_or(x);
-            let show_y: f64 = results.get::<LuaValue>("y")
+            let show_y: f64 = results
+                .get::<LuaValue>("y")
                 .and_then(|v| lua.unpack(v))
                 .unwrap_or(y);
             let items: LuaValue = results.get("items")?;
@@ -96,11 +97,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let root_view: LuaTable = core.get("root_view")?;
             let context_menu: LuaTable = root_view.get("context_menu")?;
 
-            let mut call_args = vec![
-                lua.pack(show_x)?,
-                lua.pack(show_y)?,
-                items,
-            ];
+            let mut call_args = vec![lua.pack(show_x)?, lua.pack(show_y)?, items];
             call_args.extend(rest);
             context_menu.call_method::<()>("show", LuaMultiValue::from_vec(call_args))
         })?,

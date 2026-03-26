@@ -13,19 +13,27 @@ fn font_get_width(font: &LuaValue, text: &str) -> LuaResult<f64> {
     }
 }
 
-fn font_call<R: FromLuaMulti>(font: &LuaValue, method: &str, args: impl IntoLuaMulti) -> LuaResult<R> {
+fn font_call<R: FromLuaMulti>(
+    font: &LuaValue,
+    method: &str,
+    args: impl IntoLuaMulti,
+) -> LuaResult<R> {
     match font {
         LuaValue::Table(t) => t.call_method(method, args),
         LuaValue::UserData(ud) => ud.call_method(method, args),
-        other => Err(LuaError::runtime(format!("expected font, got {}", other.type_name()))),
+        other => Err(LuaError::runtime(format!(
+            "expected font, got {}",
+            other.type_name()
+        ))),
     }
 }
-
 
 fn linewrap_config(lua: &Lua) -> LuaResult<LuaTable> {
     let config = require_table(lua, "core.config")?;
     let plugins: LuaTable = config.get("plugins")?;
-    plugins.get::<Option<LuaTable>>("linewrapping")?.ok_or_else(|| LuaError::runtime("missing linewrapping config"))
+    plugins
+        .get::<Option<LuaTable>>("linewrapping")?
+        .ok_or_else(|| LuaError::runtime("missing linewrapping config"))
 }
 
 // ── Wrap-state field names on DocView ─────────────────────────────────────────
@@ -38,7 +46,9 @@ fn linewrap_config(lua: &Lua) -> LuaResult<LuaTable> {
 
 /// True when wrapping is active (wrapped_settings is non-nil).
 pub(crate) fn is_active(docview: &LuaTable) -> LuaResult<bool> {
-    Ok(docview.get::<Option<LuaTable>>("wrapped_settings")?.is_some())
+    Ok(docview
+        .get::<Option<LuaTable>>("wrapped_settings")?
+        .is_some())
 }
 
 /// Total number of visual (wrapped) lines.
@@ -232,7 +242,9 @@ pub(crate) fn reconstruct_breaks(
     }
 
     let cfg = linewrap_config(lua)?;
-    let mode: String = cfg.get::<Option<String>>("mode")?.unwrap_or_else(|| "letter".into());
+    let mode: String = cfg
+        .get::<Option<String>>("mode")?
+        .unwrap_or_else(|| "letter".into());
     let indent: bool = cfg.get::<Option<bool>>("indent")?.unwrap_or(true);
 
     let doc: LuaTable = docview.get("doc")?;
@@ -349,7 +361,11 @@ pub(crate) fn get_col_x_offset(
 ) -> LuaResult<f64> {
     let (_, _, _, scol) = get_line_idx_col_count(docview, line, Some(col), line_end)?;
     let offsets: LuaTable = docview.get("wrapped_line_offsets")?;
-    let xoffset_start: f64 = if scol != 1 { offsets.get(line).unwrap_or(0.0) } else { 0.0 };
+    let xoffset_start: f64 = if scol != 1 {
+        offsets.get(line).unwrap_or(0.0)
+    } else {
+        0.0
+    };
 
     let doc: LuaTable = docview.get("doc")?;
     let highlighter: LuaTable = doc.get("highlighter")?;
@@ -370,7 +386,9 @@ pub(crate) fn get_col_x_offset(
         let tok_end = i + text.len();
 
         if tok_end > scol {
-            let font = syntax_fonts.get::<Option<LuaValue>>(token_type.as_str())?.unwrap_or_else(|| default_font.clone());
+            let font = syntax_fonts
+                .get::<Option<LuaValue>>(token_type.as_str())?
+                .unwrap_or_else(|| default_font.clone());
             let mut char_i = i;
             for ch in text.chars() {
                 if char_i >= scol && char_i < col {
@@ -400,7 +418,11 @@ pub(crate) fn get_line_col_from_x(
     }
     let (line, col) = get_idx_line_col(docview, idx)?;
     let offsets: LuaTable = docview.get("wrapped_line_offsets")?;
-    let xoffset_start: f64 = if col != 1 { offsets.get(line).unwrap_or(0.0) } else { 0.0 };
+    let xoffset_start: f64 = if col != 1 {
+        offsets.get(line).unwrap_or(0.0)
+    } else {
+        0.0
+    };
 
     if x < xoffset_start {
         return Ok((line, col));
@@ -425,7 +447,9 @@ pub(crate) fn get_line_col_from_x(
     while tok_idx <= tokens.raw_len() {
         let token_type: String = tokens.get(tok_idx)?;
         let text: String = tokens.get(tok_idx + 1)?;
-        let font = syntax_fonts.get::<Option<LuaValue>>(token_type.as_str())?.unwrap_or_else(|| default_font.clone());
+        let font = syntax_fonts
+            .get::<Option<LuaValue>>(token_type.as_str())?
+            .unwrap_or_else(|| default_font.clone());
 
         for ch in text.chars() {
             if i >= col {
@@ -482,5 +506,8 @@ pub(crate) fn draw_guide(lua: &Lua, docview: &LuaTable) -> LuaResult<()> {
     let h: f64 = root_size.get("y")?;
 
     let renderer: LuaTable = lua.globals().get("renderer")?;
-    renderer.call_function::<()>("draw_rect", (x + gw + wrap_width, y, 1.0, h, selection_color))
+    renderer.call_function::<()>(
+        "draw_rect",
+        (x + gw + wrap_width, y, 1.0, h, selection_color),
+    )
 }

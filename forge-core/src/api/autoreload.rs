@@ -75,11 +75,7 @@ fn keep_current_doc(doc: &LuaTable, state: &LuaTable) -> LuaResult<()> {
     Ok(())
 }
 
-fn check_prompt_reload(
-    lua: &Lua,
-    doc: &LuaTable,
-    state_key: Arc<LuaRegistryKey>,
-) -> LuaResult<()> {
+fn check_prompt_reload(lua: &Lua, doc: &LuaTable, state_key: Arc<LuaRegistryKey>) -> LuaResult<()> {
     let deferred: bool = doc.get("deferred_reload").unwrap_or(false);
     let queued: bool = doc.get("reload_prompt_queued").unwrap_or(false);
     if !deferred || queued {
@@ -202,7 +198,15 @@ fn check_open_docs(
                         ok_btn.set("text", "OK")?;
                         ok_btn.set("default_yes", true)?;
                         buttons.raw_set(1, ok_btn)?;
-                        nag.call_method::<()>("show", ("File Deleted", msg, buttons, lua.create_function(|_, _: LuaTable| Ok(()))?))?;
+                        nag.call_method::<()>(
+                            "show",
+                            (
+                                "File Deleted",
+                                msg,
+                                buttons,
+                                lua.create_function(|_, _: LuaTable| Ok(()))?,
+                            ),
+                        )?;
                         times.raw_set(doc, LuaValue::Nil)?;
                     }
                 }
@@ -298,16 +302,8 @@ fn start_background_thread(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResu
                         } else {
                             let active_view: LuaTable = core.get("active_view")?;
                             let active_doc: Option<LuaTable> = active_view.get("doc")?;
-                            let is_active = active_doc
-                                .map(|d| d == doc)
-                                .unwrap_or(false);
-                            flag_doc_changed(
-                                lua,
-                                &doc,
-                                mtime,
-                                is_active,
-                                sk2.clone(),
-                            )?;
+                            let is_active = active_doc.map(|d| d == doc).unwrap_or(false);
+                            flag_doc_changed(lua, &doc, mtime, is_active, sk2.clone())?;
                         }
                     }
                 }
@@ -318,12 +314,13 @@ fn start_background_thread(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResu
     })?;
 
     // Lua wrapper: loops and yields — only Lua functions may yield in Lua 5.4.
-    let thread_fn: LuaFunction = lua.load(
-        "local t = ...; return function() while true do t(); coroutine.yield(0.05) end end"
-    ).call::<LuaFunction>(tick)?;
+    let thread_fn: LuaFunction = lua
+        .load("local t = ...; return function() while true do t(); coroutine.yield(0.05) end end")
+        .call::<LuaFunction>(tick)?;
 
     let core = require_table(lua, "core")?;
-    core.get::<LuaFunction>("add_thread")?.call::<()>(thread_fn)?;
+    core.get::<LuaFunction>("add_thread")?
+        .call::<()>(thread_fn)?;
     Ok(())
 }
 
@@ -371,19 +368,26 @@ fn patch_node_set_active_view(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaR
             let core_t = require_table(lua, "core")?;
             let quitting = matches!(core_t.get::<LuaValue>("_exiting")?, LuaValue::Boolean(true));
             if !quitting {
-                if let Some(ref d) = doc {
+                let userdir: String = lua.globals().get("USERDIR")?;
+                let dir = std::path::PathBuf::from(&userdir)
+                    .join("storage")
+                    .join("session");
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    log::warn!("failed to create session dir: {e}");
+                }
+                let content = if let Some(ref d) = doc {
                     if let LuaValue::String(s) = d.get::<LuaValue>("abs_filename")? {
-                        let path_str = s.to_str()?.to_string();
-                        let userdir: String = lua.globals().get("USERDIR")?;
-                        let dir = std::path::PathBuf::from(&userdir)
-                            .join("storage").join("session");
-                        if let Err(e) = std::fs::create_dir_all(&dir) {
-                            log::warn!("failed to create session dir: {e}");
-                        }
-                        if let Err(e) = std::fs::write(dir.join("active_file"), format!("\"{}\"", path_str)) {
-                            log::warn!("failed to write active_file: {e}");
-                        }
+                        format!("\"{}\"", s.to_str()?)
+                    } else {
+                        // Unsaved file — clear so restore knows no saved
+                        // file was active.
+                        String::new()
                     }
+                } else {
+                    String::new()
+                };
+                if let Err(e) = std::fs::write(dir.join("active_file"), &content) {
+                    log::warn!("failed to write active_file: {e}");
                 }
             }
             Ok(())
@@ -510,8 +514,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             spec.push(entry)?;
             defaults.set("config_spec", spec)?;
 
-            let merged: LuaTable =
-                common.call_function("merge", (defaults, plugins.get::<LuaValue>("autoreload")?))?;
+            let merged: LuaTable = common
+                .call_function("merge", (defaults, plugins.get::<LuaValue>("autoreload")?))?;
             plugins.set("autoreload", merged)?;
 
             // Shared state (weak-keyed tables + dirwatch).

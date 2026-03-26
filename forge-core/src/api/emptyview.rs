@@ -42,7 +42,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 ("%s to open a file", "core:open-file"),
                 ("%s to open a file from the project", "core:find-file"),
                 ("%s to toggle focus mode", "root:toggle-focus-mode"),
-                ("%s to close the project folder", "core:close-project-folder"),
+                (
+                    "%s to close the project folder",
+                    "core:close-project-folder",
+                ),
                 ("%s to change project folder", "core:change-project-folder"),
                 ("%s to open a project folder", "core:open-project-folder"),
             ];
@@ -92,7 +95,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let class: LuaTable = lua.registry_value(&k)?;
                     let cmds_tbl: LuaTable = class.get("commands")?;
                     // Use this instead of the class commands, since instances may have their own
-                    let cmds_tbl: LuaTable = this.get::<LuaValue>("commands")?
+                    let cmds_tbl: LuaTable = this
+                        .get::<LuaValue>("commands")?
                         .as_table()
                         .cloned()
                         .unwrap_or(cmds_tbl);
@@ -123,10 +127,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let cmds_y = y - (cmd_h * displayed_count as f64) / 2.0;
 
                     let draw_text: LuaFunction = renderer.get("draw_text")?;
-                    let string_format: LuaFunction = lua
-                        .globals()
-                        .get::<LuaTable>("string")?
-                        .get("format")?;
+                    let string_format: LuaFunction =
+                        lua.globals().get::<LuaTable>("string")?.get("format")?;
 
                     for i in 1..=displayed_count {
                         let d: LuaTable = displayed.raw_get(i)?;
@@ -147,7 +149,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
                     let big_font_h: f64 = match &big_font {
                         LuaValue::Table(t) => t.call_method("get_height", title.to_string())?,
-                        LuaValue::UserData(ud) => ud.call_method("get_height", title.to_string())?,
+                        LuaValue::UserData(ud) => {
+                            ud.call_method("get_height", title.to_string())?
+                        }
                         _ => 28.0,
                     };
                     let logo_y = y - big_font_h + big_font_h / 4.0;

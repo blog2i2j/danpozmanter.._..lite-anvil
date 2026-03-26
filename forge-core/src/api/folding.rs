@@ -106,8 +106,7 @@ fn load_doc_folds(lua: &Lua, doc: &LuaTable) -> LuaResult<()> {
     let folds = lua.create_table()?;
     doc.set("folds", folds.clone())?;
     let storage = require_table(lua, "core.storage")?;
-    let loaded: LuaValue =
-        storage.call_function("load", ("folding", abs_filename.unwrap()))?;
+    let loaded: LuaValue = storage.call_function("load", ("folding", abs_filename.unwrap()))?;
     if let LuaValue::Table(lines_table) = loaded {
         for pair in lines_table.sequence_values::<i64>() {
             let line = pair?;
@@ -203,18 +202,20 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
                     return old.call::<f64>(this);
                 }
                 let h_scrollbar: LuaTable = this.get("h_scrollbar")?;
-                let track: LuaMultiValue =
-                    h_scrollbar.call_method("get_track_rect", ())?;
-                let h_scroll = track.iter().nth(3).map(|v| match v {
-                    LuaValue::Number(n) => *n,
-                    LuaValue::Integer(n) => *n as f64,
-                    _ => 0.0,
-                }).unwrap_or(0.0);
+                let track: LuaMultiValue = h_scrollbar.call_method("get_track_rect", ())?;
+                let h_scroll = track
+                    .iter()
+                    .nth(3)
+                    .map(|v| match v {
+                        LuaValue::Number(n) => *n,
+                        LuaValue::Integer(n) => *n as f64,
+                        _ => 0.0,
+                    })
+                    .unwrap_or(0.0);
                 let line_height: f64 = this.call_method("get_line_height", ())?;
                 let vc = visible_line_count(lua, &doc)? as f64;
                 let config = require_table(lua, "core.config")?;
-                let scroll_past_end: bool =
-                    config.get("scroll_past_end").unwrap_or(false);
+                let scroll_past_end: bool = config.get("scroll_past_end").unwrap_or(false);
                 let style = require_table(lua, "core.style")?;
                 let padding: LuaTable = style.get("padding")?;
                 let pad_y: f64 = padding.get("y")?;
@@ -235,46 +236,40 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
         let old_key = lua.create_registry_value(old)?;
         docview.set(
             "get_line_screen_position",
-            lua.create_function(
-                move |lua, (this, line, col): (LuaTable, i64, LuaValue)| {
-                    let doc: LuaTable = this.get("doc")?;
-                    if !has_active_folds(&doc) {
-                        let old: LuaFunction = lua.registry_value(&old_key)?;
-                        return old.call::<LuaMultiValue>((this, line, col));
+            lua.create_function(move |lua, (this, line, col): (LuaTable, i64, LuaValue)| {
+                let doc: LuaTable = this.get("doc")?;
+                if !has_active_folds(&doc) {
+                    let old: LuaFunction = lua.registry_value(&old_key)?;
+                    return old.call::<LuaMultiValue>((this, line, col));
+                }
+                let (cx, cy): (f64, f64) = this.call_method("get_content_offset", ())?;
+                let lh: f64 = this.call_method("get_line_height", ())?;
+                let (gw, _): (f64, f64) = this.call_method("get_gutter_width", ())?;
+                let style = require_table(lua, "core.style")?;
+                let padding: LuaTable = style.get("padding")?;
+                let pad_y: f64 = padding.get("y")?;
+                let y = cy + (actual_to_visible(lua, &doc, line)? - 1) as f64 * lh + pad_y;
+                match &col {
+                    LuaValue::Nil | LuaValue::Boolean(false) => {
+                        let mut mv = LuaMultiValue::new();
+                        mv.push_back(LuaValue::Number(cx + gw));
+                        mv.push_back(LuaValue::Number(y));
+                        Ok(mv)
                     }
-                    let (cx, cy): (f64, f64) =
-                        this.call_method("get_content_offset", ())?;
-                    let lh: f64 = this.call_method("get_line_height", ())?;
-                    let (gw, _): (f64, f64) = this.call_method("get_gutter_width", ())?;
-                    let style = require_table(lua, "core.style")?;
-                    let padding: LuaTable = style.get("padding")?;
-                    let pad_y: f64 = padding.get("y")?;
-                    let y = cy + (actual_to_visible(lua, &doc, line)? - 1) as f64 * lh + pad_y;
-                    match &col {
-                        LuaValue::Nil | LuaValue::Boolean(false) => {
-                            let mut mv = LuaMultiValue::new();
-                            mv.push_back(LuaValue::Number(cx + gw));
-                            mv.push_back(LuaValue::Number(y));
-                            Ok(mv)
-                        }
-                        _ => {
-                            let col_num = match &col {
-                                LuaValue::Integer(n) => *n as f64,
-                                LuaValue::Number(n) => *n,
-                                _ => 0.0,
-                            };
-                            let col_x: f64 = this.call_method(
-                                "get_col_x_offset",
-                                (line, col_num),
-                            )?;
-                            let mut mv = LuaMultiValue::new();
-                            mv.push_back(LuaValue::Number(cx + gw + col_x));
-                            mv.push_back(LuaValue::Number(y));
-                            Ok(mv)
-                        }
+                    _ => {
+                        let col_num = match &col {
+                            LuaValue::Integer(n) => *n as f64,
+                            LuaValue::Number(n) => *n,
+                            _ => 0.0,
+                        };
+                        let col_x: f64 = this.call_method("get_col_x_offset", (line, col_num))?;
+                        let mut mv = LuaMultiValue::new();
+                        mv.push_back(LuaValue::Number(cx + gw + col_x));
+                        mv.push_back(LuaValue::Number(y));
+                        Ok(mv)
                     }
-                },
-            )?,
+                }
+            })?,
         )?;
     }
 
@@ -291,16 +286,24 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
                     return old.call::<(i64, i64)>(this);
                 }
                 let bounds: LuaMultiValue = this.call_method("get_content_bounds", ())?;
-                let y = bounds.iter().nth(1).map(|v| match v {
-                    LuaValue::Number(n) => *n,
-                    LuaValue::Integer(n) => *n as f64,
-                    _ => 0.0,
-                }).unwrap_or(0.0);
-                let y2 = bounds.iter().nth(3).map(|v| match v {
-                    LuaValue::Number(n) => *n,
-                    LuaValue::Integer(n) => *n as f64,
-                    _ => 0.0,
-                }).unwrap_or(0.0);
+                let y = bounds
+                    .iter()
+                    .nth(1)
+                    .map(|v| match v {
+                        LuaValue::Number(n) => *n,
+                        LuaValue::Integer(n) => *n as f64,
+                        _ => 0.0,
+                    })
+                    .unwrap_or(0.0);
+                let y2 = bounds
+                    .iter()
+                    .nth(3)
+                    .map(|v| match v {
+                        LuaValue::Number(n) => *n,
+                        LuaValue::Integer(n) => *n as f64,
+                        _ => 0.0,
+                    })
+                    .unwrap_or(0.0);
                 let lh: f64 = this.call_method("get_line_height", ())?;
                 let style = require_table(lua, "core.style")?;
                 let padding: LuaTable = style.get("padding")?;
@@ -358,8 +361,7 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
                 let background: LuaValue = style.get("background")?;
                 this.call_method::<()>("draw_background", background)?;
 
-                let (_, indent_size): (LuaValue, i64) =
-                    doc.call_method("get_indent_info", ())?;
+                let (_, indent_size): (LuaValue, i64) = doc.call_method("get_indent_info", ())?;
                 let font: LuaValue = this.call_method("get_font", ())?;
                 match &font {
                     LuaValue::Table(t) => t.call_method::<()>("set_tab_size", indent_size)?,
@@ -380,8 +382,8 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
 
                 let mut line = minline;
                 while line <= maxline {
-                    let drawn: f64 = this
-                        .call_method("draw_line_gutter", (line, pos_x, y, inner_gw))?;
+                    let drawn: f64 =
+                        this.call_method("draw_line_gutter", (line, pos_x, y, inner_gw))?;
                     y += drawn;
                     line = next_visible_line(lua, &doc, line)?;
                 }
@@ -431,7 +433,11 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
                         let icon = match &folds {
                             LuaValue::Table(t) => {
                                 let fold_entry: LuaValue = t.get(line)?;
-                                if matches!(fold_entry, LuaValue::Nil) { "v" } else { ">" }
+                                if matches!(fold_entry, LuaValue::Nil) {
+                                    "v"
+                                } else {
+                                    ">"
+                                }
                             }
                             _ => "v",
                         };
@@ -456,35 +462,32 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
         let old_key = lua.create_registry_value(old)?;
         docview.set(
             "draw_line_text",
-            lua.create_function(
-                move |lua, (this, line, x, y): (LuaTable, i64, f64, f64)| {
-                    let old: LuaFunction = lua.registry_value(&old_key)?;
-                    let lh: f64 = old.call((this.clone(), line, x, y))?;
-                    let doc: LuaTable = this.get("doc")?;
-                    let folds: LuaValue = doc.get("folds")?;
-                    if let LuaValue::Table(folds_table) = &folds {
-                        let end_line: LuaValue = folds_table.get(line)?;
-                        if let LuaValue::Integer(end) = end_line {
-                            let text = format!(" ... {} lines", end - line);
-                            let font: LuaValue = this.call_method("get_font", ())?;
-                            let col_x: f64 =
-                                this.call_method("get_col_x_offset", (line, f64::INFINITY))?;
-                            let style = require_table(lua, "core.style")?;
-                            let padding: LuaTable = style.get("padding")?;
-                            let pad_x: f64 = padding.get("x")?;
-                            let text_y_offset: f64 =
-                                this.call_method("get_line_text_y_offset", ())?;
-                            let dim: LuaValue = style.get("dim")?;
-                            let renderer: LuaTable = lua.globals().get("renderer")?;
-                            renderer.call_function::<LuaValue>(
-                                "draw_text",
-                                (font, text, x + col_x + pad_x, y + text_y_offset, dim),
-                            )?;
-                        }
+            lua.create_function(move |lua, (this, line, x, y): (LuaTable, i64, f64, f64)| {
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                let lh: f64 = old.call((this.clone(), line, x, y))?;
+                let doc: LuaTable = this.get("doc")?;
+                let folds: LuaValue = doc.get("folds")?;
+                if let LuaValue::Table(folds_table) = &folds {
+                    let end_line: LuaValue = folds_table.get(line)?;
+                    if let LuaValue::Integer(end) = end_line {
+                        let text = format!(" ... {} lines", end - line);
+                        let font: LuaValue = this.call_method("get_font", ())?;
+                        let col_x: f64 =
+                            this.call_method("get_col_x_offset", (line, f64::INFINITY))?;
+                        let style = require_table(lua, "core.style")?;
+                        let padding: LuaTable = style.get("padding")?;
+                        let pad_x: f64 = padding.get("x")?;
+                        let text_y_offset: f64 = this.call_method("get_line_text_y_offset", ())?;
+                        let dim: LuaValue = style.get("dim")?;
+                        let renderer: LuaTable = lua.globals().get("renderer")?;
+                        renderer.call_function::<LuaValue>(
+                            "draw_text",
+                            (font, text, x + col_x + pad_x, y + text_y_offset, dim),
+                        )?;
                     }
-                    Ok(lh)
-                },
-            )?,
+                }
+                Ok(lh)
+            })?,
         )?;
     }
 

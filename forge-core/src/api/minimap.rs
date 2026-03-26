@@ -213,7 +213,8 @@ fn draw_minimap(lua: &Lua, this: &LuaTable) -> LuaResult<()> {
                         let trimmed_draw = draw_len.saturating_sub(leading);
                         if trimmed_draw > 0 {
                             let seg_x = (x_off + leading as f64 * scale).min(usable_width);
-                            let seg_w = (trimmed_draw as f64 * scale).min(usable_width - seg_x + text_padding);
+                            let seg_w = (trimmed_draw as f64 * scale)
+                                .min(usable_width - seg_x + text_padding);
                             if seg_w > 0.2 {
                                 let color: LuaValue = syntax_colors
                                     .get::<Option<LuaValue>>(token_type.as_str())?
@@ -227,7 +228,13 @@ fn draw_minimap(lua: &Lua, this: &LuaTable) -> LuaResult<()> {
                                 let draw_color = color_with_alpha(lua, &color, 130.0)?;
                                 renderer.call_function::<()>(
                                     "draw_rect",
-                                    (mx + text_padding + seg_x, y_pos, seg_w, block_height, draw_color),
+                                    (
+                                        mx + text_padding + seg_x,
+                                        y_pos,
+                                        seg_w,
+                                        block_height,
+                                        draw_color,
+                                    ),
                                 )?;
                             }
                         }
@@ -246,10 +253,7 @@ fn draw_minimap(lua: &Lua, this: &LuaTable) -> LuaResult<()> {
         let ind_y = my + (vis_min - minimap_start) as f64 * mlh;
         let ind_h = (vis_max - vis_min + 1) as f64 * mlh;
         let clamped_h = ind_h.min(mh - (ind_y - my));
-        renderer.call_function::<()>(
-            "draw_rect",
-            (mx, ind_y, mw, clamped_h, indicator_color),
-        )?;
+        renderer.call_function::<()>("draw_rect", (mx, ind_y, mw, clamped_h, indicator_color))?;
     }
 
     core.call_function::<()>("pop_clip_rect", ())?;
@@ -332,7 +336,10 @@ fn patch_on_mouse_pressed(lua: &Lua) -> LuaResult<()> {
         "on_mouse_pressed",
         lua.create_function(
             move |lua, (this, button, x, y, clicks): (LuaTable, LuaValue, f64, f64, LuaValue)| {
-                if minimap_enabled(lua)? && is_docview(lua, &this)? && point_in_minimap(lua, &this, x, y)? {
+                if minimap_enabled(lua)?
+                    && is_docview(lua, &this)?
+                    && point_in_minimap(lua, &this, x, y)?
+                {
                     this.set("minimap_dragging", true)?;
                     scroll_to_minimap_position(lua, &this, y)?;
                     return Ok(LuaValue::Boolean(true));

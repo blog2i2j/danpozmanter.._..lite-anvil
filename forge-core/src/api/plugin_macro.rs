@@ -43,9 +43,7 @@ fn install(lua: &Lua) -> LuaResult<()> {
                 if current == "recording" {
                     let event_type = args.front().cloned().unwrap_or(LuaValue::Nil);
                     let type_str = match &event_type {
-                        LuaValue::String(s) => {
-                            s.to_str().map(|s| s.to_owned()).unwrap_or_default()
-                        }
+                        LuaValue::String(s) => s.to_str().map(|s| s.to_owned()).unwrap_or_default(),
                         _ => String::new(),
                     };
                     let handled: LuaTable = lua.registry_value(&hk)?;
@@ -99,10 +97,7 @@ fn install(lua: &Lua) -> LuaResult<()> {
             st.set("state", "stopped")?;
             let buf: LuaTable = st.get("event_buffer")?;
             let count = buf.len()?;
-            core.call_function::<()>(
-                "log",
-                format!("Stopped recording macro ({count} events)"),
-            )?;
+            core.call_function::<()>("log", format!("Stopped recording macro ({count} events)"))?;
         }
         Ok(())
     })?;

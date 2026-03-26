@@ -352,7 +352,7 @@ pub fn show_if_hidden() {
     });
 }
 
-/// Returns `(w, h, x, y)` in window pixels and screen pixels. Matches C backend.
+/// Returns `(pw, ph, x, y)` — physical pixels and scaled screen position.
 pub fn get_window_size() -> (i32, i32, i32, i32) {
     SDL.with(|s| {
         s.borrow()
@@ -395,6 +395,10 @@ pub fn set_window_size(w: i32, h: i32, x: i32, y: i32) {
                     if x != -1 || y != -1 {
                         SDL_SetWindowPosition(win.raw, logical_x, logical_y);
                     }
+                    // Wait for the compositor to process the resize before the
+                    // first draw, otherwise the renderer may present a frame at
+                    // the old (creation) size, causing a visible size mismatch.
+                    SDL_SyncWindow(win.raw);
                 }
                 win.update_scale();
             }

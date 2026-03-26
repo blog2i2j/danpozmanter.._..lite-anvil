@@ -141,7 +141,8 @@ fn register_find_file_command(lua: &Lua) -> LuaResult<()> {
         let fk2 = lua.create_registry_value(lua.registry_value::<LuaTable>(&files_key)?)?;
         let pk2 = lua.create_registry_value(lua.registry_value::<LuaTable>(&native_picker_key)?)?;
         let vk2 = lua.create_registry_value(lua.registry_value::<LuaValue>(&visited_key)?)?;
-        let original_files_key_cell = std::sync::Arc::new(parking_lot::Mutex::new(None::<LuaTable>));
+        let original_files_key_cell =
+            std::sync::Arc::new(parking_lot::Mutex::new(None::<LuaTable>));
         let ofc = original_files_key_cell.clone();
         opts.set(
             "suggest",
@@ -163,7 +164,11 @@ fn register_find_file_command(lua: &Lua) -> LuaResult<()> {
                         files,
                         text.clone(),
                         true,
-                        if text.is_empty() { visited } else { LuaValue::Nil },
+                        if text.is_empty() {
+                            visited
+                        } else {
+                            LuaValue::Nil
+                        },
                     ),
                 )?;
                 if text.is_empty() {
@@ -173,10 +178,7 @@ fn register_find_file_command(lua: &Lua) -> LuaResult<()> {
             })?,
         )?;
 
-        opts.set(
-            "cancel",
-            lua.create_function(move |_lua, ()| Ok(()))?,
-        )?;
+        opts.set("cancel", lua.create_function(move |_lua, ()| Ok(()))?)?;
 
         let command_view: LuaTable = core.get("command_view")?;
         command_view.call_method::<()>("enter", ("Open File From Project", opts))?;

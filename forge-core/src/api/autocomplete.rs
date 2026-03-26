@@ -39,8 +39,7 @@ fn ac_config_get<T: FromLua>(lua: &Lua, key: &str) -> LuaResult<T> {
 }
 
 fn current_mode(lua: &Lua) -> LuaResult<String> {
-    ac_config_get::<Option<String>>(lua, "mode")
-        .map(|o| o.unwrap_or_else(|| "off".to_owned()))
+    ac_config_get::<Option<String>>(lua, "mode").map(|o| o.unwrap_or_else(|| "off".to_owned()))
 }
 
 fn suggestion_scope(lua: &Lua) -> LuaResult<Option<String>> {
@@ -90,7 +89,11 @@ fn reset_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
     if let LuaValue::Function(f) = on_close {
         let core: LuaTable = require_table(lua, "core")?;
         let av: LuaValue = core.get("active_view")?;
-        let doc: LuaValue = if let LuaValue::Table(v) = &av { v.get("doc")? } else { LuaValue::Nil };
+        let doc: LuaValue = if let LuaValue::Table(v) = &av {
+            v.get("doc")?
+        } else {
+            LuaValue::Nil
+        };
         let suggestions: LuaTable = state.get("suggestions")?;
         let idx: i64 = state.get("suggestions_idx")?;
         let item: LuaValue = suggestions.get(idx)?;
@@ -104,9 +107,10 @@ fn reset_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
 fn item_from_entry(lua: &Lua, text: &str, info: LuaValue) -> LuaResult<LuaTable> {
     let mt = lua.create_table()?;
     let text_str = lua.create_string(text)?;
-    mt.set("__tostring", lua.create_function(|_lua, t: LuaTable| {
-        t.get::<String>("text")
-    })?)?;
+    mt.set(
+        "__tostring",
+        lua.create_function(|_lua, t: LuaTable| t.get::<String>("text"))?,
+    )?;
 
     let item = lua.create_table()?;
     item.set("text", text_str.clone())?;
@@ -225,11 +229,16 @@ fn update_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<(
                         }
                     }
                     let doc_ids_tbl = lua.create_sequence_from(doc_ids.iter().copied())?;
-                    let text_symbols: LuaTable = symbol_index.call_function("collect", doc_ids_tbl)?;
+                    let text_symbols: LuaTable =
+                        symbol_index.call_function("collect", doc_ids_tbl)?;
                     for sym in text_symbols.sequence_values::<String>() {
                         let sym = sym?;
                         if !assigned_sym.contains(&sym) {
-                            let item = item_from_entry(lua, &sym, LuaValue::String(lua.create_string("normal")?))?;
+                            let item = item_from_entry(
+                                lua,
+                                &sym,
+                                LuaValue::String(lua.create_string("normal")?),
+                            )?;
                             items.push(item);
                         }
                     }
@@ -241,11 +250,16 @@ fn update_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<(
                         match syms {
                             LuaValue::Boolean(true) => {
                                 let doc_id: i64 = ce.get("doc_id")?;
-                                let syms: LuaTable = symbol_index.call_function("get_doc_symbols", doc_id)?;
+                                let syms: LuaTable =
+                                    symbol_index.call_function("get_doc_symbols", doc_id)?;
                                 for sym in syms.sequence_values::<String>() {
                                     let sym = sym?;
                                     if !assigned_sym.contains(&sym) {
-                                        let item = item_from_entry(lua, &sym, LuaValue::String(lua.create_string("normal")?))?;
+                                        let item = item_from_entry(
+                                            lua,
+                                            &sym,
+                                            LuaValue::String(lua.create_string("normal")?),
+                                        )?;
                                         items.push(item);
                                     }
                                 }
@@ -254,7 +268,11 @@ fn update_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<(
                                 for pair in sym_t.pairs::<String, LuaValue>() {
                                     let (sym, _) = pair?;
                                     if !assigned_sym.contains(&sym) {
-                                        let item = item_from_entry(lua, &sym, LuaValue::String(lua.create_string("normal")?))?;
+                                        let item = item_from_entry(
+                                            lua,
+                                            &sym,
+                                            LuaValue::String(lua.create_string("normal")?),
+                                        )?;
                                         items.push(item);
                                     }
                                 }
@@ -280,8 +298,13 @@ fn update_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<(
     let mut j = 1i64;
     for i in 1..=max_suggestions {
         let item: LuaValue = matched.get(j)?;
-        if matches!(item, LuaValue::Nil) { break; }
-        let item: LuaTable = match item { LuaValue::Table(t) => t, _ => break };
+        if matches!(item, LuaValue::Nil) {
+            break;
+        }
+        let item: LuaTable = match item {
+            LuaValue::Table(t) => t,
+            _ => break,
+        };
         let item_text: String = item.get("text")?;
         let merged = lua.create_table()?;
         // Copy fields from item
@@ -293,10 +316,14 @@ fn update_suggestions(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<(
         j += 1;
         loop {
             let next: LuaValue = matched.get(j)?;
-            if matches!(next, LuaValue::Nil) { break; }
+            if matches!(next, LuaValue::Nil) {
+                break;
+            }
             if let LuaValue::Table(next_t) = next {
                 let next_text: String = next_t.get("text")?;
-                if next_text != item_text { break; }
+                if next_text != item_text {
+                    break;
+                }
                 let merged_info: LuaValue = merged.get("info")?;
                 if matches!(merged_info, LuaValue::Nil) {
                     let next_info: LuaValue = next_t.get("info")?;
@@ -362,17 +389,23 @@ fn show_autocomplete(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
                 let doc: LuaTable = lua.registry_value(&doc_key)?;
 
                 let cur_req_id: i64 = state.get("provider_request_id")?;
-                if cur_req_id != new_req_id { return Ok(()); }
+                if cur_req_id != new_req_id {
+                    return Ok(());
+                }
 
                 let av = match get_active_docview(lua)? {
                     Some(v) => v,
                     None => return Ok(()),
                 };
                 let av_doc: LuaTable = av.get("doc")?;
-                if av_doc.to_pointer() != doc.to_pointer() { return Ok(()); }
+                if av_doc.to_pointer() != doc.to_pointer() {
+                    return Ok(());
+                }
 
                 let (cur_line, cur_col): (i64, i64) = doc.call_method("get_selection", ())?;
-                if cur_line != line || cur_col != col { return Ok(()); }
+                if cur_line != line || cur_col != col {
+                    return Ok(());
+                }
 
                 let cur_change_id: LuaValue = doc.call_method("get_change_id", ())?;
                 // Compare change IDs — if they differ, skip
@@ -380,10 +413,14 @@ fn show_autocomplete(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
                     (LuaValue::Integer(a), LuaValue::Integer(b)) => a != b,
                     _ => false,
                 };
-                if change_mismatch { return Ok(()); }
+                if change_mismatch {
+                    return Ok(());
+                }
 
                 let cur_partial = get_partial_symbol(lua)?;
-                if cur_partial != request_partial { return Ok(()); }
+                if cur_partial != request_partial {
+                    return Ok(());
+                }
 
                 let new_items = match completions {
                     LuaValue::Table(t) => {
@@ -421,12 +458,21 @@ fn show_autocomplete(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
             let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
             let last_line: LuaValue = state.get("last_line")?;
             let last_col: LuaValue = state.get("last_col")?;
-            let last_col_i: i64 = match &last_col { LuaValue::Integer(n) => *n, _ => col };
-            if line != match &last_line { LuaValue::Integer(n) => *n, _ => line } {
+            let last_col_i: i64 = match &last_col {
+                LuaValue::Integer(n) => *n,
+                _ => col,
+            };
+            if line
+                != match &last_line {
+                    LuaValue::Integer(n) => *n,
+                    _ => line,
+                }
+            {
                 reset_suggestions(lua, state, ac)?;
                 return Ok(());
             }
-            let char_before: LuaString = doc.call_method("get_char", (line, col - 1, line, col - 1))?;
+            let char_before: LuaString =
+                doc.call_method("get_char", (line, col - 1, line, col - 1))?;
             let byte = char_before.as_bytes().first().copied().unwrap_or(0);
             let is_space = byte.is_ascii_whitespace();
             let is_punct_moved = byte.is_ascii_punctuation() && col != last_col_i;
@@ -439,12 +485,25 @@ fn show_autocomplete(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
         // Scroll if suggestions rect is out of view
         let drawing: LuaTable = require_table(lua, "plugins.autocomplete.drawing")?;
         let ctx = make_ctx(lua, state, ac)?;
-        let rect: LuaMultiValue = drawing.call_function("get_suggestions_rect", (ctx, av.clone()))?;
+        let rect: LuaMultiValue =
+            drawing.call_function("get_suggestions_rect", (ctx, av.clone()))?;
         let mut r_iter = rect.into_iter();
-        let _rx: f64 = match r_iter.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-        let ry: f64 = match r_iter.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-        let _rw: f64 = match r_iter.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-        let rh: f64 = match r_iter.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
+        let _rx: f64 = match r_iter.next() {
+            Some(LuaValue::Number(n)) => n,
+            _ => return Ok(()),
+        };
+        let ry: f64 = match r_iter.next() {
+            Some(LuaValue::Number(n)) => n,
+            _ => return Ok(()),
+        };
+        let _rw: f64 = match r_iter.next() {
+            Some(LuaValue::Number(n)) => n,
+            _ => return Ok(()),
+        };
+        let rh: f64 = match r_iter.next() {
+            Some(LuaValue::Number(n)) => n,
+            _ => return Ok(()),
+        };
 
         let position: LuaTable = av.get("position")?;
         let pos_y: f64 = position.get("y")?;
@@ -505,15 +564,16 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
     let spec = lua.create_table()?;
     spec.set("name", "Autocomplete")?;
 
-    let add_entry = |spec: &LuaTable, label: &str, desc: &str, path: &str, typ: &str| -> LuaResult<()> {
-        let e = lua.create_table()?;
-        e.set("label", label)?;
-        e.set("description", desc)?;
-        e.set("path", path)?;
-        e.set("type", typ)?;
-        spec.push(e)?;
-        Ok(())
-    };
+    let add_entry =
+        |spec: &LuaTable, label: &str, desc: &str, path: &str, typ: &str| -> LuaResult<()> {
+            let e = lua.create_table()?;
+            e.set("label", label)?;
+            e.set("description", desc)?;
+            e.set("path", path)?;
+            e.set("type", typ)?;
+            spec.push(e)?;
+            Ok(())
+        };
 
     {
         let e = lua.create_table()?;
@@ -534,7 +594,10 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
     {
         let e = lua.create_table()?;
         e.set("label", "Minimum Length")?;
-        e.set("description", "Amount of characters that need to be written for autocomplete to popup.")?;
+        e.set(
+            "description",
+            "Amount of characters that need to be written for autocomplete to popup.",
+        )?;
         e.set("path", "min_len")?;
         e.set("type", "number")?;
         e.set("default", 3i64)?;
@@ -543,16 +606,49 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
         spec.push(e)?;
     }
 
-    add_entry(&spec, "Maximum Height", "The maximum amount of visible items.", "max_height", "number")?;
-    add_entry(&spec, "Maximum Suggestions", "The maximum amount of scrollable items.", "max_suggestions", "number")?;
-    add_entry(&spec, "Maximum Symbols", "Maximum amount of symbols to cache per document.", "max_symbols", "number")?;
-    add_entry(&spec, "Description Font Size", "Font size of the description box.", "desc_font_size", "number")?;
-    add_entry(&spec, "Hide Icons", "Do not show icons on the suggestions list.", "hide_icons", "toggle")?;
+    add_entry(
+        &spec,
+        "Maximum Height",
+        "The maximum amount of visible items.",
+        "max_height",
+        "number",
+    )?;
+    add_entry(
+        &spec,
+        "Maximum Suggestions",
+        "The maximum amount of scrollable items.",
+        "max_suggestions",
+        "number",
+    )?;
+    add_entry(
+        &spec,
+        "Maximum Symbols",
+        "Maximum amount of symbols to cache per document.",
+        "max_symbols",
+        "number",
+    )?;
+    add_entry(
+        &spec,
+        "Description Font Size",
+        "Font size of the description box.",
+        "desc_font_size",
+        "number",
+    )?;
+    add_entry(
+        &spec,
+        "Hide Icons",
+        "Do not show icons on the suggestions list.",
+        "hide_icons",
+        "toggle",
+    )?;
 
     {
         let e = lua.create_table()?;
         e.set("label", "Icons Position")?;
-        e.set("description", "Position to display icons on the suggestions list.")?;
+        e.set(
+            "description",
+            "Position to display icons on the suggestions list.",
+        )?;
         e.set("path", "icon_position")?;
         e.set("type", "selection")?;
         e.set("default", "left")?;
@@ -563,7 +659,13 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
         spec.push(e)?;
     }
 
-    add_entry(&spec, "Hide Items Info", "Do not show the additional info related to each suggestion.", "hide_info", "toggle")?;
+    add_entry(
+        &spec,
+        "Hide Items Info",
+        "Do not show the additional info related to each suggestion.",
+        "hide_info",
+        "toggle",
+    )?;
 
     defaults.set("config_spec", spec)?;
 
@@ -572,7 +674,11 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
     Ok(())
 }
 
-fn add_thread(lua: &Lua, state_key: Arc<LuaRegistryKey>, ac_key: Arc<LuaRegistryKey>) -> LuaResult<()> {
+fn add_thread(
+    lua: &Lua,
+    state_key: Arc<LuaRegistryKey>,
+    ac_key: Arc<LuaRegistryKey>,
+) -> LuaResult<()> {
     let core: LuaTable = require_table(lua, "core")?;
     // One tick: scan all docs for stale caches, update symbols.
     // Returns 0.0 when work was done (resume soon) or 1.0 when all caches are
@@ -636,7 +742,10 @@ fn add_thread(lua: &Lua, state_key: Arc<LuaRegistryKey>, ac_key: Arc<LuaRegistry
 
                 let max_symbols: i64 = ac_config_get(lua, "max_symbols").unwrap_or(4000);
                 let result = if let LuaValue::Table(lines_t) = doc.get::<LuaValue>("lines")? {
-                    symbol_index.call_function::<LuaTable>("set_doc_symbols", (doc_id as u64, lines_t, max_symbols as usize, LuaValue::Nil))?
+                    symbol_index.call_function::<LuaTable>(
+                        "set_doc_symbols",
+                        (doc_id as u64, lines_t, max_symbols as usize, LuaValue::Nil),
+                    )?
                 } else {
                     lua.create_table()?
                 };
@@ -654,7 +763,8 @@ fn add_thread(lua: &Lua, state_key: Arc<LuaRegistryKey>, ac_key: Arc<LuaRegistry
                 if let LuaValue::Table(ce) = entry {
                     if matches!(ce.get::<LuaValue>("symbols")?, LuaValue::Boolean(true)) {
                         let doc_id: i64 = ce.get("doc_id")?;
-                        let doc_syms: LuaTable = symbol_index.call_function("get_doc_symbols", doc_id)?;
+                        let doc_syms: LuaTable =
+                            symbol_index.call_function("get_doc_symbols", doc_id)?;
                         let global: LuaTable = state.get("global_symbols")?;
                         for sym in doc_syms.sequence_values::<String>() {
                             global.set(sym?, true)?;
@@ -670,9 +780,9 @@ fn add_thread(lua: &Lua, state_key: Arc<LuaRegistryKey>, ac_key: Arc<LuaRegistry
     })?;
 
     // Lua wrapper: loops and yields — only Lua functions may yield in Lua 5.4.
-    let thread_fn: LuaFunction = lua.load(
-        "local t = ...; return function() while true do coroutine.yield(t()) end end"
-    ).call::<LuaFunction>(tick)?;
+    let thread_fn: LuaFunction = lua
+        .load("local t = ...; return function() while true do coroutine.yield(t()) end end")
+        .call::<LuaFunction>(tick)?;
 
     core.get::<LuaFunction>("add_thread")?.call::<()>(thread_fn)
 }
@@ -689,17 +799,20 @@ fn patch_methods(
         let old_key = Arc::new(lua.create_registry_value(old)?);
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        root_view.set("on_text_input", lua.create_function(move |lua, args: LuaMultiValue| {
-            let old: LuaFunction = lua.registry_value(&old_key)?;
-            old.call::<()>(args)?;
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            let triggered: bool = state.get("triggered_manually")?;
-            if triggered || current_mode(lua)? != "lsp" {
-                show_autocomplete(lua, &state, &ac)?;
-            }
-            Ok(())
-        })?)?;
+        root_view.set(
+            "on_text_input",
+            lua.create_function(move |lua, args: LuaMultiValue| {
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                old.call::<()>(args)?;
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                let triggered: bool = state.get("triggered_manually")?;
+                if triggered || current_mode(lua)? != "lsp" {
+                    show_autocomplete(lua, &state, &ac)?;
+                }
+                Ok(())
+            })?,
+        )?;
     }
 
     // Doc.remove
@@ -709,26 +822,31 @@ fn patch_methods(
         let old_key = Arc::new(lua.create_registry_value(old)?);
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        doc_class.set("remove", lua.create_function(move |lua, (this, line1, col1, line2, col2): (LuaTable, f64, f64, f64, f64)| {
-            let old: LuaFunction = lua.registry_value(&old_key)?;
-            old.call::<()>((this, line1, col1, line2, col2))?;
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            let triggered: bool = state.get("triggered_manually")?;
-            // Use i64 casts for comparison only; math.huge passed by commandview saturates to i64::MAX
-            let iline1 = line1 as i64;
-            let icol1 = col1 as i64;
-            let iline2 = line2 as i64;
-            if triggered && iline1 == iline2 {
-                let last_col: i64 = state.get("last_col").unwrap_or(icol1);
-                if last_col >= icol1 {
-                    reset_suggestions(lua, &state, &ac)?;
-                } else {
-                    show_autocomplete(lua, &state, &ac)?;
-                }
-            }
-            Ok(())
-        })?)?;
+        doc_class.set(
+            "remove",
+            lua.create_function(
+                move |lua, (this, line1, col1, line2, col2): (LuaTable, f64, f64, f64, f64)| {
+                    let old: LuaFunction = lua.registry_value(&old_key)?;
+                    old.call::<()>((this, line1, col1, line2, col2))?;
+                    let state: LuaTable = lua.registry_value(&sk)?;
+                    let ac: LuaTable = lua.registry_value(&ak)?;
+                    let triggered: bool = state.get("triggered_manually")?;
+                    // Use i64 casts for comparison only; math.huge passed by commandview saturates to i64::MAX
+                    let iline1 = line1 as i64;
+                    let icol1 = col1 as i64;
+                    let iline2 = line2 as i64;
+                    if triggered && iline1 == iline2 {
+                        let last_col: i64 = state.get("last_col").unwrap_or(icol1);
+                        if last_col >= icol1 {
+                            reset_suggestions(lua, &state, &ac)?;
+                        } else {
+                            show_autocomplete(lua, &state, &ac)?;
+                        }
+                    }
+                    Ok(())
+                },
+            )?,
+        )?;
     }
 
     // RootView.update
@@ -738,28 +856,31 @@ fn patch_methods(
         let old_key = Arc::new(lua.create_registry_value(old)?);
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        root_view.set("update", lua.create_function(move |lua, args: LuaMultiValue| {
-            let old: LuaFunction = lua.registry_value(&old_key)?;
-            old.call::<()>(args)?;
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            if let Some(av) = get_active_docview(lua)? {
-                let doc: LuaTable = av.get("doc")?;
-                let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
-                let triggered: bool = state.get("triggered_manually")?;
-                let last_line: i64 = state.get("last_line").unwrap_or(line);
-                let last_col: i64 = state.get("last_col").unwrap_or(col);
-                let should_reset = if !triggered {
-                    line != last_line || col != last_col
-                } else {
-                    line != last_line || col < last_col
-                };
-                if should_reset {
-                    reset_suggestions(lua, &state, &ac)?;
+        root_view.set(
+            "update",
+            lua.create_function(move |lua, args: LuaMultiValue| {
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                old.call::<()>(args)?;
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                if let Some(av) = get_active_docview(lua)? {
+                    let doc: LuaTable = av.get("doc")?;
+                    let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
+                    let triggered: bool = state.get("triggered_manually")?;
+                    let last_line: i64 = state.get("last_line").unwrap_or(line);
+                    let last_col: i64 = state.get("last_col").unwrap_or(col);
+                    let should_reset = if !triggered {
+                        line != last_line || col != last_col
+                    } else {
+                        line != last_line || col < last_col
+                    };
+                    if should_reset {
+                        reset_suggestions(lua, &state, &ac)?;
+                    }
                 }
-            }
-            Ok(())
-        })?)?;
+                Ok(())
+            })?,
+        )?;
     }
 
     // RootView.draw
@@ -769,21 +890,24 @@ fn patch_methods(
         let old_key = Arc::new(lua.create_registry_value(old)?);
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        root_view.set("draw", lua.create_function(move |lua, args: LuaMultiValue| {
-            let old: LuaFunction = lua.registry_value(&old_key)?;
-            old.call::<()>(args)?;
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            if let Some(av) = get_active_docview(lua)? {
-                let core: LuaTable = require_table(lua, "core")?;
-                let root_view: LuaTable = core.get("root_view")?;
-                let ctx = make_ctx(lua, &state, &ac)?;
-                let drawing: LuaTable = require_table(lua, "plugins.autocomplete.drawing")?;
-                let draw_fn: LuaFunction = drawing.get("draw_suggestions_box")?;
-                root_view.call_method::<()>("defer_draw", (draw_fn, ctx, av))?;
-            }
-            Ok(())
-        })?)?;
+        root_view.set(
+            "draw",
+            lua.create_function(move |lua, args: LuaMultiValue| {
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                old.call::<()>(args)?;
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                if let Some(av) = get_active_docview(lua)? {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let root_view: LuaTable = core.get("root_view")?;
+                    let ctx = make_ctx(lua, &state, &ac)?;
+                    let drawing: LuaTable = require_table(lua, "plugins.autocomplete.drawing")?;
+                    let draw_fn: LuaFunction = drawing.get("draw_suggestions_box")?;
+                    root_view.call_method::<()>("defer_draw", (draw_fn, ctx, av))?;
+                }
+                Ok(())
+            })?,
+        )?;
     }
 
     // Doc.on_close
@@ -792,26 +916,31 @@ fn patch_methods(
         let old: LuaFunction = doc_class.get("on_close")?;
         let old_key = Arc::new(lua.create_registry_value(old)?);
         let sk = Arc::clone(&state_key);
-        doc_class.set("on_close", lua.create_function(move |lua, (this, rest): (LuaTable, LuaMultiValue)| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let cache: LuaTable = state.get("cache")?;
-            let entry: LuaValue = cache.raw_get(this.clone())?;
-            if let LuaValue::Table(ce) = entry {
-                let doc_id: Option<i64> = ce.get("doc_id")?;
-                if let Some(id) = doc_id {
-                    let symbol_index: LuaTable = require_table(lua, "symbol_index")?;
-                    symbol_index.call_function::<()>("remove_doc", id as u64)?;
-                    let shrink: LuaValue = symbol_index.get("shrink")?;
-                    if let LuaValue::Function(f) = shrink {
-                        f.call::<()>(())?;
+        doc_class.set(
+            "on_close",
+            lua.create_function(move |lua, (this, rest): (LuaTable, LuaMultiValue)| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let cache: LuaTable = state.get("cache")?;
+                let entry: LuaValue = cache.raw_get(this.clone())?;
+                if let LuaValue::Table(ce) = entry {
+                    let doc_id: Option<i64> = ce.get("doc_id")?;
+                    if let Some(id) = doc_id {
+                        let symbol_index: LuaTable = require_table(lua, "symbol_index")?;
+                        symbol_index.call_function::<()>("remove_doc", id as u64)?;
+                        let shrink: LuaValue = symbol_index.get("shrink")?;
+                        if let LuaValue::Function(f) = shrink {
+                            f.call::<()>(())?;
+                        }
                     }
                 }
-            }
-            let old: LuaFunction = lua.registry_value(&old_key)?;
-            let mut args = vec![LuaValue::Table(this)];
-            for v in rest.into_iter() { args.push(v); }
-            old.call::<()>(LuaMultiValue::from_vec(args))
-        })?)?;
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                let mut args = vec![LuaValue::Table(this)];
+                for v in rest.into_iter() {
+                    args.push(v);
+                }
+                old.call::<()>(LuaMultiValue::from_vec(args))
+            })?,
+        )?;
     }
 
     Ok(())
@@ -847,157 +976,187 @@ fn register_commands(
     {
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        cmds.set("autocomplete:complete", lua.create_function(move |lua, dv: LuaTable| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            let doc: LuaTable = dv.get("doc")?;
-            let suggestions: LuaTable = state.get("suggestions")?;
-            let idx: i64 = state.get("suggestions_idx")?;
-            let item: LuaTable = suggestions.get(idx)?;
+        cmds.set(
+            "autocomplete:complete",
+            lua.create_function(move |lua, dv: LuaTable| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                let doc: LuaTable = dv.get("doc")?;
+                let suggestions: LuaTable = state.get("suggestions")?;
+                let idx: i64 = state.get("suggestions_idx")?;
+                let item: LuaTable = suggestions.get(idx)?;
 
-            let mut inserted = false;
-            let onselect: LuaValue = item.get("onselect")?;
-            if let LuaValue::Function(f) = onselect {
-                let result: LuaValue = f.call((idx, item.clone()))?;
-                inserted = matches!(result, LuaValue::Boolean(true));
-            }
+                let mut inserted = false;
+                let onselect: LuaValue = item.get("onselect")?;
+                if let LuaValue::Function(f) = onselect {
+                    let result: LuaValue = f.call((idx, item.clone()))?;
+                    inserted = matches!(result, LuaValue::Boolean(true));
+                }
 
-            if !inserted {
-                let current_partial = get_partial_symbol(lua)?;
-                let sz = current_partial.len();
-                let item_text: String = item.get("text")?;
+                if !inserted {
+                    let current_partial = get_partial_symbol(lua)?;
+                    let sz = current_partial.len();
+                    let item_text: String = item.get("text")?;
 
-                // Iterate selections to remove partial and insert completion
-                let sel_results: LuaMultiValue = doc.call_method("get_selections", (true,))?;
-                let mut sel_iter = sel_results.into_iter();
-                let iter_fn: LuaFunction = match sel_iter.next() {
-                    Some(LuaValue::Function(f)) => f,
-                    _ => {
-                        doc.call_method::<()>("text_input", item_text.clone())?;
-                        return reset_suggestions(lua, &state, &ac);
-                    }
-                };
-                let sel_state = sel_iter.next().unwrap_or(LuaValue::Nil);
-                let mut control = sel_iter.next().unwrap_or(LuaValue::Nil);
+                    // Iterate selections to remove partial and insert completion
+                    let sel_results: LuaMultiValue = doc.call_method("get_selections", (true,))?;
+                    let mut sel_iter = sel_results.into_iter();
+                    let iter_fn: LuaFunction = match sel_iter.next() {
+                        Some(LuaValue::Function(f)) => f,
+                        _ => {
+                            doc.call_method::<()>("text_input", item_text.clone())?;
+                            return reset_suggestions(lua, &state, &ac);
+                        }
+                    };
+                    let sel_state = sel_iter.next().unwrap_or(LuaValue::Nil);
+                    let mut control = sel_iter.next().unwrap_or(LuaValue::Nil);
 
-                loop {
-                    let res: LuaMultiValue = iter_fn.call((sel_state.clone(), control.clone()))?;
-                    let mut vals = res.into_iter();
-                    let first = vals.next();
-                    match first {
-                        None | Some(LuaValue::Nil) => break,
-                        Some(v) => {
-                            control = v;
-                            let line1: i64 = match &control { LuaValue::Integer(n) => *n, _ => break };
-                            let col1: i64 = match vals.next() { Some(LuaValue::Integer(n)) => n, _ => break };
-                            let line2: i64 = match vals.next() { Some(LuaValue::Integer(n)) => n, _ => break };
-                            let _col2: LuaValue = vals.next().unwrap_or(LuaValue::Nil);
-
-                            let n = col1 - 1;
-                            let line_text: String = {
-                                let lines: LuaTable = doc.get("lines")?;
-                                lines.get(line1).unwrap_or_default()
-                            };
-                            for i in 1..=(sz as i64 + 1) {
-                                let j = sz as i64 - i;
-                                let subline_start = (n - j).max(0) as usize;
-                                let subline_end = n as usize;
-                                let subline = if subline_start <= line_text.len() && subline_end <= line_text.len() {
-                                    &line_text[subline_start..subline_end]
-                                } else {
-                                    ""
+                    loop {
+                        let res: LuaMultiValue =
+                            iter_fn.call((sel_state.clone(), control.clone()))?;
+                        let mut vals = res.into_iter();
+                        let first = vals.next();
+                        match first {
+                            None | Some(LuaValue::Nil) => break,
+                            Some(v) => {
+                                control = v;
+                                let line1: i64 = match &control {
+                                    LuaValue::Integer(n) => *n,
+                                    _ => break,
                                 };
-                                let subpartial_start = (i - 1) as usize;
-                                let subpartial = if subpartial_start <= current_partial.len() {
-                                    &current_partial[subpartial_start..]
-                                } else {
-                                    ""
+                                let col1: i64 = match vals.next() {
+                                    Some(LuaValue::Integer(n)) => n,
+                                    _ => break,
                                 };
-                                if subpartial == subline {
-                                    doc.call_method::<()>("remove", (line1, col1, line2, n - j))?;
-                                    break;
+                                let line2: i64 = match vals.next() {
+                                    Some(LuaValue::Integer(n)) => n,
+                                    _ => break,
+                                };
+                                let _col2: LuaValue = vals.next().unwrap_or(LuaValue::Nil);
+
+                                let n = col1 - 1;
+                                let line_text: String = {
+                                    let lines: LuaTable = doc.get("lines")?;
+                                    lines.get(line1).unwrap_or_default()
+                                };
+                                for i in 1..=(sz as i64 + 1) {
+                                    let j = sz as i64 - i;
+                                    let subline_start = (n - j).max(0) as usize;
+                                    let subline_end = n as usize;
+                                    let subline = if subline_start <= line_text.len()
+                                        && subline_end <= line_text.len()
+                                    {
+                                        &line_text[subline_start..subline_end]
+                                    } else {
+                                        ""
+                                    };
+                                    let subpartial_start = (i - 1) as usize;
+                                    let subpartial = if subpartial_start <= current_partial.len() {
+                                        &current_partial[subpartial_start..]
+                                    } else {
+                                        ""
+                                    };
+                                    if subpartial == subline {
+                                        doc.call_method::<()>(
+                                            "remove",
+                                            (line1, col1, line2, n - j),
+                                        )?;
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
+                    doc.call_method::<()>("text_input", item_text)?;
                 }
-                doc.call_method::<()>("text_input", item_text)?;
-            }
 
-            reset_suggestions(lua, &state, &ac)
-        })?)?;
+                reset_suggestions(lua, &state, &ac)
+            })?,
+        )?;
     }
 
     // autocomplete:previous
     {
         let sk = Arc::clone(&state_key);
-        cmds.set("autocomplete:previous", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let suggestions: LuaTable = state.get("suggestions")?;
-            let len = suggestions.raw_len() as i64;
-            let idx: i64 = state.get("suggestions_idx")?;
-            let new_idx = (idx - 2).rem_euclid(len) + 1;
-            state.set("suggestions_idx", new_idx)?;
-            let ah: i64 = ac_config_get(lua, "max_height")?;
-            let ah = ah.min(len);
-            let offset: i64 = state.get("suggestions_offset")?;
-            let new_offset = if offset > new_idx {
-                new_idx
-            } else if offset + ah < new_idx + 1 {
-                new_idx - ah + 1
-            } else {
-                offset
-            };
-            state.set("suggestions_offset", new_offset)
-        })?)?;
+        cmds.set(
+            "autocomplete:previous",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let suggestions: LuaTable = state.get("suggestions")?;
+                let len = suggestions.raw_len() as i64;
+                let idx: i64 = state.get("suggestions_idx")?;
+                let new_idx = (idx - 2).rem_euclid(len) + 1;
+                state.set("suggestions_idx", new_idx)?;
+                let ah: i64 = ac_config_get(lua, "max_height")?;
+                let ah = ah.min(len);
+                let offset: i64 = state.get("suggestions_offset")?;
+                let new_offset = if offset > new_idx {
+                    new_idx
+                } else if offset + ah < new_idx + 1 {
+                    new_idx - ah + 1
+                } else {
+                    offset
+                };
+                state.set("suggestions_offset", new_offset)
+            })?,
+        )?;
     }
 
     // autocomplete:next
     {
         let sk = Arc::clone(&state_key);
-        cmds.set("autocomplete:next", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let suggestions: LuaTable = state.get("suggestions")?;
-            let len = suggestions.raw_len() as i64;
-            let idx: i64 = state.get("suggestions_idx")?;
-            let new_idx = idx.rem_euclid(len) + 1;
-            state.set("suggestions_idx", new_idx)?;
-            let ah: i64 = ac_config_get(lua, "max_height")?;
-            let ah = ah.min(len);
-            let offset: i64 = state.get("suggestions_offset")?;
-            let new_offset = if offset + ah < new_idx + 1 {
-                new_idx - ah + 1
-            } else if offset > new_idx {
-                new_idx
-            } else {
-                offset
-            };
-            state.set("suggestions_offset", new_offset)
-        })?)?;
+        cmds.set(
+            "autocomplete:next",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let suggestions: LuaTable = state.get("suggestions")?;
+                let len = suggestions.raw_len() as i64;
+                let idx: i64 = state.get("suggestions_idx")?;
+                let new_idx = idx.rem_euclid(len) + 1;
+                state.set("suggestions_idx", new_idx)?;
+                let ah: i64 = ac_config_get(lua, "max_height")?;
+                let ah = ah.min(len);
+                let offset: i64 = state.get("suggestions_offset")?;
+                let new_offset = if offset + ah < new_idx + 1 {
+                    new_idx - ah + 1
+                } else if offset > new_idx {
+                    new_idx
+                } else {
+                    offset
+                };
+                state.set("suggestions_offset", new_offset)
+            })?,
+        )?;
     }
 
     // autocomplete:cycle
     {
         let sk = Arc::clone(&state_key);
-        cmds.set("autocomplete:cycle", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let suggestions: LuaTable = state.get("suggestions")?;
-            let len = suggestions.raw_len() as i64;
-            let idx: i64 = state.get("suggestions_idx")?;
-            let new_idx = if idx + 1 > len { 1 } else { idx + 1 };
-            state.set("suggestions_idx", new_idx)
-        })?)?;
+        cmds.set(
+            "autocomplete:cycle",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let suggestions: LuaTable = state.get("suggestions")?;
+                let len = suggestions.raw_len() as i64;
+                let idx: i64 = state.get("suggestions_idx")?;
+                let new_idx = if idx + 1 > len { 1 } else { idx + 1 };
+                state.set("suggestions_idx", new_idx)
+            })?,
+        )?;
     }
 
     // autocomplete:cancel
     {
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        cmds.set("autocomplete:cancel", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            reset_suggestions(lua, &state, &ac)
-        })?)?;
+        cmds.set(
+            "autocomplete:cancel",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                reset_suggestions(lua, &state, &ac)
+            })?,
+        )?;
     }
 
     command.call_function::<()>("add", (LuaValue::Function(predicate), cmds))?;
@@ -1015,10 +1174,7 @@ fn register_commands(
     Ok(())
 }
 
-fn build_autocomplete_module(
-    lua: &Lua,
-    state_key: Arc<LuaRegistryKey>,
-) -> LuaResult<LuaTable> {
+fn build_autocomplete_module(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaResult<LuaTable> {
     let ac = lua.create_table()?;
     ac.set("map", lua.create_table()?)?;
     ac.set("map_manually", lua.create_table()?)?;
@@ -1031,151 +1187,182 @@ fn build_autocomplete_module(
     // autocomplete.add(t, manually_triggered)
     {
         let ak = Arc::clone(&ac_key);
-        ac.set("add", lua.create_function(move |lua, (t, manually): (LuaTable, LuaValue)| {
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            let manually = matches!(manually, LuaValue::Boolean(true));
-            let name: String = t.get("name")?;
-            let files: String = t.get("files").unwrap_or_else(|_| ".*".to_owned());
-            let items = items_from_completion_map(lua, &t)?;
-            let entry = lua.create_table()?;
-            entry.set("files", files)?;
-            entry.set("items", items)?;
-            if !manually {
-                let map: LuaTable = ac.get("map")?;
-                map.set(name, entry)?;
-            } else {
-                let map: LuaTable = ac.get("map_manually")?;
-                map.set(name, entry)?;
-            }
-            Ok(())
-        })?)?;
+        ac.set(
+            "add",
+            lua.create_function(move |lua, (t, manually): (LuaTable, LuaValue)| {
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                let manually = matches!(manually, LuaValue::Boolean(true));
+                let name: String = t.get("name")?;
+                let files: String = t.get("files").unwrap_or_else(|_| ".*".to_owned());
+                let items = items_from_completion_map(lua, &t)?;
+                let entry = lua.create_table()?;
+                entry.set("files", files)?;
+                entry.set("items", items)?;
+                if !manually {
+                    let map: LuaTable = ac.get("map")?;
+                    map.set(name, entry)?;
+                } else {
+                    let map: LuaTable = ac.get("map_manually")?;
+                    map.set(name, entry)?;
+                }
+                Ok(())
+            })?,
+        )?;
     }
 
     // autocomplete.open(on_close)
     {
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        ac.set("open", lua.create_function(move |lua, on_close: LuaValue| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            state.set("triggered_manually", true)?;
-            if !matches!(on_close, LuaValue::Nil) {
-                ac.set("on_close", on_close)?;
-            }
-            if let Some(_av) = get_active_docview(lua)? {
-                let partial = get_partial_symbol(lua)?;
-                state.set("partial", partial)?;
-                let core: LuaTable = require_table(lua, "core")?;
-                let av: LuaTable = core.get("active_view")?;
-                let doc: LuaTable = av.get("doc")?;
-                let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
-                state.set("last_line", line)?;
-                state.set("last_col", col)?;
-                update_suggestions(lua, &state, &ac)?;
-            }
-            Ok(())
-        })?)?;
+        ac.set(
+            "open",
+            lua.create_function(move |lua, on_close: LuaValue| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                state.set("triggered_manually", true)?;
+                if !matches!(on_close, LuaValue::Nil) {
+                    ac.set("on_close", on_close)?;
+                }
+                if let Some(_av) = get_active_docview(lua)? {
+                    let partial = get_partial_symbol(lua)?;
+                    state.set("partial", partial)?;
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let av: LuaTable = core.get("active_view")?;
+                    let doc: LuaTable = av.get("doc")?;
+                    let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
+                    state.set("last_line", line)?;
+                    state.set("last_col", col)?;
+                    update_suggestions(lua, &state, &ac)?;
+                }
+                Ok(())
+            })?,
+        )?;
     }
 
     // autocomplete.close()
     {
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        ac.set("close", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            reset_suggestions(lua, &state, &ac)
-        })?)?;
+        ac.set(
+            "close",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                reset_suggestions(lua, &state, &ac)
+            })?,
+        )?;
     }
 
     // autocomplete.is_open()
     {
         let sk = Arc::clone(&state_key);
-        ac.set("is_open", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let suggestions: LuaTable = state.get("suggestions")?;
-            Ok(suggestions.raw_len() > 0)
-        })?)?;
+        ac.set(
+            "is_open",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let suggestions: LuaTable = state.get("suggestions")?;
+                Ok(suggestions.raw_len() > 0)
+            })?,
+        )?;
     }
 
     // autocomplete.complete(completions, on_close)
     {
         let sk = Arc::clone(&state_key);
         let ak = Arc::clone(&ac_key);
-        ac.set("complete", lua.create_function(move |lua, (completions, on_close): (LuaTable, LuaValue)| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            reset_suggestions(lua, &state, &ac)?;
-            let empty = lua.create_table()?;
-            ac.set("map_manually", empty)?;
-            let open: LuaFunction = ac.get("add")?;
-            open.call::<()>((completions, LuaValue::Boolean(true)))?;
-            let open_fn: LuaFunction = ac.get("open")?;
-            open_fn.call::<()>(on_close)
-        })?)?;
+        ac.set(
+            "complete",
+            lua.create_function(move |lua, (completions, on_close): (LuaTable, LuaValue)| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                reset_suggestions(lua, &state, &ac)?;
+                let empty = lua.create_table()?;
+                ac.set("map_manually", empty)?;
+                let open: LuaFunction = ac.get("add")?;
+                open.call::<()>((completions, LuaValue::Boolean(true)))?;
+                let open_fn: LuaFunction = ac.get("open")?;
+                open_fn.call::<()>(on_close)
+            })?,
+        )?;
     }
 
     // autocomplete.can_complete()
     {
         let sk = Arc::clone(&state_key);
-        ac.set("can_complete", lua.create_function(move |lua, ()| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            if current_mode(lua)? == "off" { return Ok(false); }
-            let partial: String = state.get("partial")?;
-            let min_len: i64 = ac_config_get(lua, "min_len")?;
-            Ok((partial.len() as i64) >= min_len)
-        })?)?;
+        ac.set(
+            "can_complete",
+            lua.create_function(move |lua, ()| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                if current_mode(lua)? == "off" {
+                    return Ok(false);
+                }
+                let partial: String = state.get("partial")?;
+                let min_len: i64 = ac_config_get(lua, "min_len")?;
+                Ok((partial.len() as i64) >= min_len)
+            })?,
+        )?;
     }
 
     // autocomplete.register_provider(name, provider)
     {
         let ak = Arc::clone(&ac_key);
-        ac.set("register_provider", lua.create_function(move |lua, (name, provider): (String, LuaFunction)| {
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            let providers: LuaTable = ac.get("providers")?;
-            providers.set(name, provider)
-        })?)?;
+        ac.set(
+            "register_provider",
+            lua.create_function(move |lua, (name, provider): (String, LuaFunction)| {
+                let ac: LuaTable = lua.registry_value(&ak)?;
+                let providers: LuaTable = ac.get("providers")?;
+                providers.set(name, provider)
+            })?,
+        )?;
     }
 
     // autocomplete.set_default_mode(mode)
     {
         let sk = Arc::clone(&state_key);
-        ac.set("set_default_mode", lua.create_function(move |lua, mode: String| {
-            let state: LuaTable = lua.registry_value(&sk)?;
-            let mode_explicitly_set: bool = state.get("mode_explicitly_set")?;
-            if !mode_explicitly_set && current_mode(lua)? == "lsp" {
-                let config: LuaTable = require_table(lua, "core.config")?;
-                let plugins: LuaTable = config.get("plugins")?;
-                let ac: LuaTable = plugins.get("autocomplete")?;
-                ac.set("mode", mode)?;
-            }
-            Ok(())
-        })?)?;
+        ac.set(
+            "set_default_mode",
+            lua.create_function(move |lua, mode: String| {
+                let state: LuaTable = lua.registry_value(&sk)?;
+                let mode_explicitly_set: bool = state.get("mode_explicitly_set")?;
+                if !mode_explicitly_set && current_mode(lua)? == "lsp" {
+                    let config: LuaTable = require_table(lua, "core.config")?;
+                    let plugins: LuaTable = config.get("plugins")?;
+                    let ac: LuaTable = plugins.get("autocomplete")?;
+                    ac.set("mode", mode)?;
+                }
+                Ok(())
+            })?,
+        )?;
     }
 
     // autocomplete.add_icon(name, character, font, color)
     {
         let ak = Arc::clone(&ac_key);
-        ac.set("add_icon", lua.create_function(move |lua, (name, character, font, color): (String, String, LuaValue, LuaValue)| {
-            let ac: LuaTable = lua.registry_value(&ak)?;
-            let icons: LuaTable = ac.get("icons")?;
-            let entry = lua.create_table()?;
-            entry.set("char", character)?;
-            let font = if matches!(font, LuaValue::Nil) {
-                let style: LuaTable = require_table(lua, "core.style")?;
-                style.get("code_font")?
-            } else {
-                font
-            };
-            entry.set("font", font)?;
-            let color = if matches!(color, LuaValue::Nil) {
-                LuaValue::String(lua.create_string("keyword")?)
-            } else {
-                color
-            };
-            entry.set("color", color)?;
-            icons.set(name, entry)
-        })?)?;
+        ac.set(
+            "add_icon",
+            lua.create_function(
+                move |lua, (name, character, font, color): (String, String, LuaValue, LuaValue)| {
+                    let ac: LuaTable = lua.registry_value(&ak)?;
+                    let icons: LuaTable = ac.get("icons")?;
+                    let entry = lua.create_table()?;
+                    entry.set("char", character)?;
+                    let font = if matches!(font, LuaValue::Nil) {
+                        let style: LuaTable = require_table(lua, "core.style")?;
+                        style.get("code_font")?
+                    } else {
+                        font
+                    };
+                    entry.set("font", font)?;
+                    let color = if matches!(color, LuaValue::Nil) {
+                        LuaValue::String(lua.create_string("keyword")?)
+                    } else {
+                        color
+                    };
+                    entry.set("color", color)?;
+                    icons.set(name, entry)
+                },
+            )?,
+        )?;
     }
 
     // Add built-in syntax symbol icons (one for each style.syntax key)
@@ -1258,327 +1445,509 @@ fn init_drawing(lua: &Lua) -> LuaResult<LuaValue> {
     // M.get_suggestions_rect(ctx, av) -> x, y, w, h[, has_icons]
     {
         let dsk = Arc::clone(&ds_key);
-        m.set("get_suggestions_rect", lua.create_function(move |lua, (ctx, av): (LuaTable, LuaTable)| {
-            let suggestions: LuaTable = ctx.get("suggestions")?;
-            let suggestions_idx: i64 = ctx.get("suggestions_idx")?;
-            let partial: String = ctx.get("partial")?;
-            let icons: LuaTable = ctx.get("icons")?;
+        m.set(
+            "get_suggestions_rect",
+            lua.create_function(move |lua, (ctx, av): (LuaTable, LuaTable)| {
+                let suggestions: LuaTable = ctx.get("suggestions")?;
+                let suggestions_idx: i64 = ctx.get("suggestions_idx")?;
+                let partial: String = ctx.get("partial")?;
+                let icons: LuaTable = ctx.get("icons")?;
 
-            let len = suggestions.raw_len() as i64;
-            let ds: LuaTable = lua.registry_value(&dsk)?;
-            if len == 0 {
-                ds.set("last_max_width", 0.0f64)?;
-                return Ok(LuaMultiValue::from_vec(vec![
-                    LuaValue::Number(0.0), LuaValue::Number(0.0),
-                    LuaValue::Number(0.0), LuaValue::Number(0.0),
-                ]));
-            }
-
-            let doc: LuaTable = av.get("doc")?;
-            let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
-            let partial_len = partial.chars().count() as i64;
-            let (mut x, mut y): (f64, f64) = av.call_method("get_line_screen_position", (line, col - partial_len))?;
-            let lh_av: f64 = av.call_method("get_line_height", ())?;
-            let style: LuaTable = require_table(lua, "core.style")?;
-            let padding: LuaTable = style.get("padding")?;
-            let px: f64 = padding.get("x")?;
-            let py: f64 = padding.get("y")?;
-            y += lh_av + py;
-
-            let av_font: LuaValue = av.call_method("get_font", ())?;
-            let th = font_get_height(&av_font)?;
-            let mut has_icons = false;
-            let hide_info: bool = ac_config_get(lua, "hide_info")?;
-            let hide_icons: bool = ac_config_get(lua, "hide_icons")?;
-            let ah: i64 = ac_config_get(lua, "max_height")?;
-            let show_count = len.min(ah);
-            let start_idx = (suggestions_idx - (ah - 1)).max(1);
-
-            let mut max_width = 0.0f64;
-            let mut max_l_icon_width = 0.0f64;
-            let style_font: LuaValue = style.get("font")?;
-
-            for i in start_idx..start_idx + show_count {
-                let s: LuaValue = suggestions.get(i)?;
-                let s = match s { LuaValue::Table(t) => t, _ => continue };
-                let text: String = s.get("text")?;
-                let mut w = font_get_width(&av_font, &text)?;
-                let info: LuaValue = s.get("info")?;
-                if !matches!(info, LuaValue::Nil) && !hide_info {
-                    if let LuaValue::String(is) = &info {
-                        w += font_get_width(&style_font, &is.to_str()?)? + px;
-                    }
+                let len = suggestions.raw_len() as i64;
+                let ds: LuaTable = lua.registry_value(&dsk)?;
+                if len == 0 {
+                    ds.set("last_max_width", 0.0f64)?;
+                    return Ok(LuaMultiValue::from_vec(vec![
+                        LuaValue::Number(0.0),
+                        LuaValue::Number(0.0),
+                        LuaValue::Number(0.0),
+                        LuaValue::Number(0.0),
+                    ]));
                 }
-                let icon: LuaValue = s.get("icon").unwrap_or_else(|_| LuaValue::Nil);
-                let icon_key = if !matches!(icon, LuaValue::Nil) { icon } else { info };
-                if !hide_icons {
-                    if let LuaValue::String(ik) = &icon_key {
-                        let icon_data: LuaValue = icons.get(ik.to_str()?)?;
-                        if let LuaValue::Table(id) = icon_data {
-                            let ifont: LuaValue = id.get("font")?;
-                            let ichar: String = id.get("char")?;
-                            let iw = font_get_width(&ifont, &ichar)?;
-                            let icon_pos: String = ac_config_get(lua, "icon_position")?;
-                            if icon_pos == "left" {
-                                max_l_icon_width = max_l_icon_width.max(iw + px / 2.0);
-                            }
-                            w += iw + px / 2.0;
-                            has_icons = true;
+
+                let doc: LuaTable = av.get("doc")?;
+                let (line, col): (i64, i64) = doc.call_method("get_selection", ())?;
+                let partial_len = partial.chars().count() as i64;
+                let (mut x, mut y): (f64, f64) =
+                    av.call_method("get_line_screen_position", (line, col - partial_len))?;
+                let lh_av: f64 = av.call_method("get_line_height", ())?;
+                let style: LuaTable = require_table(lua, "core.style")?;
+                let padding: LuaTable = style.get("padding")?;
+                let px: f64 = padding.get("x")?;
+                let py: f64 = padding.get("y")?;
+                y += lh_av + py;
+
+                let av_font: LuaValue = av.call_method("get_font", ())?;
+                let th = font_get_height(&av_font)?;
+                let mut has_icons = false;
+                let hide_info: bool = ac_config_get(lua, "hide_info")?;
+                let hide_icons: bool = ac_config_get(lua, "hide_icons")?;
+                let ah: i64 = ac_config_get(lua, "max_height")?;
+                let show_count = len.min(ah);
+                let start_idx = (suggestions_idx - (ah - 1)).max(1);
+
+                let mut max_width = 0.0f64;
+                let mut max_l_icon_width = 0.0f64;
+                let style_font: LuaValue = style.get("font")?;
+
+                for i in start_idx..start_idx + show_count {
+                    let s: LuaValue = suggestions.get(i)?;
+                    let s = match s {
+                        LuaValue::Table(t) => t,
+                        _ => continue,
+                    };
+                    let text: String = s.get("text")?;
+                    let mut w = font_get_width(&av_font, &text)?;
+                    let info: LuaValue = s.get("info")?;
+                    if !matches!(info, LuaValue::Nil) && !hide_info {
+                        if let LuaValue::String(is) = &info {
+                            w += font_get_width(&style_font, &is.to_str()?)? + px;
                         }
                     }
+                    let icon: LuaValue = s.get("icon").unwrap_or_else(|_| LuaValue::Nil);
+                    let icon_key = if !matches!(icon, LuaValue::Nil) {
+                        icon
+                    } else {
+                        info
+                    };
+                    if !hide_icons {
+                        if let LuaValue::String(ik) = &icon_key {
+                            let icon_data: LuaValue = icons.get(ik.to_str()?)?;
+                            if let LuaValue::Table(id) = icon_data {
+                                let ifont: LuaValue = id.get("font")?;
+                                let ichar: String = id.get("char")?;
+                                let iw = font_get_width(&ifont, &ichar)?;
+                                let icon_pos: String = ac_config_get(lua, "icon_position")?;
+                                if icon_pos == "left" {
+                                    max_l_icon_width = max_l_icon_width.max(iw + px / 2.0);
+                                }
+                                w += iw + px / 2.0;
+                                has_icons = true;
+                            }
+                        }
+                    }
+                    max_width = max_width.max(w);
                 }
-                max_width = max_width.max(w);
-            }
 
-            let last_max: f64 = ds.get("last_max_width")?;
-            max_width = max_width.max(last_max);
-            ds.set("last_max_width", max_width)?;
-            max_width += px * 2.0;
-            x -= px + max_l_icon_width;
+                let last_max: f64 = ds.get("last_max_width")?;
+                max_width = max_width.max(last_max);
+                ds.set("last_max_width", max_width)?;
+                max_width += px * 2.0;
+                x -= px + max_l_icon_width;
 
-            let max_items = len.min(ah) + 1;
+                let max_items = len.min(ah) + 1;
 
-            let core: LuaTable = require_table(lua, "core")?;
-            let root_view: LuaTable = core.get("root_view")?;
-            let rv_size: LuaTable = root_view.get("size")?;
-            let rv_w: f64 = rv_size.get("x")?;
+                let core: LuaTable = require_table(lua, "core")?;
+                let root_view: LuaTable = core.get("root_view")?;
+                let rv_size: LuaTable = root_view.get("size")?;
+                let rv_w: f64 = rv_size.get("x")?;
 
-            if max_width > rv_w { max_width = rv_w; }
-            let scale: f64 = lua.globals().get::<LuaValue>("SCALE")
-                .map(|v| match v { LuaValue::Number(n) => n, LuaValue::Integer(n) => n as f64, _ => 1.0 })
-                .unwrap_or(1.0);
-            if max_width < 150.0 * scale { max_width = 150.0 * scale; }
+                if max_width > rv_w {
+                    max_width = rv_w;
+                }
+                let scale: f64 = lua
+                    .globals()
+                    .get::<LuaValue>("SCALE")
+                    .map(|v| match v {
+                        LuaValue::Number(n) => n,
+                        LuaValue::Integer(n) => n as f64,
+                        _ => 1.0,
+                    })
+                    .unwrap_or(1.0);
+                if max_width < 150.0 * scale {
+                    max_width = 150.0 * scale;
+                }
 
-            let av_size: LuaTable = av.get("size")?;
-            let av_pos: LuaTable = av.get("position")?;
-            let av_sx: f64 = av_size.get("x")?;
-            let av_px: f64 = av_pos.get("x")?;
-            if x + max_width > rv_w {
-                x = av_sx + av_px - max_width;
-            }
+                let av_size: LuaTable = av.get("size")?;
+                let av_pos: LuaTable = av.get("position")?;
+                let av_sx: f64 = av_size.get("x")?;
+                let av_px: f64 = av_pos.get("x")?;
+                if x + max_width > rv_w {
+                    x = av_sx + av_px - max_width;
+                }
 
-            let h = max_items as f64 * (th + py) + py;
-            Ok(LuaMultiValue::from_vec(vec![
-                LuaValue::Number(x),
-                LuaValue::Number(y - py),
-                LuaValue::Number(max_width),
-                LuaValue::Number(h),
-                LuaValue::Boolean(has_icons),
-            ]))
-        })?)?;
+                let h = max_items as f64 * (th + py) + py;
+                Ok(LuaMultiValue::from_vec(vec![
+                    LuaValue::Number(x),
+                    LuaValue::Number(y - py),
+                    LuaValue::Number(max_width),
+                    LuaValue::Number(h),
+                    LuaValue::Boolean(has_icons),
+                ]))
+            })?,
+        )?;
     }
 
     // M.draw_suggestions_box(ctx, av)
     {
         let dsk = Arc::clone(&ds_key);
-        m.set("draw_suggestions_box", lua.create_function(move |lua, (ctx, av): (LuaTable, LuaTable)| {
-            let suggestions: LuaTable = ctx.get("suggestions")?;
-            let suggestions_idx: i64 = ctx.get("suggestions_idx")?;
-            let suggestions_offset: i64 = ctx.get("suggestions_offset")?;
-            let icons: LuaTable = ctx.get("icons")?;
-            let len = suggestions.raw_len() as i64;
-            if len <= 0 { return Ok(()); }
+        m.set(
+            "draw_suggestions_box",
+            lua.create_function(move |lua, (ctx, av): (LuaTable, LuaTable)| {
+                let suggestions: LuaTable = ctx.get("suggestions")?;
+                let suggestions_idx: i64 = ctx.get("suggestions_idx")?;
+                let suggestions_offset: i64 = ctx.get("suggestions_offset")?;
+                let icons: LuaTable = ctx.get("icons")?;
+                let len = suggestions.raw_len() as i64;
+                if len <= 0 {
+                    return Ok(());
+                }
 
-            let style: LuaTable = require_table(lua, "core.style")?;
-            let ah: i64 = ac_config_get(lua, "max_height")?;
-            let m_tbl: LuaTable = require_table(lua, "plugins.autocomplete.drawing")?;
-            let rect: LuaMultiValue = m_tbl.call_function("get_suggestions_rect", (ctx.clone(), av.clone()))?;
-            let mut rv = rect.into_iter();
-            let rx: f64 = match rv.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-            let ry: f64 = match rv.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-            let rw: f64 = match rv.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-            let rh: f64 = match rv.next() { Some(LuaValue::Number(n)) => n, _ => return Ok(()) };
-            let has_icons: bool = match rv.next() { Some(LuaValue::Boolean(b)) => b, _ => false };
-
-            let renderer: LuaTable = lua.globals().get("renderer")?;
-            let bg3: LuaValue = style.get("background3")?;
-            renderer.call_function::<()>("draw_rect", (rx, ry, rw, rh, bg3.clone()))?;
-
-            let av_font: LuaValue = av.call_method("get_font", ())?;
-            let padding: LuaTable = style.get("padding")?;
-            let py: f64 = padding.get("y")?;
-            let px: f64 = padding.get("x")?;
-            let th = font_get_height(&av_font)? + py;
-            let mut y = ry + py / 2.0;
-            let show_count = len.min(ah);
-            let hide_info: bool = ac_config_get(lua, "hide_info")?;
-            let color_accent: LuaValue = style.get("accent")?;
-            let color_text: LuaValue = style.get("text")?;
-            let color_dim: LuaValue = style.get("dim")?;
-            let style_font: LuaValue = style.get("font")?;
-            let common: LuaTable = require_table(lua, "core.common")?;
-            let hide_icons: bool = ac_config_get(lua, "hide_icons")?;
-            let icon_position: String = ac_config_get(lua, "icon_position")?;
-            let core: LuaTable = require_table(lua, "core")?;
-
-            let ds: LuaTable = lua.registry_value(&dsk)?;
-            // Update desc font if needed
-            let cur_scale: f64 = lua.globals().get::<LuaValue>("SCALE")
-                .map(|v| match v { LuaValue::Number(n) => n, LuaValue::Integer(n) => n as f64, _ => 1.0 })
-                .unwrap_or(1.0);
-            let prev_scale: f64 = ds.get("previous_scale").unwrap_or(cur_scale);
-            let desc_font: LuaValue = ds.get("desc_font")?;
-            let desc_font = if matches!(desc_font, LuaValue::Nil) || (prev_scale - cur_scale).abs() > 1e-6 {
-                let code_font: LuaValue = style.get("code_font")?;
-                let desc_size: i64 = ac_config_get(lua, "desc_font_size")?;
-                let new_font: LuaValue = match &code_font {
-                    LuaValue::Table(t) => t.call_method("copy", (desc_size as f64 * cur_scale,))?,
-                    LuaValue::UserData(ud) => ud.call_method("copy", (desc_size as f64 * cur_scale,))?,
-                    _ => code_font.clone(),
+                let style: LuaTable = require_table(lua, "core.style")?;
+                let ah: i64 = ac_config_get(lua, "max_height")?;
+                let m_tbl: LuaTable = require_table(lua, "plugins.autocomplete.drawing")?;
+                let rect: LuaMultiValue =
+                    m_tbl.call_function("get_suggestions_rect", (ctx.clone(), av.clone()))?;
+                let mut rv = rect.into_iter();
+                let rx: f64 = match rv.next() {
+                    Some(LuaValue::Number(n)) => n,
+                    _ => return Ok(()),
                 };
-                ds.set("desc_font", new_font.clone())?;
-                ds.set("previous_scale", cur_scale)?;
-                new_font
-            } else {
-                desc_font
-            };
+                let ry: f64 = match rv.next() {
+                    Some(LuaValue::Number(n)) => n,
+                    _ => return Ok(()),
+                };
+                let rw: f64 = match rv.next() {
+                    Some(LuaValue::Number(n)) => n,
+                    _ => return Ok(()),
+                };
+                let rh: f64 = match rv.next() {
+                    Some(LuaValue::Number(n)) => n,
+                    _ => return Ok(()),
+                };
+                let has_icons: bool = match rv.next() {
+                    Some(LuaValue::Boolean(b)) => b,
+                    _ => false,
+                };
 
-            let mut desc_item: Option<(i64, LuaTable)> = None;
+                let renderer: LuaTable = lua.globals().get("renderer")?;
+                let bg3: LuaValue = style.get("background3")?;
+                renderer.call_function::<()>("draw_rect", (rx, ry, rw, rh, bg3.clone()))?;
 
-            for i in suggestions_offset..suggestions_offset + show_count {
-                let s: LuaValue = suggestions.get(i)?;
-                let s = match s { LuaValue::Table(t) => t, _ => break };
-                let mut icon_l_padding = 0.0f64;
-                let mut icon_r_padding = 0.0f64;
+                let av_font: LuaValue = av.call_method("get_font", ())?;
+                let padding: LuaTable = style.get("padding")?;
+                let py: f64 = padding.get("y")?;
+                let px: f64 = padding.get("x")?;
+                let th = font_get_height(&av_font)? + py;
+                let mut y = ry + py / 2.0;
+                let show_count = len.min(ah);
+                let hide_info: bool = ac_config_get(lua, "hide_info")?;
+                let color_accent: LuaValue = style.get("accent")?;
+                let color_text: LuaValue = style.get("text")?;
+                let color_dim: LuaValue = style.get("dim")?;
+                let style_font: LuaValue = style.get("font")?;
+                let common: LuaTable = require_table(lua, "core.common")?;
+                let hide_icons: bool = ac_config_get(lua, "hide_icons")?;
+                let icon_position: String = ac_config_get(lua, "icon_position")?;
+                let core: LuaTable = require_table(lua, "core")?;
 
-                if has_icons && !hide_icons {
-                    let icon: LuaValue = s.get("icon").unwrap_or(LuaValue::Nil);
+                let ds: LuaTable = lua.registry_value(&dsk)?;
+                // Update desc font if needed
+                let cur_scale: f64 = lua
+                    .globals()
+                    .get::<LuaValue>("SCALE")
+                    .map(|v| match v {
+                        LuaValue::Number(n) => n,
+                        LuaValue::Integer(n) => n as f64,
+                        _ => 1.0,
+                    })
+                    .unwrap_or(1.0);
+                let prev_scale: f64 = ds.get("previous_scale").unwrap_or(cur_scale);
+                let desc_font: LuaValue = ds.get("desc_font")?;
+                let desc_font = if matches!(desc_font, LuaValue::Nil)
+                    || (prev_scale - cur_scale).abs() > 1e-6
+                {
+                    let code_font: LuaValue = style.get("code_font")?;
+                    let desc_size: i64 = ac_config_get(lua, "desc_font_size")?;
+                    let new_font: LuaValue = match &code_font {
+                        LuaValue::Table(t) => {
+                            t.call_method("copy", (desc_size as f64 * cur_scale,))?
+                        }
+                        LuaValue::UserData(ud) => {
+                            ud.call_method("copy", (desc_size as f64 * cur_scale,))?
+                        }
+                        _ => code_font.clone(),
+                    };
+                    ds.set("desc_font", new_font.clone())?;
+                    ds.set("previous_scale", cur_scale)?;
+                    new_font
+                } else {
+                    desc_font
+                };
+
+                let mut desc_item: Option<(i64, LuaTable)> = None;
+
+                for i in suggestions_offset..suggestions_offset + show_count {
+                    let s: LuaValue = suggestions.get(i)?;
+                    let s = match s {
+                        LuaValue::Table(t) => t,
+                        _ => break,
+                    };
+                    let mut icon_l_padding = 0.0f64;
+                    let mut icon_r_padding = 0.0f64;
+
+                    if has_icons && !hide_icons {
+                        let icon: LuaValue = s.get("icon").unwrap_or(LuaValue::Nil);
+                        let info: LuaValue = s.get("info").unwrap_or(LuaValue::Nil);
+                        let icon_key = if !matches!(icon, LuaValue::Nil) {
+                            icon
+                        } else {
+                            info
+                        };
+                        if let LuaValue::String(ik) = &icon_key {
+                            let icon_data: LuaValue = icons.get(ik.to_str()?)?;
+                            if let LuaValue::Table(id) = icon_data {
+                                let ifont: LuaValue = id.get("font")?;
+                                let itext: String = id.get("char")?;
+                                let mut icolor: LuaValue = id.get("color")?;
+                                if i == suggestions_idx {
+                                    icolor = color_accent.clone();
+                                } else if let LuaValue::String(cs) = &icolor {
+                                    let syn_color: LuaValue = {
+                                        let syntax: LuaTable = style.get("syntax")?;
+                                        syntax.get(cs.to_str()?)?
+                                    };
+                                    icolor = syn_color;
+                                }
+                                let iw = font_get_width(&ifont, &itext)?;
+                                if icon_position == "left" {
+                                    common.call_function::<()>(
+                                        "draw_text",
+                                        (
+                                            ifont.clone(),
+                                            icolor,
+                                            itext.clone(),
+                                            "left",
+                                            rx + px,
+                                            y,
+                                            rw,
+                                            th,
+                                        ),
+                                    )?;
+                                    icon_l_padding = iw + px / 2.0;
+                                } else {
+                                    common.call_function::<()>(
+                                        "draw_text",
+                                        (
+                                            ifont.clone(),
+                                            icolor,
+                                            itext.clone(),
+                                            "right",
+                                            rx,
+                                            y,
+                                            rw - px,
+                                            th,
+                                        ),
+                                    )?;
+                                    icon_r_padding = iw + px / 2.0;
+                                }
+                            }
+                        }
+                    }
+
                     let info: LuaValue = s.get("info").unwrap_or(LuaValue::Nil);
-                    let icon_key = if !matches!(icon, LuaValue::Nil) { icon } else { info };
-                    if let LuaValue::String(ik) = &icon_key {
-                        let icon_data: LuaValue = icons.get(ik.to_str()?)?;
-                        if let LuaValue::Table(id) = icon_data {
-                            let ifont: LuaValue = id.get("font")?;
-                            let itext: String = id.get("char")?;
-                            let mut icolor: LuaValue = id.get("color")?;
-                            if i == suggestions_idx {
-                                icolor = color_accent.clone();
-                            } else if let LuaValue::String(cs) = &icolor {
-                                let syn_color: LuaValue = {
-                                    let syntax: LuaTable = style.get("syntax")?;
-                                    syntax.get(cs.to_str()?)?
-                                };
-                                icolor = syn_color;
-                            }
-                            let iw = font_get_width(&ifont, &itext)?;
-                            if icon_position == "left" {
-                                common.call_function::<()>("draw_text", (ifont.clone(), icolor, itext.clone(), "left", rx + px, y, rw, th))?;
-                                icon_l_padding = iw + px / 2.0;
-                            } else {
-                                common.call_function::<()>("draw_text", (ifont.clone(), icolor, itext.clone(), "right", rx, y, rw - px, th))?;
-                                icon_r_padding = iw + px / 2.0;
+                    let info_size = if !matches!(info, LuaValue::Nil) && !hide_info {
+                        if let LuaValue::String(is) = &info {
+                            font_get_width(&style_font, &is.to_str()?)? + px
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    };
+
+                    let color = if i == suggestions_idx {
+                        color_accent.clone()
+                    } else {
+                        color_text.clone()
+                    };
+                    let text: String = s.get("text")?;
+
+                    core.call_function::<()>(
+                        "push_clip_rect",
+                        (
+                            rx + icon_l_padding + px,
+                            y,
+                            rw - info_size - icon_l_padding - icon_r_padding - px,
+                            th,
+                        ),
+                    )?;
+                    let x_adv: f64 = common.call_function(
+                        "draw_text",
+                        (
+                            av_font.clone(),
+                            color.clone(),
+                            text.clone(),
+                            "left",
+                            rx + icon_l_padding + px,
+                            y,
+                            rw,
+                            th,
+                        ),
+                    )?;
+                    core.call_function::<()>("pop_clip_rect", ())?;
+
+                    if x_adv > rx + rw - info_size - icon_r_padding {
+                        let ellipsis_size = font_get_width(&av_font, "…")?;
+                        let ell_x = rx + rw - info_size - icon_r_padding - ellipsis_size;
+                        renderer.call_function::<()>(
+                            "draw_rect",
+                            (ell_x, y, ellipsis_size, th, bg3.clone()),
+                        )?;
+                        common.call_function::<()>(
+                            "draw_text",
+                            (
+                                av_font.clone(),
+                                color.clone(),
+                                "…",
+                                "left",
+                                ell_x,
+                                y,
+                                ellipsis_size,
+                                th,
+                            ),
+                        )?;
+                    }
+
+                    if !matches!(info, LuaValue::Nil) && !hide_info {
+                        let info_color = if i == suggestions_idx {
+                            color_text.clone()
+                        } else {
+                            color_dim.clone()
+                        };
+                        common.call_function::<()>(
+                            "draw_text",
+                            (
+                                style_font.clone(),
+                                info_color,
+                                info,
+                                "right",
+                                rx,
+                                y,
+                                rw - icon_r_padding - px,
+                                th,
+                            ),
+                        )?;
+                    }
+
+                    y += th;
+
+                    if suggestions_idx == i {
+                        // Handle onhover
+                        let onhover: LuaValue = s.get("onhover")?;
+                        if let LuaValue::Function(f) = onhover {
+                            f.call::<()>((suggestions_idx, s.clone()))?;
+                            s.set("onhover", LuaValue::Nil)?;
+                        }
+                        // Check for description
+                        let desc: LuaValue = s.get("desc")?;
+                        if let LuaValue::String(ds_str) = &desc {
+                            if !ds_str.to_str()?.is_empty() {
+                                desc_item = Some((i, s.clone()));
                             }
                         }
                     }
                 }
 
-                let info: LuaValue = s.get("info").unwrap_or(LuaValue::Nil);
-                let info_size = if !matches!(info, LuaValue::Nil) && !hide_info {
-                    if let LuaValue::String(is) = &info {
-                        font_get_width(&style_font, &is.to_str()?)? + px
-                    } else { 0.0 }
-                } else { 0.0 };
+                // Footer
+                let caret: LuaValue = style.get("caret")?;
+                let bg: LuaValue = style.get("background")?;
+                renderer.call_function::<()>("draw_rect", (rx, y, rw, 2.0, caret))?;
+                renderer.call_function::<()>("draw_rect", (rx, y + 2.0, rw, th, bg))?;
+                common.call_function::<()>(
+                    "draw_text",
+                    (
+                        style_font.clone(),
+                        color_accent.clone(),
+                        "Items",
+                        "left",
+                        rx + px,
+                        y,
+                        rw,
+                        th,
+                    ),
+                )?;
+                common.call_function::<()>(
+                    "draw_text",
+                    (
+                        style_font.clone(),
+                        color_accent.clone(),
+                        format!("{}/{}", suggestions_idx, len),
+                        "right",
+                        rx,
+                        y,
+                        rw - px,
+                        th,
+                    ),
+                )?;
 
-                let color = if i == suggestions_idx { color_accent.clone() } else { color_text.clone() };
-                let text: String = s.get("text")?;
+                // Description box
+                if let Some((_i, s)) = desc_item {
+                    let desc: String = s.get("desc")?;
+                    let av_size: LuaTable = av.get("size")?;
+                    let av_pos: LuaTable = av.get("position")?;
+                    let av_sx: f64 = av_size.get("x")?;
+                    let av_px: f64 = av_pos.get("x")?;
+                    let av_py: f64 = av_pos.get("y")?;
 
-                core.call_function::<()>("push_clip_rect", (
-                    rx + icon_l_padding + px, y,
-                    rw - info_size - icon_l_padding - icon_r_padding - px, th,
-                ))?;
-                let x_adv: f64 = common.call_function("draw_text", (
-                    av_font.clone(), color.clone(), text.clone(), "left",
-                    rx + icon_l_padding + px, y, rw, th,
-                ))?;
-                core.call_function::<()>("pop_clip_rect", ())?;
+                    // draw_description_box inline
+                    let font = &desc_font;
+                    let lh = font_get_height(font)?;
+                    let desc_y = ry + py;
+                    let desc_x = rx + rw + px / 4.0;
+                    let char_width = font_get_width(font, " ")?;
 
-                if x_adv > rx + rw - info_size - icon_r_padding {
-                    let ellipsis_size = font_get_width(&av_font, "…")?;
-                    let ell_x = rx + rw - info_size - icon_r_padding - ellipsis_size;
-                    renderer.call_function::<()>("draw_rect", (ell_x, y, ellipsis_size, th, bg3.clone()))?;
-                    common.call_function::<()>("draw_text", (av_font.clone(), color.clone(), "…", "left", ell_x, y, ellipsis_size, th))?;
-                }
+                    let max_chars_right = (av_sx + av_px - desc_x) / char_width - 5.0;
+                    let max_chars_left = (rx - av_px - px / 4.0 - 10.0) / char_width - 5.0;
+                    let draw_left = (rx - av_px) < (av_sx - (rx - av_px) - rw);
+                    let max_chars = if draw_left {
+                        max_chars_left
+                    } else {
+                        max_chars_right
+                    };
 
-                if !matches!(info, LuaValue::Nil) && !hide_info {
-                    let info_color = if i == suggestions_idx { color_text.clone() } else { color_dim.clone() };
-                    common.call_function::<()>("draw_text", (
-                        style_font.clone(), info_color, info, "right",
-                        rx, y, rw - icon_r_padding - px, th,
-                    ))?;
-                }
+                    let lines: Vec<String> = desc
+                        .split('\n')
+                        .flat_map(|line| wrap_line(line, max_chars.max(1.0) as usize))
+                        .collect();
+                    let width: f64 = lines
+                        .iter()
+                        .map(|l| font_get_width(font, l).unwrap_or(0.0))
+                        .fold(0.0f64, f64::max);
 
-                y += th;
-
-                if suggestions_idx == i {
-                    // Handle onhover
-                    let onhover: LuaValue = s.get("onhover")?;
-                    if let LuaValue::Function(f) = onhover {
-                        f.call::<()>((suggestions_idx, s.clone()))?;
-                        s.set("onhover", LuaValue::Nil)?;
+                    let box_x = if draw_left {
+                        rx - px / 4.0 - width - px * 2.0
+                    } else {
+                        desc_x
+                    };
+                    let box_h = lines.len() as f64 * lh;
+                    renderer.call_function::<()>(
+                        "draw_rect",
+                        (box_x, ry, width + px * 2.0, box_h + py * 2.0, bg3.clone()),
+                    )?;
+                    let mut dy = ry + py;
+                    for line in &lines {
+                        common.call_function::<()>(
+                            "draw_text",
+                            (
+                                font.clone(),
+                                color_text.clone(),
+                                line.as_str(),
+                                "left",
+                                box_x + px,
+                                dy,
+                                width,
+                                lh,
+                            ),
+                        )?;
+                        dy += lh;
                     }
-                    // Check for description
-                    let desc: LuaValue = s.get("desc")?;
-                    if let LuaValue::String(ds_str) = &desc {
-                        if !ds_str.to_str()?.is_empty() {
-                            desc_item = Some((i, s.clone()));
-                        }
-                    }
+                    let _ = (av_py, desc_y, desc_x);
                 }
-            }
 
-            // Footer
-            let caret: LuaValue = style.get("caret")?;
-            let bg: LuaValue = style.get("background")?;
-            renderer.call_function::<()>("draw_rect", (rx, y, rw, 2.0, caret))?;
-            renderer.call_function::<()>("draw_rect", (rx, y + 2.0, rw, th, bg))?;
-            common.call_function::<()>("draw_text", (style_font.clone(), color_accent.clone(), "Items", "left", rx + px, y, rw, th))?;
-            common.call_function::<()>("draw_text", (
-                style_font.clone(), color_accent.clone(),
-                format!("{}/{}", suggestions_idx, len), "right",
-                rx, y, rw - px, th,
-            ))?;
-
-            // Description box
-            if let Some((_i, s)) = desc_item {
-                let desc: String = s.get("desc")?;
-                let av_size: LuaTable = av.get("size")?;
-                let av_pos: LuaTable = av.get("position")?;
-                let av_sx: f64 = av_size.get("x")?;
-                let av_px: f64 = av_pos.get("x")?;
-                let av_py: f64 = av_pos.get("y")?;
-
-                // draw_description_box inline
-                let font = &desc_font;
-                let lh = font_get_height(font)?;
-                let desc_y = ry + py;
-                let desc_x = rx + rw + px / 4.0;
-                let char_width = font_get_width(font, " ")?;
-
-                let max_chars_right = (av_sx + av_px - desc_x) / char_width - 5.0;
-                let max_chars_left = (rx - av_px - px / 4.0 - 10.0) / char_width - 5.0;
-                let draw_left = (rx - av_px) < (av_sx - (rx - av_px) - rw);
-                let max_chars = if draw_left { max_chars_left } else { max_chars_right };
-
-                let lines: Vec<String> = desc.split('\n')
-                    .flat_map(|line| wrap_line(line, max_chars.max(1.0) as usize))
-                    .collect();
-                let width: f64 = lines.iter()
-                    .map(|l| font_get_width(font, l).unwrap_or(0.0))
-                    .fold(0.0f64, f64::max);
-
-                let box_x = if draw_left { rx - px / 4.0 - width - px * 2.0 } else { desc_x };
-                let box_h = lines.len() as f64 * lh;
-                renderer.call_function::<()>("draw_rect", (box_x, ry, width + px * 2.0, box_h + py * 2.0, bg3.clone()))?;
-                let mut dy = ry + py;
-                for line in &lines {
-                    common.call_function::<()>("draw_text", (font.clone(), color_text.clone(), line.as_str(), "left", box_x + px, dy, width, lh))?;
-                    dy += lh;
-                }
-                let _ = (av_py, desc_y, desc_x);
-            }
-
-            Ok(())
-        })?)?;
+                Ok(())
+            })?,
+        )?;
     }
 
     Ok(LuaValue::Table(m))
@@ -1603,7 +1972,11 @@ fn wrap_line(line: &str, max_chars: usize) -> Vec<String> {
                 lines.push(current.clone());
             }
         } else {
-            let next_ch = if pos + 1 < total { line_chars[pos + 1] } else { ' ' };
+            let next_ch = if pos + 1 < total {
+                line_chars[pos + 1]
+            } else {
+                ' '
+            };
             if !prev_char.is_whitespace() && !next_ch.is_whitespace() && pos + 1 < total {
                 current.push('-');
             }

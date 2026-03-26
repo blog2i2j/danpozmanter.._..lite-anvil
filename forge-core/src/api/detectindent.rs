@@ -19,7 +19,11 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             lua.create_function(move |lua, (value, _item): (String, LuaValue)| {
                 let dv: LuaTable = lua.registry_value(&dv_key)?;
                 let doc: LuaTable = dv.get("doc")?;
-                let indent_type = if value.to_lowercase() == "tabs" { "hard" } else { "soft" };
+                let indent_type = if value.to_lowercase() == "tabs" {
+                    "hard"
+                } else {
+                    "soft"
+                };
                 if let Some(info) = doc.get::<Option<LuaTable>>("indent_info")? {
                     info.set("type", indent_type)?;
                     info.set("confirmed", true)?;

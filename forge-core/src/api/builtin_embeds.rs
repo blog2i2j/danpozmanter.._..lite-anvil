@@ -194,12 +194,18 @@ fn register_local_helpers(
                 if info != LuaValue::Nil {
                     let pcall: LuaFunction = lua.globals().get("pcall")?;
                     let dofile: LuaFunction = lua.globals().get("dofile")?;
-                    let result: LuaMultiValue =
-                        pcall.call((dofile, path_str))?;
+                    let result: LuaMultiValue = pcall.call((dofile, path_str))?;
                     let mut vals: Vec<LuaValue> = result.into_vec();
-                    let ok = vals.first().and_then(|v| {
-                        if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-                    }).unwrap_or(false);
+                    let ok = vals
+                        .first()
+                        .and_then(|v| {
+                            if let LuaValue::Boolean(b) = v {
+                                Some(*b)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(false);
                     if ok && vals.len() >= 2 {
                         if let LuaValue::Table(legacy) = vals.remove(1) {
                             let save_fn: LuaFunction = session_native.get("save")?;
@@ -221,7 +227,6 @@ fn register_local_helpers(
             let core = get_core(lua)?;
             let config: LuaTable = get_module(lua, "core.config")?;
             let session_native: LuaTable = get_module(lua, "session_native")?;
-            let table_mod: LuaTable = lua.globals().get("table")?;
 
             // treeview_size
             let mut treeview_size = LuaValue::Nil;
@@ -238,7 +243,8 @@ fn register_local_helpers(
 
             // open_files
             let open_files = lua.create_table()?;
-            let skip: bool = core.get::<LuaValue>("skip_session_open_files")
+            let skip: bool = core
+                .get::<LuaValue>("skip_session_open_files")
                 .map(|v| matches!(v, LuaValue::Boolean(true)))
                 .unwrap_or(false);
             if !skip {
@@ -259,6 +265,85 @@ fn register_local_helpers(
                 }
             }
 
+            // Save backups of dirty/unsaved docs.
+            {
+                let userdir: String = lua.globals().get("USERDIR")?;
+                let backup_dir = std::path::PathBuf::from(&userdir).join("backups");
+                // Remove stale backups before writing new ones.
+                let _ = std::fs::remove_dir_all(&backup_dir);
+                let _ = std::fs::create_dir_all(&backup_dir);
+                let doc_native: LuaTable = get_module(lua, "doc_native")?;
+                let docs: LuaTable = core.get("docs")?;
+                let mut manifest = Vec::<serde_json::Value>::new();
+                let mut idx: u32 = 0;
+                for pair in docs.sequence_values::<LuaTable>() {
+                    let doc = pair?;
+                    let new_file: bool = doc.get::<Option<bool>>("new_file")?.unwrap_or(false);
+                    let dirty: bool = doc.call_method("is_dirty", ())?;
+                    if !dirty && !new_file {
+                        continue;
+                    }
+                    // Ensure deferred content is loaded before saving.
+                    doc.call_method::<()>("ensure_loaded", ())?;
+                    let buf_id: LuaValue = doc.get("buffer_id")?;
+                    if matches!(buf_id, LuaValue::Nil) {
+                        continue;
+                    }
+                    let backup_name = format!("backup_{idx}.txt");
+                    let backup_path = backup_dir.join(&backup_name);
+                    let backup_str = backup_path.to_string_lossy().to_string();
+                    let crlf: bool = doc.get::<Option<bool>>("crlf")?.unwrap_or(false);
+                    let save_fn: LuaFunction = doc_native.get("buffer_save")?;
+                    let ok: LuaValue = save_fn.call((buf_id, backup_str.clone(), crlf))?;
+                    if !matches!(ok, LuaValue::Boolean(true)) {
+                        continue;
+                    }
+                    let filename: LuaValue = doc.get("filename")?;
+                    let abs_filename: LuaValue = doc.get("abs_filename")?;
+                    let selections: LuaValue = doc.get("selections")?;
+                    let mut sel_vec = Vec::new();
+                    if let LuaValue::Table(ref sel_t) = selections {
+                        for v in sel_t.sequence_values::<LuaValue>() {
+                            match v? {
+                                LuaValue::Integer(i) => {
+                                    sel_vec.push(serde_json::Value::from(i));
+                                }
+                                LuaValue::Number(n) => {
+                                    sel_vec.push(serde_json::json!(n));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    let entry = serde_json::json!({
+                        "filename": match &filename {
+                            LuaValue::String(s) => {
+                                serde_json::Value::String(s.to_str()?.to_string())
+                            }
+                            _ => serde_json::Value::Null,
+                        },
+                        "abs_filename": match &abs_filename {
+                            LuaValue::String(s) => {
+                                serde_json::Value::String(s.to_str()?.to_string())
+                            }
+                            _ => serde_json::Value::Null,
+                        },
+                        "new_file": new_file,
+                        "backup_path": backup_str,
+                        "selections": sel_vec,
+                        "crlf": crlf,
+                    });
+                    manifest.push(entry);
+                    idx += 1;
+                }
+                if !manifest.is_empty() {
+                    let manifest_path = backup_dir.join("manifest.json");
+                    let content = serde_json::to_string_pretty(&serde_json::Value::Array(manifest))
+                        .unwrap_or_default();
+                    let _ = std::fs::write(&manifest_path, content);
+                }
+            }
+
             // plugin_data
             let plugin_data = lua.create_table()?;
             let hooks: LuaValue = core.get("session_save_hooks")?;
@@ -268,9 +353,16 @@ fn register_local_helpers(
                     let (name, hook) = pair?;
                     let result: LuaMultiValue = pcall.call(hook)?;
                     let vals: Vec<LuaValue> = result.into_vec();
-                    let ok = vals.first().and_then(|v| {
-                        if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-                    }).unwrap_or(false);
+                    let ok = vals
+                        .first()
+                        .and_then(|v| {
+                            if let LuaValue::Boolean(b) = v {
+                                Some(*b)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(false);
                     if ok {
                         if let Some(result_val) = vals.get(1) {
                             if *result_val != LuaValue::Nil {
@@ -293,9 +385,18 @@ fn register_local_helpers(
             let system: LuaTable = lua.globals().get("system")?;
             let get_window_size: LuaFunction = system.get("get_window_size")?;
             let window: LuaValue = core.get("window")?;
-            let table_pack: LuaFunction = table_mod.get("pack")?;
-            let win_packed: LuaValue =
-                table_pack.call(get_window_size.call::<LuaMultiValue>(window.clone())?)?;
+            // Build window size table without table.pack's `n` field,
+            // which poisons table_to_json's array detection.
+            let win_packed: LuaValue = {
+                let vals: LuaMultiValue =
+                    get_window_size.call(window.clone())?;
+                let v = vals.into_vec();
+                let t = lua.create_table()?;
+                for (i, val) in v.into_iter().enumerate() {
+                    t.raw_set((i + 1) as i64, val)?;
+                }
+                LuaValue::Table(t)
+            };
             let get_window_mode: LuaFunction = system.get("get_window_mode")?;
             let win_mode: LuaValue = get_window_mode.call(window)?;
 
@@ -305,7 +406,10 @@ fn register_local_helpers(
             session_data.set("window", win_packed)?;
             session_data.set("window_mode", win_mode)?;
             session_data.set("previous_find", core.get::<LuaValue>("previous_find")?)?;
-            session_data.set("previous_replace", core.get::<LuaValue>("previous_replace")?)?;
+            session_data.set(
+                "previous_replace",
+                core.get::<LuaValue>("previous_replace")?,
+            )?;
             let recent_files: LuaValue = core.get("recent_files")?;
             session_data.set(
                 "recent_files",
@@ -465,9 +569,16 @@ fn register_local_helpers(
 
             let result: LuaMultiValue = mkdirp.call(userdir.clone())?;
             let vals: Vec<LuaValue> = result.into_vec();
-            let success = vals.first().and_then(|v| {
-                if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-            }).unwrap_or(false);
+            let success = vals
+                .first()
+                .and_then(|v| {
+                    if let LuaValue::Boolean(b) = v {
+                        Some(*b)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false);
             if !success {
                 let err_msg = vals.get(1).map(|v| format!("{:?}", v)).unwrap_or_default();
                 return Err(LuaError::runtime(format!(
@@ -744,11 +855,7 @@ fn register_local_helpers(
 // Project management functions
 // ---------------------------------------------------------------------------
 
-fn register_project_fns(
-    lua: &Lua,
-    core: &LuaTable,
-    _state_key: &LuaRegistryKey,
-) -> LuaResult<()> {
+fn register_project_fns(lua: &Lua, core: &LuaTable, _state_key: &LuaRegistryKey) -> LuaResult<()> {
     // core.add_project(project)
     core.set(
         "add_project",
@@ -867,8 +974,7 @@ fn register_project_fns(
                         }
 
                         if entry_count > 0 {
-                            let confirm_close: LuaFunction =
-                                rv.get("confirm_close_views")?;
+                            let confirm_close: LuaFunction = rv.get("confirm_close_views")?;
                             confirm_close.call::<()>((rv.clone(), entries))?;
                         }
                     }
@@ -994,7 +1100,12 @@ fn register_init_fn(
         lua.create_registry_value(lua.registry_value::<LuaTable>(lazy_loaded_key)?.clone())?;
 
     // Suppress unused variable warnings — these keys are captured by the closure.
-    let _ = (&state_key2, &lazy_plugins_key2, &lazy_handlers_key2, &lazy_loaded_key2);
+    let _ = (
+        &state_key2,
+        &lazy_plugins_key2,
+        &lazy_handlers_key2,
+        &lazy_loaded_key2,
+    );
 
     core.set(
         "init",
@@ -1470,13 +1581,6 @@ fn register_init_fn(
                                                 primary.clone(),
                                                 view.clone(),
                                             ))?;
-                                            let root_view2: LuaTable =
-                                                core.get("root_view")?;
-                                            let rn: LuaTable =
-                                                root_view2.get("root_node")?;
-                                            let update_layout: LuaFunction =
-                                                rn.get("update_layout")?;
-                                            update_layout.call::<()>(rn)?;
                                             if let LuaValue::Table(ref vt) = view {
                                                 let doc_t: LuaTable = vt.get("doc")?;
                                                 let get_sel: LuaFunction =
@@ -1499,8 +1603,247 @@ fn register_init_fn(
                         }
                     }
 
+                    // Restore backed-up dirty/unsaved docs.
+                    let mut last_backup_view: Option<LuaTable> = None;
+                    {
+                        let userdir: String = lua.globals().get("USERDIR")?;
+                        let manifest_path = std::path::PathBuf::from(&userdir)
+                            .join("backups")
+                            .join("manifest.json");
+                        if let Ok(manifest_str) = std::fs::read_to_string(&manifest_path) {
+                            if let Ok(serde_json::Value::Array(entries)) =
+                                serde_json::from_str::<serde_json::Value>(&manifest_str)
+                            {
+                                let require2: LuaFunction = lua.globals().get("require")?;
+                                let doc_native: LuaTable = require2.call("doc_native")?;
+                                let dv_cls: LuaValue = require2.call("core.docview")?;
+                                let primary: LuaTable =
+                                    get_primary.call(root_view.clone())?;
+                                for entry in &entries {
+                                    let backup_path = match entry.get("backup_path") {
+                                        Some(serde_json::Value::String(s)) => s.clone(),
+                                        _ => continue,
+                                    };
+                                    if !std::path::Path::new(&backup_path).exists() {
+                                        continue;
+                                    }
+                                    let new_file = entry
+                                        .get("new_file")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(true);
+                                    let filename: LuaValue = match entry.get("filename") {
+                                        Some(serde_json::Value::String(s)) => {
+                                            LuaValue::String(lua.create_string(s.as_bytes())?)
+                                        }
+                                        _ => LuaValue::Nil,
+                                    };
+                                    let abs_filename: LuaValue =
+                                        match entry.get("abs_filename") {
+                                            Some(serde_json::Value::String(s)) => {
+                                                LuaValue::String(
+                                                    lua.create_string(s.as_bytes())?,
+                                                )
+                                            }
+                                            _ => LuaValue::Nil,
+                                        };
+                                    let crlf = entry
+                                        .get("crlf")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+
+                                    // Check if doc already opened by the
+                                    // normal session restore (dirty edits
+                                    // to on-disk files).
+                                    let mut existing_doc: Option<LuaTable> = None;
+                                    if !new_file {
+                                        if let LuaValue::String(ref abs_s) = abs_filename
+                                        {
+                                            let abs_str = abs_s.to_str()?;
+                                            let docs: LuaTable = core.get("docs")?;
+                                            for d in docs.sequence_values::<LuaTable>() {
+                                                let d = d?;
+                                                let da: LuaValue =
+                                                    d.get("abs_filename")?;
+                                                if let LuaValue::String(ref ds) = da {
+                                                    if ds.to_str()? == abs_str {
+                                                        existing_doc = Some(d);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    let (doc, doc_t, need_view) =
+                                        if let Some(ed) = existing_doc {
+                                            let d = LuaValue::Table(ed.clone());
+                                            (d, ed, false)
+                                        } else {
+                                            // Create a new Doc via the class
+                                            // constructor — same pattern as the
+                                            // session open_files restore above.
+                                            let doc_cls: LuaValue =
+                                                require2.call("core.doc")?;
+                                            let d: LuaValue = match doc_cls {
+                                                LuaValue::Table(ref t) => {
+                                                    let mt: Option<LuaTable> =
+                                                        t.metatable();
+                                                    if let Some(mt) = mt {
+                                                        let cf: LuaValue =
+                                                            mt.get("__call")?;
+                                                        if let LuaValue::Function(f) =
+                                                            cf
+                                                        {
+                                                            f.call::<LuaValue>((
+                                                                t.clone(),
+                                                                filename.clone(),
+                                                                abs_filename.clone(),
+                                                                true,
+                                                            ))?
+                                                        } else {
+                                                            continue;
+                                                        }
+                                                    } else {
+                                                        continue;
+                                                    }
+                                                }
+                                                _ => continue,
+                                            };
+                                            let dt = match &d {
+                                                LuaValue::Table(t) => t.clone(),
+                                                _ => continue,
+                                            };
+                                            (d, dt, true)
+                                        };
+
+                                    // Clear deferred_load so the lazy-load
+                                    // path does not overwrite backup content.
+                                    doc_t.set("deferred_load", LuaValue::Nil)?;
+
+                                    // Load backup content into the buffer.
+                                    let buf_id: LuaValue = doc_t.get("buffer_id")?;
+                                    let load_fn: LuaFunction =
+                                        doc_native.get("buffer_load")?;
+                                    let pcall: LuaFunction =
+                                        lua.globals().get("pcall")?;
+                                    let result: LuaMultiValue = pcall.call((
+                                        load_fn,
+                                        buf_id,
+                                        backup_path.clone(),
+                                    ))?;
+                                    let vals: Vec<LuaValue> = result.into_vec();
+                                    if !matches!(
+                                        vals.first(),
+                                        Some(LuaValue::Boolean(true))
+                                    ) {
+                                        continue;
+                                    }
+                                    // Apply the snapshot from buffer_load.
+                                    if let Some(LuaValue::Table(snapshot)) =
+                                        vals.get(1)
+                                    {
+                                        let lines: LuaValue = snapshot.get("lines")?;
+                                        if let LuaValue::Table(ref lt) = lines {
+                                            doc_t.set("lines", lt.clone())?;
+                                            let hl: LuaTable =
+                                                doc_t.get("highlighter")?;
+                                            let hl_lines: LuaTable =
+                                                hl.get("lines")?;
+                                            for i in 1..=(lt.raw_len() as i64) {
+                                                hl_lines.raw_set(i, false)?;
+                                            }
+                                        }
+                                    }
+
+                                    doc_t.set("new_file", new_file)?;
+                                    doc_t.set("crlf", crlf)?;
+
+                                    // Restore selections.
+                                    if let Some(serde_json::Value::Array(sel_arr)) =
+                                        entry.get("selections")
+                                    {
+                                        if !sel_arr.is_empty() {
+                                            let sel_t = lua.create_table()?;
+                                            for (i, v) in sel_arr.iter().enumerate() {
+                                                let num = v
+                                                    .as_i64()
+                                                    .unwrap_or_else(|| {
+                                                        v.as_f64()
+                                                            .map(|f| f as i64)
+                                                            .unwrap_or(1)
+                                                    });
+                                                sel_t.raw_set(
+                                                    (i + 1) as i64,
+                                                    num,
+                                                )?;
+                                            }
+                                            doc_t.set("selections", sel_t)?;
+                                        }
+                                    }
+
+                                    doc_t.call_method::<()>("reset_syntax", ())?;
+
+                                    if need_view {
+                                        // Add to core.docs.
+                                        let docs: LuaTable = core.get("docs")?;
+                                        let table_mod: LuaTable =
+                                            lua.globals().get("table")?;
+                                        let insert_fn: LuaFunction =
+                                            table_mod.get("insert")?;
+                                        insert_fn
+                                            .call::<()>((docs, doc.clone()))?;
+
+                                        // Create a DocView and add it — same
+                                        // pattern as session open_files restore.
+                                        let view: LuaValue = match &dv_cls {
+                                            LuaValue::Table(t) => {
+                                                let mt: Option<LuaTable> =
+                                                    t.metatable();
+                                                if let Some(mt) = mt {
+                                                    let cf: LuaValue =
+                                                        mt.get("__call")?;
+                                                    if let LuaValue::Function(f) =
+                                                        cf
+                                                    {
+                                                        f.call::<LuaValue>((
+                                                            t.clone(),
+                                                            doc.clone(),
+                                                        ))?
+                                                    } else {
+                                                        LuaValue::Nil
+                                                    }
+                                                } else {
+                                                    LuaValue::Nil
+                                                }
+                                            }
+                                            _ => LuaValue::Nil,
+                                        };
+                                        let add_view: LuaFunction =
+                                            primary.get("add_view")?;
+                                        add_view.call::<()>((
+                                            primary.clone(),
+                                            view.clone(),
+                                        ))?;
+                                        if let LuaValue::Table(ref vt) = view {
+                                            last_backup_view = Some(vt.clone());
+                                        }
+                                    }
+                                }
+                                // No update_layout here — core.step runs it
+                                // every frame with the actual window size.
+                                // Clean up backup files after successful restore.
+                                let backup_dir = std::path::PathBuf::from(&userdir)
+                                    .join("backups");
+                                let _ = std::fs::remove_dir_all(&backup_dir);
+                            }
+                        }
+                    }
+
+                    // Restore focus: prefer saved_active file, fall back to
+                    // the last backup-restored view if saved_active is absent
+                    // (e.g. only unsaved files were open).
+                    let mut focus_restored = false;
                     if let Some(af_str) = saved_active {
-                        // Get views directly from primary node (preserves tab order).
                         let primary: LuaTable = get_primary.call(root_view.clone())?;
                         let root_node: LuaTable = root_view.get("root_node")?;
                         let views: LuaTable = primary.get("views")?;
@@ -1512,10 +1855,20 @@ fn register_init_fn(
                                         let get_node: LuaFunction = root_node.get("get_node_for_view")?;
                                         if let LuaValue::Table(node) = get_node.call::<LuaValue>((root_node.clone(), v.clone()))? {
                                             node.call_method::<()>("set_active_view", v)?;
+                                            focus_restored = true;
                                         }
                                         break;
                                     }
                                 }
+                            }
+                        }
+                    }
+                    if !focus_restored {
+                        if let Some(bv) = last_backup_view {
+                            let root_node: LuaTable = root_view.get("root_node")?;
+                            let get_node: LuaFunction = root_node.get("get_node_for_view")?;
+                            if let LuaValue::Table(node) = get_node.call::<LuaValue>((root_node.clone(), bv.clone()))? {
+                                node.call_method::<()>("set_active_view", bv)?;
                             }
                         }
                     }
@@ -1697,8 +2050,16 @@ fn register_core_git(lua: &Lua) -> LuaResult<()> {
                 t
             };
             for key in &[
-                "branch", "ahead", "behind", "detached", "dirty", "refreshing", "last_refresh",
-                "error", "ordered", "files",
+                "branch",
+                "ahead",
+                "behind",
+                "detached",
+                "dirty",
+                "refreshing",
+                "last_refresh",
+                "error",
+                "ordered",
+                "files",
             ] {
                 let val: LuaValue = s.get(*key)?;
                 r.set(*key, val)?;
@@ -1709,9 +2070,8 @@ fn register_core_git(lua: &Lua) -> LuaResult<()> {
 
         // git.get_repo(path)
         {
-            let repos_key3 = lua.create_registry_value(
-                lua.registry_value::<LuaTable>(&repos_key)?.clone(),
-            )?;
+            let repos_key3 =
+                lua.create_registry_value(lua.registry_value::<LuaTable>(&repos_key)?.clone())?;
             git.set(
                 "get_repo",
                 lua.create_function(move |lua, path: String| {
@@ -1824,62 +2184,63 @@ fn register_core_git(lua: &Lua) -> LuaResult<()> {
         // git.run(path, args, on_complete?)
         git.set(
             "run",
-            lua.create_function(|lua, (path, args, on_complete): (String, LuaTable, Option<LuaFunction>)| {
-                let git_native: LuaTable = get_module(lua, "git_native")?;
-                let get_root: LuaFunction = git_native.get("get_root")?;
-                let root: LuaValue = get_root.call(path)?;
-                if root == LuaValue::Nil {
-                    if let Some(cb) = on_complete {
-                        cb.call::<()>((false, "", "Not inside a Git repository"))?;
-                    }
-                    return Ok(());
-                }
-                let start_command: LuaFunction = git_native.get("start_command")?;
-                let handle: LuaValue = start_command.call((root.clone(), args.clone()))?;
-
-                // Get first arg to check if it's "branch".
-                let first_arg: LuaValue = args.get(1)?;
-                let is_branch = if let LuaValue::String(s) = &first_arg {
-                    s.to_str()? == "branch"
-                } else {
-                    false
-                };
-
-                let handle_key = lua.create_registry_value(handle)?;
-                let root_key = lua.create_registry_value(root)?;
-                let on_complete_key = on_complete
-                    .map(|f| lua.create_registry_value(f))
-                    .transpose()?;
-
-                // Tick-mode thread: polls git command each cycle without yielding.
-                let tick_fn = lua.create_function(move |lua, ()| -> LuaResult<LuaValue> {
+            lua.create_function(
+                |lua, (path, args, on_complete): (String, LuaTable, Option<LuaFunction>)| {
                     let git_native: LuaTable = get_module(lua, "git_native")?;
-                    let check: LuaFunction = git_native.get("check_command")?;
-                    let handle: LuaValue = lua.registry_value(&handle_key)?;
-                    let result: LuaValue = check.call(handle)?;
-                    if let LuaValue::Table(ref rt) = result {
-                        let ok: bool = rt.get(1)?;
-                        let stdout: LuaValue = rt.get(2)?;
-                        let stderr: LuaValue = rt.get(3)?;
-                        let root: LuaValue = lua.registry_value(&root_key)?;
-                        if ok && !is_branch {
-                            let start_refresh: LuaFunction =
-                                git_native.get("start_refresh")?;
-                            start_refresh.call::<()>(root.clone())?;
+                    let get_root: LuaFunction = git_native.get("get_root")?;
+                    let root: LuaValue = get_root.call(path)?;
+                    if root == LuaValue::Nil {
+                        if let Some(cb) = on_complete {
+                            cb.call::<()>((false, "", "Not inside a Git repository"))?;
                         }
-                        if let Some(ref cb_key) = on_complete_key {
-                            let cb: LuaFunction = lua.registry_value(cb_key)?;
-                            cb.call::<()>((ok, stdout, stderr, root))?;
-                        }
-                        let core = get_core(lua)?;
-                        core.set("redraw", true)?;
-                        return Ok(LuaValue::Nil);
+                        return Ok(());
                     }
-                    Ok(LuaValue::Number(0.05))
-                })?;
-                add_tick_thread(lua, tick_fn)?;
-                Ok(())
-            })?,
+                    let start_command: LuaFunction = git_native.get("start_command")?;
+                    let handle: LuaValue = start_command.call((root.clone(), args.clone()))?;
+
+                    // Get first arg to check if it's "branch".
+                    let first_arg: LuaValue = args.get(1)?;
+                    let is_branch = if let LuaValue::String(s) = &first_arg {
+                        s.to_str()? == "branch"
+                    } else {
+                        false
+                    };
+
+                    let handle_key = lua.create_registry_value(handle)?;
+                    let root_key = lua.create_registry_value(root)?;
+                    let on_complete_key = on_complete
+                        .map(|f| lua.create_registry_value(f))
+                        .transpose()?;
+
+                    // Tick-mode thread: polls git command each cycle without yielding.
+                    let tick_fn = lua.create_function(move |lua, ()| -> LuaResult<LuaValue> {
+                        let git_native: LuaTable = get_module(lua, "git_native")?;
+                        let check: LuaFunction = git_native.get("check_command")?;
+                        let handle: LuaValue = lua.registry_value(&handle_key)?;
+                        let result: LuaValue = check.call(handle)?;
+                        if let LuaValue::Table(ref rt) = result {
+                            let ok: bool = rt.get(1)?;
+                            let stdout: LuaValue = rt.get(2)?;
+                            let stderr: LuaValue = rt.get(3)?;
+                            let root: LuaValue = lua.registry_value(&root_key)?;
+                            if ok && !is_branch {
+                                let start_refresh: LuaFunction = git_native.get("start_refresh")?;
+                                start_refresh.call::<()>(root.clone())?;
+                            }
+                            if let Some(ref cb_key) = on_complete_key {
+                                let cb: LuaFunction = lua.registry_value(cb_key)?;
+                                cb.call::<()>((ok, stdout, stderr, root))?;
+                            }
+                            let core = get_core(lua)?;
+                            core.set("redraw", true)?;
+                            return Ok(LuaValue::Nil);
+                        }
+                        Ok(LuaValue::Number(0.05))
+                    })?;
+                    add_tick_thread(lua, tick_fn)?;
+                    Ok(())
+                },
+            )?,
         )?;
 
         // git.list_branches(path, on_complete)
@@ -1893,31 +2254,33 @@ fn register_core_git(lua: &Lua) -> LuaResult<()> {
                 args.set(2, "--all")?;
                 args.set(3, "--format=%(refname:short)")?;
                 let cb_key = lua.create_registry_value(on_complete)?;
-                let callback = lua.create_function(move |lua, (ok, stdout, stderr): (bool, String, LuaValue)| {
-                    let on_complete: LuaFunction = lua.registry_value(&cb_key)?;
-                    if !ok {
-                        on_complete.call::<()>((LuaValue::Nil, stderr))?;
-                        return Ok(());
-                    }
-                    let branches = lua.create_table()?;
-                    let seen = lua.create_table()?;
-                    let mut idx = 0;
-                    for line in stdout.lines() {
-                        if !line.is_empty() {
-                            let already: LuaValue = seen.get(line)?;
-                            if already == LuaValue::Nil {
-                                seen.set(line, true)?;
-                                idx += 1;
-                                branches.set(idx, line.to_string())?;
+                let callback = lua.create_function(
+                    move |lua, (ok, stdout, stderr): (bool, String, LuaValue)| {
+                        let on_complete: LuaFunction = lua.registry_value(&cb_key)?;
+                        if !ok {
+                            on_complete.call::<()>((LuaValue::Nil, stderr))?;
+                            return Ok(());
+                        }
+                        let branches = lua.create_table()?;
+                        let seen = lua.create_table()?;
+                        let mut idx = 0;
+                        for line in stdout.lines() {
+                            if !line.is_empty() {
+                                let already: LuaValue = seen.get(line)?;
+                                if already == LuaValue::Nil {
+                                    seen.set(line, true)?;
+                                    idx += 1;
+                                    branches.set(idx, line.to_string())?;
+                                }
                             }
                         }
-                    }
-                    let table_mod: LuaTable = lua.globals().get("table")?;
-                    let sort: LuaFunction = table_mod.get("sort")?;
-                    sort.call::<()>(branches.clone())?;
-                    on_complete.call::<()>(branches)?;
-                    Ok(())
-                })?;
+                        let table_mod: LuaTable = lua.globals().get("table")?;
+                        let sort: LuaFunction = table_mod.get("sort")?;
+                        sort.call::<()>(branches.clone())?;
+                        on_complete.call::<()>(branches)?;
+                        Ok(())
+                    },
+                )?;
                 run.call::<()>((path, args, callback))?;
                 Ok(())
             })?,
@@ -1975,55 +2338,56 @@ fn register_core_git(lua: &Lua) -> LuaResult<()> {
         // git.diff_file(path, cached?, on_complete?)
         git.set(
             "diff_file",
-            lua.create_function(|lua, (path, cached, on_complete): (String, Option<bool>, Option<LuaFunction>)| {
-                let git_mod: LuaTable = get_module(lua, "core.git")?;
-                let gfs: LuaFunction = git_mod.get("get_file_status")?;
-                let entry: LuaValue = gfs.call(path.clone())?;
-                let common: LuaTable = get_module(lua, "core.common")?;
-                let basename: LuaFunction = common.get("basename")?;
-                let rel: String = if let LuaValue::Table(ref e) = entry {
-                    e.get("rel")?
-                } else {
-                    basename.call(path.clone())?
-                };
-                let run: LuaFunction = git_mod.get("run")?;
-                let args = lua.create_table()?;
-                let mut idx = 1;
-                args.set(idx, "diff")?;
-                if cached.unwrap_or(false) {
+            lua.create_function(
+                |lua, (path, cached, on_complete): (String, Option<bool>, Option<LuaFunction>)| {
+                    let git_mod: LuaTable = get_module(lua, "core.git")?;
+                    let gfs: LuaFunction = git_mod.get("get_file_status")?;
+                    let entry: LuaValue = gfs.call(path.clone())?;
+                    let common: LuaTable = get_module(lua, "core.common")?;
+                    let basename: LuaFunction = common.get("basename")?;
+                    let rel: String = if let LuaValue::Table(ref e) = entry {
+                        e.get("rel")?
+                    } else {
+                        basename.call(path.clone())?
+                    };
+                    let run: LuaFunction = git_mod.get("run")?;
+                    let args = lua.create_table()?;
+                    let mut idx = 1;
+                    args.set(idx, "diff")?;
+                    if cached.unwrap_or(false) {
+                        idx += 1;
+                        args.set(idx, "--cached")?;
+                    }
                     idx += 1;
-                    args.set(idx, "--cached")?;
-                }
-                idx += 1;
-                args.set(idx, "--")?;
-                idx += 1;
-                args.set(idx, rel)?;
-                run.call::<()>((path, args, on_complete))?;
-                Ok(())
-            })?,
+                    args.set(idx, "--")?;
+                    idx += 1;
+                    args.set(idx, rel)?;
+                    run.call::<()>((path, args, on_complete))?;
+                    Ok(())
+                },
+            )?,
         )?;
 
         // git.diff_repo(path, cached?, on_complete?)
         git.set(
             "diff_repo",
-            lua.create_function(|lua, (path, cached, on_complete): (String, Option<bool>, Option<LuaFunction>)| {
-                let git_mod: LuaTable = get_module(lua, "core.git")?;
-                let run: LuaFunction = git_mod.get("run")?;
-                let args = lua.create_table()?;
-                args.set(1, "diff")?;
-                if cached.unwrap_or(false) {
-                    args.set(2, "--cached")?;
-                }
-                run.call::<()>((path, args, on_complete))?;
-                Ok(())
-            })?,
+            lua.create_function(
+                |lua, (path, cached, on_complete): (String, Option<bool>, Option<LuaFunction>)| {
+                    let git_mod: LuaTable = get_module(lua, "core.git")?;
+                    let run: LuaFunction = git_mod.get("run")?;
+                    let args = lua.create_table()?;
+                    args.set(1, "diff")?;
+                    if cached.unwrap_or(false) {
+                        args.set(2, "--cached")?;
+                    }
+                    run.call::<()>((path, args, on_complete))?;
+                    Ok(())
+                },
+            )?,
         )?;
 
         // Store git module.
-        let loaded: LuaTable = lua
-            .globals()
-            .get::<LuaTable>("package")?
-            .get("loaded")?;
+        let loaded: LuaTable = lua.globals().get::<LuaTable>("package")?.get("loaded")?;
         loaded.set("core.git", git)?;
 
         // Tick-mode thread for polling git updates. Never terminates.
@@ -2106,158 +2470,194 @@ fn register_plugin_loader(
     // parse_plugin_details(path, file, mod_version_regex, priority_regex)
     core.set(
         "parse_plugin_details",
-        lua.create_function(|lua, (path, file, mod_version_regex, priority_regex): (String, String, LuaValue, LuaValue)| {
-            // Check for generated sidecar files.
-            if path.ends_with(".luac") || path.ends_with(".lazy.json")
-                || file.ends_with(".luac") || file.ends_with(".lazy.json")
-            {
-                return Ok(LuaValue::Nil);
-            }
-
-            let io_mod: LuaTable = lua.globals().get("io")?;
-            let open: LuaFunction = io_mod.get("open")?;
-            let f_val: LuaValue = open.call((file.clone(), "r"))?;
-            if f_val == LuaValue::Nil {
-                return Ok(LuaValue::Boolean(false));
-            }
-
-            let pcall: LuaFunction = lua.globals().get("pcall")?;
-            let mut priority: LuaValue = LuaValue::Boolean(false);
-            let mut version_match = false;
-            let mut major: Option<i64> = None;
-            let mut minor: i64 = 0;
-            let mut patch: i64 = 0;
-
-            let mod_ver_major: i64 = lua.globals().get("MOD_VERSION_MAJOR")?;
-            let mod_ver_minor: i64 = lua.globals().get("MOD_VERSION_MINOR")?;
-            let mod_ver_patch: i64 = lua.globals().get("MOD_VERSION_PATCH")?;
-
-            // Read lines from file.
-            let lines_fn: LuaFunction = match &f_val {
-                LuaValue::UserData(ud) => ud.get("lines")?,
-                LuaValue::Table(t) => t.get("lines")?,
-                _ => return Ok(LuaValue::Boolean(false)),
-            };
-            let iter: LuaFunction = lines_fn.call(f_val.clone())?;
-
-            loop {
-                let line: LuaValue = iter.call(())?;
-                if line == LuaValue::Nil {
-                    break;
+        lua.create_function(
+            |lua,
+             (path, file, mod_version_regex, priority_regex): (
+                String,
+                String,
+                LuaValue,
+                LuaValue,
+            )| {
+                // Check for generated sidecar files.
+                if path.ends_with(".luac")
+                    || path.ends_with(".lazy.json")
+                    || file.ends_with(".luac")
+                    || file.ends_with(".lazy.json")
+                {
+                    return Ok(LuaValue::Nil);
                 }
 
-                if major.is_none() {
-                    if let LuaValue::Table(ref regex_obj) = mod_version_regex {
-                        let match_fn: LuaFunction = regex_obj.get("match")?;
-                        let result: LuaMultiValue =
-                            pcall.call((match_fn.clone(), regex_obj.clone(), line.clone()))?;
-                        let vals: Vec<LuaValue> = result.into_vec();
-                        let ok = vals.first().and_then(|v| {
-                            if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-                        }).unwrap_or(false);
-                        if ok && vals.len() >= 2 {
-                            if let Some(maj_val) = vals.get(1) {
-                                if *maj_val != LuaValue::Nil {
-                                    let tonumber: LuaFunction = lua.globals().get("tonumber")?;
-                                    let m: i64 = tonumber.call::<LuaValue>(maj_val.clone())?
-                                        .as_integer().unwrap_or(0);
-                                    let mi: i64 = if let Some(v) = vals.get(2) {
-                                        tonumber.call::<LuaValue>(v.clone())?
-                                            .as_integer().unwrap_or(0)
-                                    } else { 0 };
-                                    let p: i64 = if let Some(v) = vals.get(3) {
-                                        tonumber.call::<LuaValue>(v.clone())?
-                                            .as_integer().unwrap_or(0)
-                                    } else { 0 };
-                                    major = Some(m);
-                                    minor = mi;
-                                    patch = p;
+                let io_mod: LuaTable = lua.globals().get("io")?;
+                let open: LuaFunction = io_mod.get("open")?;
+                let f_val: LuaValue = open.call((file.clone(), "r"))?;
+                if f_val == LuaValue::Nil {
+                    return Ok(LuaValue::Boolean(false));
+                }
 
-                                    version_match = m == mod_ver_major
-                                        && mi <= mod_ver_minor
-                                        && p <= mod_ver_patch;
+                let pcall: LuaFunction = lua.globals().get("pcall")?;
+                let mut priority: LuaValue = LuaValue::Boolean(false);
+                let mut version_match = false;
+                let mut major: Option<i64> = None;
+                let mut minor: i64 = 0;
+                let mut patch: i64 = 0;
+
+                let mod_ver_major: i64 = lua.globals().get("MOD_VERSION_MAJOR")?;
+                let mod_ver_minor: i64 = lua.globals().get("MOD_VERSION_MINOR")?;
+                let mod_ver_patch: i64 = lua.globals().get("MOD_VERSION_PATCH")?;
+
+                // Read lines from file.
+                let lines_fn: LuaFunction = match &f_val {
+                    LuaValue::UserData(ud) => ud.get("lines")?,
+                    LuaValue::Table(t) => t.get("lines")?,
+                    _ => return Ok(LuaValue::Boolean(false)),
+                };
+                let iter: LuaFunction = lines_fn.call(f_val.clone())?;
+
+                loop {
+                    let line: LuaValue = iter.call(())?;
+                    if line == LuaValue::Nil {
+                        break;
+                    }
+
+                    if major.is_none() {
+                        if let LuaValue::Table(ref regex_obj) = mod_version_regex {
+                            let match_fn: LuaFunction = regex_obj.get("match")?;
+                            let result: LuaMultiValue =
+                                pcall.call((match_fn.clone(), regex_obj.clone(), line.clone()))?;
+                            let vals: Vec<LuaValue> = result.into_vec();
+                            let ok = vals
+                                .first()
+                                .and_then(|v| {
+                                    if let LuaValue::Boolean(b) = v {
+                                        Some(*b)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(false);
+                            if ok && vals.len() >= 2 {
+                                if let Some(maj_val) = vals.get(1) {
+                                    if *maj_val != LuaValue::Nil {
+                                        let tonumber: LuaFunction =
+                                            lua.globals().get("tonumber")?;
+                                        let m: i64 = tonumber
+                                            .call::<LuaValue>(maj_val.clone())?
+                                            .as_integer()
+                                            .unwrap_or(0);
+                                        let mi: i64 = if let Some(v) = vals.get(2) {
+                                            tonumber
+                                                .call::<LuaValue>(v.clone())?
+                                                .as_integer()
+                                                .unwrap_or(0)
+                                        } else {
+                                            0
+                                        };
+                                        let p: i64 = if let Some(v) = vals.get(3) {
+                                            tonumber
+                                                .call::<LuaValue>(v.clone())?
+                                                .as_integer()
+                                                .unwrap_or(0)
+                                        } else {
+                                            0
+                                        };
+                                        major = Some(m);
+                                        minor = mi;
+                                        patch = p;
+
+                                        version_match = m == mod_ver_major
+                                            && mi <= mod_ver_minor
+                                            && p <= mod_ver_patch;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                if priority == LuaValue::Boolean(false) {
-                    if let LuaValue::Table(ref regex_obj) = priority_regex {
-                        let match_fn: LuaFunction = regex_obj.get("match")?;
-                        let result: LuaMultiValue =
-                            pcall.call((match_fn.clone(), regex_obj.clone(), line.clone()))?;
-                        let vals: Vec<LuaValue> = result.into_vec();
-                        let ok = vals.first().and_then(|v| {
-                            if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-                        }).unwrap_or(false);
-                        if ok {
-                            if let Some(p_val) = vals.get(1) {
-                                if *p_val != LuaValue::Nil {
-                                    let tonumber: LuaFunction = lua.globals().get("tonumber")?;
-                                    priority = tonumber.call(p_val.clone())?;
+                    if priority == LuaValue::Boolean(false) {
+                        if let LuaValue::Table(ref regex_obj) = priority_regex {
+                            let match_fn: LuaFunction = regex_obj.get("match")?;
+                            let result: LuaMultiValue =
+                                pcall.call((match_fn.clone(), regex_obj.clone(), line.clone()))?;
+                            let vals: Vec<LuaValue> = result.into_vec();
+                            let ok = vals
+                                .first()
+                                .and_then(|v| {
+                                    if let LuaValue::Boolean(b) = v {
+                                        Some(*b)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or(false);
+                            if ok {
+                                if let Some(p_val) = vals.get(1) {
+                                    if *p_val != LuaValue::Nil {
+                                        let tonumber: LuaFunction =
+                                            lua.globals().get("tonumber")?;
+                                        priority = tonumber.call(p_val.clone())?;
+                                    }
                                 }
                             }
                         }
                     }
+
+                    if version_match {
+                        break;
+                    }
                 }
 
-                if version_match {
-                    break;
+                // Close file.
+                let close_fn: LuaFunction = match &f_val {
+                    LuaValue::UserData(ud) => ud.get("close")?,
+                    LuaValue::Table(t) => t.get("close")?,
+                    _ => return Ok(LuaValue::Boolean(false)),
+                };
+                close_fn.call::<()>(f_val)?;
+
+                // Check bundled plugin path.
+                let datadir: String = lua.globals().get("DATADIR")?;
+                let pathsep: String = lua.globals().get("PATHSEP")?;
+                let bundled_prefix = format!("{}{}plugins", datadir, pathsep);
+                if path.starts_with(&bundled_prefix) || file.starts_with(&bundled_prefix) {
+                    version_match = true;
                 }
-            }
 
-            // Close file.
-            let close_fn: LuaFunction = match &f_val {
-                LuaValue::UserData(ud) => ud.get("close")?,
-                LuaValue::Table(t) => t.get("close")?,
-                _ => return Ok(LuaValue::Boolean(false)),
-            };
-            close_fn.call::<()>(f_val)?;
+                let version = lua.create_table()?;
+                if let Some(m) = major {
+                    version.set(1, m)?;
+                    version.set(2, minor)?;
+                    version.set(3, patch)?;
+                }
 
-            // Check bundled plugin path.
-            let datadir: String = lua.globals().get("DATADIR")?;
-            let pathsep: String = lua.globals().get("PATHSEP")?;
-            let bundled_prefix = format!("{}{}plugins", datadir, pathsep);
-            if path.starts_with(&bundled_prefix) || file.starts_with(&bundled_prefix) {
-                version_match = true;
-            }
+                let common: LuaTable = get_module(lua, "core.common")?;
+                let basename: LuaFunction = common.get("basename")?;
+                let name: String = basename.call(path)?;
 
-            let version = lua.create_table()?;
-            if let Some(m) = major {
-                version.set(1, m)?;
-                version.set(2, minor)?;
-                version.set(3, patch)?;
-            }
+                let version_string = if major.is_some() {
+                    let table_mod: LuaTable = lua.globals().get("table")?;
+                    let concat: LuaFunction = table_mod.get("concat")?;
+                    concat.call::<String>((version.clone(), "."))?
+                } else {
+                    "unknown".to_string()
+                };
 
-            let common: LuaTable = get_module(lua, "core.common")?;
-            let basename: LuaFunction = common.get("basename")?;
-            let name: String = basename.call(path)?;
+                let priority_val = if priority == LuaValue::Boolean(false) {
+                    LuaValue::Integer(100)
+                } else {
+                    priority
+                };
 
-            let version_string = if major.is_some() {
-                let table_mod: LuaTable = lua.globals().get("table")?;
-                let concat: LuaFunction = table_mod.get("concat")?;
-                concat.call::<String>((version.clone(), "."))?
-            } else {
-                "unknown".to_string()
-            };
+                let details = lua.create_table()?;
+                details.set("name", name)?;
+                details.set("file", file)?;
+                details.set("version_match", version_match)?;
+                details.set("version", version)?;
+                details.set("priority", priority_val)?;
+                details.set("version_string", version_string)?;
 
-            let priority_val = if priority == LuaValue::Boolean(false) {
-                LuaValue::Integer(100)
-            } else {
-                priority
-            };
-
-            let details = lua.create_table()?;
-            details.set("name", name)?;
-            details.set("file", file)?;
-            details.set("version_match", version_match)?;
-            details.set("version", version)?;
-            details.set("priority", priority_val)?;
-            details.set("version_string", version_string)?;
-
-            Ok(LuaValue::Table(details))
-        })?,
+                Ok(LuaValue::Table(details))
+            },
+        )?,
     )?;
 
     // get_plugin_details(path)
@@ -2287,8 +2687,7 @@ fn register_plugin_loader(
             let compile: LuaFunction = regex_mod.get("compile")?;
             let mod_ver_re: LuaValue =
                 compile.call("--.*mod-version:(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?(?:$|\\s)")?;
-            let prio_re: LuaValue =
-                compile.call("\\-\\-.*priority\\s*:\\s*(\\-?[\\d\\.]+)")?;
+            let prio_re: LuaValue = compile.call("\\-\\-.*priority\\s*:\\s*(\\-?[\\d\\.]+)")?;
 
             let parse: LuaFunction = core.get("parse_plugin_details")?;
             // Strip .lua extension for name.
@@ -2403,7 +2802,11 @@ fn register_plugin_loader(
                     let info: LuaValue = get_file_info.call(file.clone())?;
                     if info != LuaValue::Nil {
                         let rawset: LuaFunction = lua.globals().get("rawset")?;
-                        rawset.call::<()>((lua.globals(), "__lite_anvil_user_config_loaded", true))?;
+                        rawset.call::<()>((
+                            lua.globals(),
+                            "__lite_anvil_user_config_loaded",
+                            true,
+                        ))?;
                         let dofile: LuaFunction = lua.globals().get("dofile")?;
                         let result: LuaValue = dofile.call(file)?;
                         let require: LuaFunction = lua.globals().get("require")?;
@@ -2507,8 +2910,7 @@ fn register_plugin_loader(
                             let filename = filename?;
                             let already: LuaValue = files.get(filename.as_str())?;
                             if already == LuaValue::Nil || already == LuaValue::Boolean(false) {
-                                let full_path =
-                                    format!("{}{}{}", plugin_dir, pathsep, filename);
+                                let full_path = format!("{}{}{}", plugin_dir, pathsep, filename);
                                 let get_details: LuaFunction = core.get("get_plugin_details")?;
                                 let details: LuaValue = get_details.call(full_path)?;
                                 if let LuaValue::Table(ref dt) = details {
@@ -2535,8 +2937,7 @@ fn register_plugin_loader(
                 let try_fn: LuaFunction = core.get("try")?;
                 let dirname: LuaFunction = common.get("dirname")?;
                 let skip_version: LuaValue = config.get("skip_plugins_version")?;
-                let skip_version_check =
-                    skip_version == LuaValue::Boolean(true);
+                let skip_version_check = skip_version == LuaValue::Boolean(true);
 
                 let lazy_plugins: LuaTable = lua.registry_value(&lazy_plugins_key2)?;
                 let lazy_handlers: LuaTable = lua.registry_value(&lazy_handlers_key2)?;
@@ -2563,7 +2964,9 @@ fn register_plugin_loader(
                     };
 
                     if !skip_version_check && !version_match {
-                        let vs: String = plugin.get::<Option<String>>("version_string")?.unwrap_or_else(|| "unknown".to_string());
+                        let vs: String = plugin
+                            .get::<Option<String>>("version_string")?
+                            .unwrap_or_else(|| "unknown".to_string());
                         let dir: String = dirname.call(file.clone())?;
                         log_quiet.call::<()>((
                             "Version mismatch for plugin %q[%s] from %s",
@@ -2632,77 +3035,93 @@ fn register_plugin_loader(
                             let lazy_loaded_clone = lazy_loaded.clone();
                             let lazy_handlers_clone = lazy_handlers.clone();
                             let cmd_name_clone = command_name.clone();
-                            let handler = lua.create_function(move |lua, args: LuaMultiValue| {
-                                let name: String = plugin_clone.get("name")?;
-                                let already: LuaValue = lazy_loaded_clone.get(name.as_str())?;
-                                if already == LuaValue::Nil || already == LuaValue::Boolean(false) {
-                                    lazy_loaded_clone.set(name.as_str(), true)?;
-                                    let core = get_core(lua)?;
-                                    let try_fn: LuaFunction = core.get("try")?;
-                                    let load_fn: LuaFunction = plugin_clone.get("load")?;
-                                    let start_time: f64 = {
-                                        let system_t: LuaTable = lua.globals().get("system")?;
-                                        let gt: LuaFunction = system_t.get("get_time")?;
-                                        gt.call(())?
-                                    };
-                                    let result: LuaMultiValue = try_fn.call((load_fn, plugin_clone.clone()))?;
-                                    let vals: Vec<LuaValue> = result.into_vec();
-                                    let ok = vals.first().and_then(|v| {
-                                        if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-                                    }).unwrap_or(false);
-                                    if !ok {
-                                        return Ok(LuaValue::Nil);
-                                    }
-                                    let end_time: f64 = {
-                                        let system_t: LuaTable = lua.globals().get("system")?;
-                                        let gt: LuaFunction = system_t.get("get_time")?;
-                                        gt.call(())?
-                                    };
-                                    let common: LuaTable = get_module(lua, "core.common")?;
-                                    let dirname_fn: LuaFunction = common.get("dirname")?;
-                                    let file: String = plugin_clone.get("file")?;
-                                    let dir: String = dirname_fn.call(file)?;
-                                    let log_quiet: LuaFunction = core.get("log_quiet")?;
-                                    log_quiet.call::<()>((
-                                        "Lazy-loaded plugin %q from %s in %.1fms",
-                                        name.clone(),
-                                        dir,
-                                        (end_time - start_time) * 1000.0,
-                                    ))?;
-                                    let config: LuaTable = get_module(lua, "core.config")?;
-                                    let plugins_c: LuaTable = config.get("plugins")?;
-                                    let pc: LuaValue = plugins_c.get(name.as_str())?;
-                                    if let LuaValue::Table(ref pct) = pc {
-                                        let onload: LuaValue = pct.get("onload")?;
-                                        if let LuaValue::Function(f) = onload {
-                                            let try2: LuaFunction = core.get("try")?;
-                                            let loaded = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                                            try2.call::<()>((f, loaded))?;
+                            let handler =
+                                lua.create_function(move |lua, args: LuaMultiValue| {
+                                    let name: String = plugin_clone.get("name")?;
+                                    let already: LuaValue = lazy_loaded_clone.get(name.as_str())?;
+                                    if already == LuaValue::Nil
+                                        || already == LuaValue::Boolean(false)
+                                    {
+                                        lazy_loaded_clone.set(name.as_str(), true)?;
+                                        let core = get_core(lua)?;
+                                        let try_fn: LuaFunction = core.get("try")?;
+                                        let load_fn: LuaFunction = plugin_clone.get("load")?;
+                                        let start_time: f64 = {
+                                            let system_t: LuaTable = lua.globals().get("system")?;
+                                            let gt: LuaFunction = system_t.get("get_time")?;
+                                            gt.call(())?
+                                        };
+                                        let result: LuaMultiValue =
+                                            try_fn.call((load_fn, plugin_clone.clone()))?;
+                                        let vals: Vec<LuaValue> = result.into_vec();
+                                        let ok = vals
+                                            .first()
+                                            .and_then(|v| {
+                                                if let LuaValue::Boolean(b) = v {
+                                                    Some(*b)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .unwrap_or(false);
+                                        if !ok {
+                                            return Ok(LuaValue::Nil);
+                                        }
+                                        let end_time: f64 = {
+                                            let system_t: LuaTable = lua.globals().get("system")?;
+                                            let gt: LuaFunction = system_t.get("get_time")?;
+                                            gt.call(())?
+                                        };
+                                        let common: LuaTable = get_module(lua, "core.common")?;
+                                        let dirname_fn: LuaFunction = common.get("dirname")?;
+                                        let file: String = plugin_clone.get("file")?;
+                                        let dir: String = dirname_fn.call(file)?;
+                                        let log_quiet: LuaFunction = core.get("log_quiet")?;
+                                        log_quiet.call::<()>((
+                                            "Lazy-loaded plugin %q from %s in %.1fms",
+                                            name.clone(),
+                                            dir,
+                                            (end_time - start_time) * 1000.0,
+                                        ))?;
+                                        let config: LuaTable = get_module(lua, "core.config")?;
+                                        let plugins_c: LuaTable = config.get("plugins")?;
+                                        let pc: LuaValue = plugins_c.get(name.as_str())?;
+                                        if let LuaValue::Table(ref pct) = pc {
+                                            let onload: LuaValue = pct.get("onload")?;
+                                            if let LuaValue::Function(f) = onload {
+                                                let try2: LuaFunction = core.get("try")?;
+                                                let loaded =
+                                                    vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                                                try2.call::<()>((f, loaded))?;
+                                            }
                                         }
                                     }
-                                }
-                                // Now perform the real command.
-                                let command_mod: LuaTable = get_module(lua, "core.command")?;
-                                let cmd_map: LuaTable = command_mod.get("map")?;
-                                let loaded_cmd: LuaValue = cmd_map.get(cmd_name_clone.as_str())?;
-                                if let LuaValue::Table(ref lc) = loaded_cmd {
-                                    let perform: LuaValue = lc.get("perform")?;
-                                    let existing_handler: LuaValue = lazy_handlers_clone.get(cmd_name_clone.as_str())?;
-                                    if perform != existing_handler {
-                                        let cmd_perform: LuaFunction = command_mod.get("perform")?;
-                                        return cmd_perform.call::<LuaValue>((cmd_name_clone.clone(), args));
+                                    // Now perform the real command.
+                                    let command_mod: LuaTable = get_module(lua, "core.command")?;
+                                    let cmd_map: LuaTable = command_mod.get("map")?;
+                                    let loaded_cmd: LuaValue =
+                                        cmd_map.get(cmd_name_clone.as_str())?;
+                                    if let LuaValue::Table(ref lc) = loaded_cmd {
+                                        let perform: LuaValue = lc.get("perform")?;
+                                        let existing_handler: LuaValue =
+                                            lazy_handlers_clone.get(cmd_name_clone.as_str())?;
+                                        if perform != existing_handler {
+                                            let cmd_perform: LuaFunction =
+                                                command_mod.get("perform")?;
+                                            return cmd_perform
+                                                .call::<LuaValue>((cmd_name_clone.clone(), args));
+                                        }
                                     }
-                                }
-                                let core2 = get_core(lua)?;
-                                let warn: LuaFunction = core2.get("warn")?;
-                                let pname: String = plugin_clone.get("name")?;
-                                warn.call::<()>((
-                                    "Lazy command %q did not register after loading plugin %q",
-                                    cmd_name_clone.clone(),
-                                    pname,
-                                ))?;
-                                Ok(LuaValue::Nil)
-                            })?;
+                                    let core2 = get_core(lua)?;
+                                    let warn: LuaFunction = core2.get("warn")?;
+                                    let pname: String = plugin_clone.get("name")?;
+                                    warn.call::<()>((
+                                        "Lazy command %q did not register after loading plugin %q",
+                                        cmd_name_clone.clone(),
+                                        pname,
+                                    ))?;
+                                    Ok(LuaValue::Nil)
+                                })?;
                             lazy_handlers.set(command_name.as_str(), handler.clone())?;
                             map.set(command_name, handler)?;
                         }
@@ -2723,15 +3142,23 @@ fn register_plugin_loader(
                         get_time.call(())?
                     };
                     let load_fn: LuaFunction = plugin.get("load")?;
-                    let result: LuaMultiValue =
-                        try_fn.call((load_fn, plugin.clone()))?;
+                    let result: LuaMultiValue = try_fn.call((load_fn, plugin.clone()))?;
                     let vals: Vec<LuaValue> = result.into_vec();
-                    let ok = vals.first().and_then(|v| {
-                        if let LuaValue::Boolean(b) = v { Some(*b) } else { None }
-                    }).unwrap_or(false);
+                    let ok = vals
+                        .first()
+                        .and_then(|v| {
+                            if let LuaValue::Boolean(b) = v {
+                                Some(*b)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(false);
 
                     if ok {
-                        let vs: String = plugin.get::<Option<String>>("version_string")?.unwrap_or_default();
+                        let vs: String = plugin
+                            .get::<Option<String>>("version_string")?
+                            .unwrap_or_default();
                         let plugin_version = if vs != mod_version_string {
                             format!("[{}]", vs)
                         } else {
@@ -2814,11 +3241,7 @@ fn register_plugin_loader(
 // Logging
 // ---------------------------------------------------------------------------
 
-fn register_logging(
-    lua: &Lua,
-    core: &LuaTable,
-    state_key: &LuaRegistryKey,
-) -> LuaResult<()> {
+fn register_logging(lua: &Lua, core: &LuaTable, state_key: &LuaRegistryKey) -> LuaResult<()> {
     let _ = state_key;
 
     // custom_log(level, show, backtrace, fmt, ...)
@@ -2837,8 +3260,10 @@ fn register_logging(
             let string_mod: LuaTable = lua.globals().get("string")?;
             let format_fn: LuaFunction = string_mod.get("format")?;
             let fmt_args: Vec<LuaValue> = vals.into_iter().skip(3).collect();
-            let text: String = format_fn.call::<LuaValue>(LuaMultiValue::from_vec(fmt_args))?
-                .as_string().and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            let text: String = format_fn
+                .call::<LuaValue>(LuaMultiValue::from_vec(fmt_args))?
+                .as_string()
+                .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
                 .unwrap_or_default();
 
             let core = get_core(lua)?;
@@ -2979,20 +3404,12 @@ fn register_logging(
                 let text: String = item.get("text")?;
                 let at: String = item.get("at")?;
                 let date_str: String = date_fn.call((LuaValue::Nil, time))?;
-                let mut result: String = format_fn.call((
-                    "%s [%s] %s at %s",
-                    date_str,
-                    level,
-                    text,
-                    at,
-                ))?;
+                let mut result: String =
+                    format_fn.call(("%s [%s] %s at %s", date_str, level, text, at))?;
                 let info: LuaValue = item.get("info")?;
                 if let LuaValue::String(ref s) = info {
-                    result = format_fn.call::<String>((
-                        "%s\n%s\n",
-                        result,
-                        s.to_str()?.to_string(),
-                    ))?;
+                    result =
+                        format_fn.call::<String>(("%s\n%s\n", result, s.to_str()?.to_string()))?;
                 }
                 Ok(result)
             };
@@ -3035,216 +3452,220 @@ fn register_doc_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
     // open_doc(filename?, options?)
     core.set(
         "open_doc",
-        lua.create_function(|lua, (filename, options): (Option<String>, Option<LuaTable>)| {
-            let core = get_core(lua)?;
-            let common: LuaTable = get_module(lua, "core.common")?;
-            let config: LuaTable = get_module(lua, "core.config")?;
-            let system_t: LuaTable = lua.globals().get("system")?;
-            let table_mod: LuaTable = lua.globals().get("table")?;
-            let insert: LuaFunction = table_mod.get("insert")?;
-            let string_mod: LuaTable = lua.globals().get("string")?;
-            let format_fn: LuaFunction = string_mod.get("format")?;
-            let require: LuaFunction = lua.globals().get("require")?;
+        lua.create_function(
+            |lua, (filename, options): (Option<String>, Option<LuaTable>)| {
+                let core = get_core(lua)?;
+                let common: LuaTable = get_module(lua, "core.common")?;
+                let config: LuaTable = get_module(lua, "core.config")?;
+                let system_t: LuaTable = lua.globals().get("system")?;
+                let table_mod: LuaTable = lua.globals().get("table")?;
+                let insert: LuaFunction = table_mod.get("insert")?;
+                let string_mod: LuaTable = lua.globals().get("string")?;
+                let format_fn: LuaFunction = string_mod.get("format")?;
+                let require: LuaFunction = lua.globals().get("require")?;
 
-            let options = options.unwrap_or(lua.create_table()?);
-            let mut new_file = true;
-            let mut abs_filename: LuaValue = LuaValue::Nil;
-            let mut open_options: LuaValue = LuaValue::Nil;
+                let options = options.unwrap_or(lua.create_table()?);
+                let mut new_file = true;
+                let mut abs_filename: LuaValue = LuaValue::Nil;
+                let mut open_options: LuaValue = LuaValue::Nil;
 
-            if let Some(ref fname) = filename {
-                let root_project_fn: LuaFunction = core.get("root_project")?;
-                let rp: LuaValue = root_project_fn.call(())?;
+                if let Some(ref fname) = filename {
+                    let root_project_fn: LuaFunction = core.get("root_project")?;
+                    let rp: LuaValue = root_project_fn.call(())?;
 
-                let normalize_path: LuaFunction = common.get("normalize_path")?;
-                let normalized: String = if let LuaValue::Table(ref p) = rp {
-                    let np: LuaFunction = p.get("normalize_path")?;
-                    np.call((p.clone(), fname.clone()))?
-                } else {
-                    normalize_path.call(fname.clone())?
-                };
+                    let normalize_path: LuaFunction = common.get("normalize_path")?;
+                    let normalized: String = if let LuaValue::Table(ref p) = rp {
+                        let np: LuaFunction = p.get("normalize_path")?;
+                        np.call((p.clone(), fname.clone()))?
+                    } else {
+                        normalize_path.call(fname.clone())?
+                    };
 
-                let abs: String = if let LuaValue::Table(ref p) = rp {
-                    let ap: LuaFunction = p.get("absolute_path")?;
-                    ap.call((p.clone(), normalized.clone()))?
-                } else {
-                    let abs_fn: LuaFunction = system_t.get("absolute_path")?;
-                    abs_fn.call(normalized.clone())?
-                };
+                    let abs: String = if let LuaValue::Table(ref p) = rp {
+                        let ap: LuaFunction = p.get("absolute_path")?;
+                        ap.call((p.clone(), normalized.clone()))?
+                    } else {
+                        let abs_fn: LuaFunction = system_t.get("absolute_path")?;
+                        abs_fn.call(normalized.clone())?
+                    };
 
-                abs_filename = LuaValue::String(lua.create_string(abs.as_bytes())?);
+                    abs_filename = LuaValue::String(lua.create_string(abs.as_bytes())?);
 
-                let get_file_info: LuaFunction = system_t.get("get_file_info")?;
-                let info: LuaValue = get_file_info.call(abs.clone())?;
-                new_file = info == LuaValue::Nil;
+                    let get_file_info: LuaFunction = system_t.get("get_file_info")?;
+                    let info: LuaValue = get_file_info.call(abs.clone())?;
+                    new_file = info == LuaValue::Nil;
 
-                if let LuaValue::Table(ref info_t) = info {
-                    let ftype: LuaValue = info_t.get("type")?;
-                    if ftype == LuaValue::String(lua.create_string("file")?) {
-                        let size: f64 = info_t.get("size")?;
-                        let size_mb = size / 1e6;
-                        let large_file: LuaValue = config.get("large_file")?;
-                        if let LuaValue::Table(ref lf) = large_file {
-                            let soft: f64 = lf
-                                .get::<LuaValue>("soft_limit_mb")?
-                                .as_number()
-                                .unwrap_or(f64::INFINITY);
-                            if size_mb >= soft {
-                                let hard: f64 = lf
-                                    .get::<LuaValue>("hard_limit_mb")?
+                    if let LuaValue::Table(ref info_t) = info {
+                        let ftype: LuaValue = info_t.get("type")?;
+                        if ftype == LuaValue::String(lua.create_string("file")?) {
+                            let size: f64 = info_t.get("size")?;
+                            let size_mb = size / 1e6;
+                            let large_file: LuaValue = config.get("large_file")?;
+                            if let LuaValue::Table(ref lf) = large_file {
+                                let soft: f64 = lf
+                                    .get::<LuaValue>("soft_limit_mb")?
                                     .as_number()
                                     .unwrap_or(f64::INFINITY);
-                                let read_only: LuaValue = lf.get("read_only")?;
-                                let plain_text: LuaValue = lf.get("plain_text")?;
-                                let opts = lua.create_table()?;
-                                opts.set("large_file", true)?;
-                                opts.set("file_size", size)?;
-                                opts.set("hard_limited", size_mb >= hard)?;
-                                opts.set(
-                                    "read_only",
-                                    read_only != LuaValue::Boolean(false),
-                                )?;
-                                opts.set(
-                                    "plain_text",
-                                    plain_text != LuaValue::Boolean(false),
-                                )?;
-                                open_options = LuaValue::Table(opts);
+                                if size_mb >= soft {
+                                    let hard: f64 = lf
+                                        .get::<LuaValue>("hard_limit_mb")?
+                                        .as_number()
+                                        .unwrap_or(f64::INFINITY);
+                                    let read_only: LuaValue = lf.get("read_only")?;
+                                    let plain_text: LuaValue = lf.get("plain_text")?;
+                                    let opts = lua.create_table()?;
+                                    opts.set("large_file", true)?;
+                                    opts.set("file_size", size)?;
+                                    opts.set("hard_limited", size_mb >= hard)?;
+                                    opts.set("read_only", read_only != LuaValue::Boolean(false))?;
+                                    opts.set("plain_text", plain_text != LuaValue::Boolean(false))?;
+                                    open_options = LuaValue::Table(opts);
+                                }
                             }
                         }
                     }
-                }
 
-                // Check if doc already exists.
-                let docs: LuaTable = core.get("docs")?;
-                for doc in docs.sequence_values::<LuaTable>() {
-                    let doc = doc?;
-                    let doc_abs: LuaValue = doc.get("abs_filename")?;
-                    if let LuaValue::String(ref da) = doc_abs {
-                        if da.to_str()? == abs {
-                            return Ok(LuaValue::Table(doc));
+                    // Check if doc already exists.
+                    let docs: LuaTable = core.get("docs")?;
+                    for doc in docs.sequence_values::<LuaTable>() {
+                        let doc = doc?;
+                        let doc_abs: LuaValue = doc.get("abs_filename")?;
+                        if let LuaValue::String(ref da) = doc_abs {
+                            if da.to_str()? == abs {
+                                return Ok(LuaValue::Table(doc));
+                            }
                         }
+                    }
+
+                    // Trigger syntax detection.
+                    let is_plain = if let LuaValue::Table(ref oo) = open_options {
+                        let pt: LuaValue = oo.get("plain_text")?;
+                        pt == LuaValue::Boolean(true)
+                    } else {
+                        false
+                    };
+                    if !is_plain {
+                        let mut header = String::new();
+                        let lazy_restore: LuaValue = options.get("lazy_restore")?;
+                        if !new_file && lazy_restore != LuaValue::Boolean(true) {
+                            let io_mod: LuaTable = lua.globals().get("io")?;
+                            let io_open: LuaFunction = io_mod.get("open")?;
+                            let fp: LuaValue = io_open.call((abs.clone(), "rb"))?;
+                            if fp != LuaValue::Nil {
+                                let read_fn: LuaFunction = match &fp {
+                                    LuaValue::UserData(ud) => ud.get("read")?,
+                                    LuaValue::Table(t) => t.get("read")?,
+                                    _ => return Err(LuaError::runtime("cannot read file")),
+                                };
+                                let data: LuaValue = read_fn.call((fp.clone(), 256))?;
+                                header = match data {
+                                    LuaValue::String(s) => s.to_str()?.to_string(),
+                                    _ => String::new(),
+                                };
+                                let close_fn: LuaFunction = match &fp {
+                                    LuaValue::UserData(ud) => ud.get("close")?,
+                                    LuaValue::Table(t) => t.get("close")?,
+                                    _ => return Err(LuaError::runtime("cannot close file")),
+                                };
+                                close_fn.call::<()>(fp)?;
+                            }
+                        }
+                        let syntax: LuaTable = require.call("core.syntax")?;
+                        let get_syntax: LuaFunction = syntax.get("get")?;
+                        get_syntax.call::<()>((abs.clone(), header))?;
                     }
                 }
 
-                // Trigger syntax detection.
-                let is_plain = if let LuaValue::Table(ref oo) = open_options {
-                    let pt: LuaValue = oo.get("plain_text")?;
-                    pt == LuaValue::Boolean(true)
-                } else {
-                    false
-                };
-                if !is_plain {
-                    let mut header = String::new();
-                    let lazy_restore: LuaValue = options.get("lazy_restore")?;
-                    if !new_file && lazy_restore != LuaValue::Boolean(true) {
-                        let io_mod: LuaTable = lua.globals().get("io")?;
-                        let io_open: LuaFunction = io_mod.get("open")?;
-                        let fp: LuaValue = io_open.call((abs.clone(), "rb"))?;
-                        if fp != LuaValue::Nil {
-                            let read_fn: LuaFunction = match &fp {
-                                LuaValue::UserData(ud) => ud.get("read")?,
-                                LuaValue::Table(t) => t.get("read")?,
-                                _ => return Err(LuaError::runtime("cannot read file")),
-                            };
-                            let data: LuaValue = read_fn.call((fp.clone(), 256))?;
-                            header = match data {
-                                LuaValue::String(s) => s.to_str()?.to_string(),
-                                _ => String::new(),
-                            };
-                            let close_fn: LuaFunction = match &fp {
-                                LuaValue::UserData(ud) => ud.get("close")?,
-                                LuaValue::Table(t) => t.get("close")?,
-                                _ => return Err(LuaError::runtime("cannot close file")),
-                            };
-                            close_fn.call::<()>(fp)?;
-                        }
-                    }
-                    let syntax: LuaTable = require.call("core.syntax")?;
-                    let get_syntax: LuaFunction = syntax.get("get")?;
-                    get_syntax.call::<()>((abs.clone(), header))?;
+                // Merge lazy_restore into open_options.
+                let lazy_restore: LuaValue = options.get("lazy_restore")?;
+                if lazy_restore == LuaValue::Boolean(true) {
+                    let merge: LuaFunction = common.get("merge")?;
+                    let base = if open_options == LuaValue::Nil {
+                        lua.create_table()?
+                    } else if let LuaValue::Table(t) = open_options {
+                        t
+                    } else {
+                        lua.create_table()?
+                    };
+                    let extra = lua.create_table()?;
+                    extra.set("lazy_restore", true)?;
+                    open_options = LuaValue::Table(merge.call((base, extra))?);
                 }
-            }
 
-            // Merge lazy_restore into open_options.
-            let lazy_restore: LuaValue = options.get("lazy_restore")?;
-            if lazy_restore == LuaValue::Boolean(true) {
-                let merge: LuaFunction = common.get("merge")?;
-                let base = if open_options == LuaValue::Nil {
-                    lua.create_table()?
-                } else if let LuaValue::Table(t) = open_options {
-                    t
-                } else {
-                    lua.create_table()?
-                };
-                let extra = lua.create_table()?;
-                extra.set("lazy_restore", true)?;
-                open_options = LuaValue::Table(merge.call((base, extra))?);
-            }
-
-            // Create new doc.
-            let doc_cls: LuaValue = require.call("core.doc")?;
-            let doc: LuaValue = match doc_cls {
-                LuaValue::Table(ref t) => {
-                    let mt: Option<LuaTable> = t.metatable();
-                    if let Some(mt) = mt {
-                        let cf: LuaValue = mt.get("__call")?;
-                        if let LuaValue::Function(f) = cf {
-                            f.call((t.clone(), filename.clone(), abs_filename.clone(), new_file, open_options))?
+                // Create new doc.
+                let doc_cls: LuaValue = require.call("core.doc")?;
+                let doc: LuaValue = match doc_cls {
+                    LuaValue::Table(ref t) => {
+                        let mt: Option<LuaTable> = t.metatable();
+                        if let Some(mt) = mt {
+                            let cf: LuaValue = mt.get("__call")?;
+                            if let LuaValue::Function(f) = cf {
+                                f.call((
+                                    t.clone(),
+                                    filename.clone(),
+                                    abs_filename.clone(),
+                                    new_file,
+                                    open_options,
+                                ))?
+                            } else {
+                                LuaValue::Nil
+                            }
                         } else {
                             LuaValue::Nil
                         }
-                    } else {
-                        LuaValue::Nil
+                    }
+                    _ => LuaValue::Nil,
+                };
+
+                let docs: LuaTable = core.get("docs")?;
+                insert.call::<()>((docs, doc.clone()))?;
+
+                if let LuaValue::Table(ref dt) = doc {
+                    let doc_abs: LuaValue = dt.get("abs_filename")?;
+                    if let LuaValue::String(ref s) = doc_abs {
+                        let update: LuaFunction = core.get("_update_recent_file")?;
+                        update.call::<()>(s.to_str()?.to_string())?;
+                    }
+
+                    let large_mode: LuaValue = dt.get("large_file_mode")?;
+                    if large_mode == LuaValue::Boolean(true) {
+                        let size: f64 = dt
+                            .get::<LuaValue>("large_file_size")?
+                            .as_number()
+                            .unwrap_or(0.0);
+                        let size_mb_str = format!("{:.1}", size / 1e6);
+                        let hard: LuaValue = dt.get("hard_limited")?;
+                        let mode_str = if hard == LuaValue::Boolean(true) {
+                            "degraded"
+                        } else {
+                            "large-file"
+                        };
+                        let get_name: LuaFunction = dt.get("get_name")?;
+                        let doc_name: String = get_name.call(dt.clone())?;
+                        let style: LuaTable = get_module(lua, "core.style")?;
+                        let warn_color: LuaValue = style.get("warn")?;
+                        let status_view: LuaTable = core.get("status_view")?;
+                        let show_msg: LuaFunction = status_view.get("show_message")?;
+                        let msg: String = format_fn.call((
+                            "Opened %s in %s mode (%s MB)",
+                            doc_name,
+                            mode_str.to_string(),
+                            size_mb_str,
+                        ))?;
+                        show_msg.call::<()>((status_view, "i", warn_color, msg))?;
                     }
                 }
-                _ => LuaValue::Nil,
-            };
 
-            let docs: LuaTable = core.get("docs")?;
-            insert.call::<()>((docs, doc.clone()))?;
-
-            if let LuaValue::Table(ref dt) = doc {
-                let doc_abs: LuaValue = dt.get("abs_filename")?;
-                if let LuaValue::String(ref s) = doc_abs {
-                    let update: LuaFunction = core.get("_update_recent_file")?;
-                    update.call::<()>(s.to_str()?.to_string())?;
+                let log_quiet: LuaFunction = core.get("log_quiet")?;
+                if filename.is_some() {
+                    log_quiet.call::<()>(("Opened doc \"%s\"", filename))?;
+                } else {
+                    log_quiet.call::<()>("Opened new doc")?;
                 }
 
-                let large_mode: LuaValue = dt.get("large_file_mode")?;
-                if large_mode == LuaValue::Boolean(true) {
-                    let size: f64 = dt.get::<LuaValue>("large_file_size")?
-                        .as_number().unwrap_or(0.0);
-                    let size_mb_str = format!("{:.1}", size / 1e6);
-                    let hard: LuaValue = dt.get("hard_limited")?;
-                    let mode_str = if hard == LuaValue::Boolean(true) {
-                        "degraded"
-                    } else {
-                        "large-file"
-                    };
-                    let get_name: LuaFunction = dt.get("get_name")?;
-                    let doc_name: String = get_name.call(dt.clone())?;
-                    let style: LuaTable = get_module(lua, "core.style")?;
-                    let warn_color: LuaValue = style.get("warn")?;
-                    let status_view: LuaTable = core.get("status_view")?;
-                    let show_msg: LuaFunction = status_view.get("show_message")?;
-                    let msg: String = format_fn.call((
-                        "Opened %s in %s mode (%s MB)",
-                        doc_name,
-                        mode_str.to_string(),
-                        size_mb_str,
-                    ))?;
-                    show_msg.call::<()>((status_view, "i", warn_color, msg))?;
-                }
-            }
-
-            let log_quiet: LuaFunction = core.get("log_quiet")?;
-            if filename.is_some() {
-                log_quiet.call::<()>(("Opened doc \"%s\"", filename))?;
-            } else {
-                log_quiet.call::<()>("Opened new doc")?;
-            }
-
-            Ok(doc)
-        })?,
+                Ok(doc)
+            },
+        )?,
     )?;
 
     // get_views_referencing_doc(doc)
@@ -3314,15 +3735,9 @@ fn register_doc_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                 let string_mod: LuaTable = lua.globals().get("string")?;
                 let format_fn: LuaFunction = string_mod.get("format")?;
                 let text: String = if dirty_count == 1 {
-                    format_fn.call((
-                        "\"%s\" has unsaved changes. Quit anyway?",
-                        dirty_name,
-                    ))?
+                    format_fn.call(("\"%s\" has unsaved changes. Quit anyway?", dirty_name))?
                 } else {
-                    format_fn.call((
-                        "%d docs have unsaved changes. Quit anyway?",
-                        dirty_count,
-                    ))?
+                    format_fn.call(("%d docs have unsaved changes. Quit anyway?", dirty_count))?
                 };
 
                 let opt = lua.create_table()?;
@@ -3336,9 +3751,8 @@ fn register_doc_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                 opt.set(2, no)?;
 
                 let close_fn_key = lua.create_registry_value(close_fn)?;
-                let extra_key = lua.create_registry_value(
-                    LuaMultiValue::from_vec(extra_args).into_vec(),
-                )?;
+                let extra_key =
+                    lua.create_registry_value(LuaMultiValue::from_vec(extra_args).into_vec())?;
                 let callback = lua.create_function(move |lua, item: LuaTable| {
                     let text: String = item.get("text")?;
                     if text == "Yes" {
@@ -3889,19 +4303,20 @@ fn register_event_handling(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
     // step()
     core.set(
         "step",
-        lua.create_function(|lua, ()| {
+        lua.create_function(move |lua, ()| {
             let core = get_core(lua)?;
 
             // Cache on first call via a named registry slot.
-            let poll_event: LuaFunction = match lua.named_registry_value::<LuaValue>("_step_poll")? {
-                LuaValue::Function(f) => f,
-                _ => {
-                    let s: LuaTable = lua.globals().get("system")?;
-                    let f: LuaFunction = s.get("poll_event")?;
-                    lua.set_named_registry_value("_step_poll", f.clone())?;
-                    f
-                }
-            };
+            let poll_event: LuaFunction =
+                match lua.named_registry_value::<LuaValue>("_step_poll")? {
+                    LuaValue::Function(f) => f,
+                    _ => {
+                        let s: LuaTable = lua.globals().get("system")?;
+                        let f: LuaFunction = s.get("poll_event")?;
+                        lua.set_named_registry_value("_step_poll", f.clone())?;
+                        f
+                    }
+                };
             let try_fn: LuaFunction = match lua.named_registry_value::<LuaValue>("_step_try")? {
                 LuaValue::Function(f) => f,
                 _ => {
@@ -3964,9 +4379,7 @@ fn register_event_handling(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
             size.set("y", height)?;
             root_view.call_method::<()>("update", ())?;
 
-            let redraw: bool = core
-                .get::<LuaValue>("redraw")?
-                .eq(&LuaValue::Boolean(true));
+            let redraw: bool = core.get::<LuaValue>("redraw")?.eq(&LuaValue::Boolean(true));
             if !redraw {
                 return Ok(LuaValue::Boolean(false));
             }
@@ -4155,8 +4568,7 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
             };
             let mut next_key = LuaValue::Nil;
             loop {
-                let result: LuaMultiValue =
-                    next_fn.call((threads.clone(), next_key.clone()))?;
+                let result: LuaMultiValue = next_fn.call((threads.clone(), next_key.clone()))?;
                 let vals: Vec<LuaValue> = result.into_vec();
                 let k = vals.first().cloned().unwrap_or(LuaValue::Nil);
                 if k == LuaValue::Nil {
@@ -4202,18 +4614,17 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
 
                             // On first resume, pass stored args.
                             let args_val: LuaValue = t.get("args")?;
-                            let result: LuaMultiValue = if let LuaValue::Table(ref args_tbl) =
-                                args_val
-                            {
-                                let mut resume_args = vec![cr.clone()];
-                                for arg in args_tbl.clone().sequence_values::<LuaValue>() {
-                                    resume_args.push(arg?);
-                                }
-                                t.set("args", LuaValue::Nil)?;
-                                resume.call(LuaMultiValue::from_vec(resume_args))?
-                            } else {
-                                resume.call(cr.clone())?
-                            };
+                            let result: LuaMultiValue =
+                                if let LuaValue::Table(ref args_tbl) = args_val {
+                                    let mut resume_args = vec![cr.clone()];
+                                    for arg in args_tbl.clone().sequence_values::<LuaValue>() {
+                                        resume_args.push(arg?);
+                                    }
+                                    t.set("args", LuaValue::Nil)?;
+                                    resume.call(LuaMultiValue::from_vec(resume_args))?
+                                } else {
+                                    resume.call(cr.clone())?
+                                };
                             let vals: Vec<LuaValue> = result.into_vec();
 
                             // vals[0] = ok (bool from coroutine.resume), vals[1..] = yielded values
@@ -4223,9 +4634,9 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                                 let err_msg = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
                                 let error_fn: LuaResult<LuaFunction> = core.get("error");
                                 if let Ok(error_fn) = error_fn {
-                                    if let Err(e) = error_fn.call::<LuaValue>(
-                                        ("Error running thread: %s", err_msg),
-                                    ) {
+                                    if let Err(e) = error_fn
+                                        .call::<LuaValue>(("Error running thread: %s", err_msg))
+                                    {
                                         log::warn!("core.error callback failed: {e}");
                                     }
                                 }
@@ -4299,16 +4710,21 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
             let frame_budget = 1.0 / fps - 0.002;
             let frame_interval = 1.0 / fps;
 
+            let quit_fn: LuaFunction = core.get("quit")?;
+
             loop {
+                if crate::signal::shutdown_requested() {
+                    crate::signal::clear_shutdown();
+                    quit_fn.call::<()>(())?;
+                }
+
                 let frame_start: f64 = get_time.call(())?;
                 core.set("frame_start", frame_start)?;
 
                 let mut did_redraw = false;
                 let mut did_step = false;
 
-                let redraw: bool = core
-                    .get::<LuaValue>("redraw")?
-                    .eq(&LuaValue::Boolean(true));
+                let redraw: bool = core.get::<LuaValue>("redraw")?.eq(&LuaValue::Boolean(true));
                 let force_draw = redraw
                     && last_frame_time.is_some()
                     && (frame_start - last_frame_time.unwrap_or(0.0)) > (1.0 / fps);
@@ -4331,11 +4747,14 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                     LuaMultiValue::from_vec(vec![LuaValue::Number(0.0), LuaValue::Boolean(false)])
                 };
                 let rt_vals: Vec<LuaValue> = result.into_vec();
-                let time_to_wake: f64 = rt_vals.first().and_then(|v| match v {
-                    LuaValue::Number(n) => Some(*n),
-                    LuaValue::Integer(n) => Some(*n as f64),
-                    _ => None,
-                }).unwrap_or(1.0);
+                let time_to_wake: f64 = rt_vals
+                    .first()
+                    .and_then(|v| match v {
+                        LuaValue::Number(n) => Some(*n),
+                        LuaValue::Integer(n) => Some(*n as f64),
+                        _ => None,
+                    })
+                    .unwrap_or(1.0);
                 let threads_done = matches!(rt_vals.get(1), Some(LuaValue::Boolean(true)));
 
                 if threads_done {
@@ -4431,60 +4850,55 @@ fn register_misc(
         let handler_key = lua.create_registry_value(handler)?;
         let xpcall_key = lua.create_registry_value(xpcall)?;
 
-    core.set(
-        "try",
-        lua.create_function(move |lua, args: LuaMultiValue| {
-            let vals: Vec<LuaValue> = args.into_vec();
-            let func = match vals.first() {
-                Some(v) => v.clone(),
-                None => return Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(false)])),
-            };
-            let fn_args: Vec<LuaValue> = vals.into_iter().skip(1).collect();
+        core.set(
+            "try",
+            lua.create_function(move |lua, args: LuaMultiValue| {
+                let vals: Vec<LuaValue> = args.into_vec();
+                let func = match vals.first() {
+                    Some(v) => v.clone(),
+                    None => return Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(false)])),
+                };
+                let fn_args: Vec<LuaValue> = vals.into_iter().skip(1).collect();
 
-            let xpcall: LuaFunction = lua.registry_value(&xpcall_key)?;
-            let handler: LuaFunction = lua.registry_value(&handler_key)?;
+                let xpcall: LuaFunction = lua.registry_value(&xpcall_key)?;
+                let handler: LuaFunction = lua.registry_value(&handler_key)?;
 
-            let mut call_args = vec![func, LuaValue::Function(handler)];
-            call_args.extend(fn_args);
-            let result: LuaMultiValue = xpcall.call(LuaMultiValue::from_vec(call_args))?;
-            let result_vals: Vec<LuaValue> = result.into_vec();
-            let ok = matches!(result_vals.first(), Some(LuaValue::Boolean(true)));
+                let mut call_args = vec![func, LuaValue::Function(handler)];
+                call_args.extend(fn_args);
+                let result: LuaMultiValue = xpcall.call(LuaMultiValue::from_vec(call_args))?;
+                let result_vals: Vec<LuaValue> = result.into_vec();
+                let ok = matches!(result_vals.first(), Some(LuaValue::Boolean(true)));
 
-            if ok {
-                let res = result_vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(true), res]))
-            } else {
-                let err = result_vals.get(1).cloned().unwrap_or(LuaValue::Nil);
-                Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(false), err]))
-            }
-        })?,
-    )?;
+                if ok {
+                    let res = result_vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                    Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(true), res]))
+                } else {
+                    let err = result_vals.get(1).cloned().unwrap_or(LuaValue::Nil);
+                    Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(false), err]))
+                }
+            })?,
+        )?;
     } // end try() block
 
     // exit(quit_fn, force?)
+    // Always saves the session (including dirty-doc backups) and exits.
+    // The confirm dialog only appears when closing individual tabs.
     core.set(
         "exit",
-        lua.create_function(|lua, (quit_fn, force): (LuaFunction, Option<bool>)| {
+        lua.create_function(|lua, (quit_fn, _force): (LuaFunction, Option<bool>)| {
             let core = get_core(lua)?;
-            if force.unwrap_or(false) {
-                core.set("_exiting", true)?;
-                let save: LuaFunction = core.get("_save_session")?;
-                save.call::<()>(())?;
-                let delete_temp: LuaFunction = core.get("delete_temp_files")?;
-                delete_temp.call::<()>(())?;
-                let projects: LuaTable = core.get("projects")?;
-                while projects.raw_len() > 0 {
-                    let last: LuaValue = projects.get(projects.raw_len())?;
-                    let remove: LuaFunction = core.get("remove_project")?;
-                    remove.call::<()>((last, true))?;
-                }
-                quit_fn.call::<()>(())?;
-            } else {
-                let docs: LuaTable = core.get("docs")?;
-                let confirm: LuaFunction = core.get("confirm_close_docs")?;
-                let exit_fn: LuaFunction = core.get("exit")?;
-                confirm.call::<()>((docs, exit_fn, quit_fn, true))?;
+            core.set("_exiting", true)?;
+            let save: LuaFunction = core.get("_save_session")?;
+            save.call::<()>(())?;
+            let delete_temp: LuaFunction = core.get("delete_temp_files")?;
+            delete_temp.call::<()>(())?;
+            let projects: LuaTable = core.get("projects")?;
+            while projects.raw_len() > 0 {
+                let last: LuaValue = projects.get(projects.raw_len())?;
+                let remove: LuaFunction = core.get("remove_project")?;
+                remove.call::<()>((last, true))?;
             }
+            quit_fn.call::<()>(())?;
             Ok(())
         })?,
     )?;
@@ -4546,27 +4960,37 @@ fn register_misc(
     // _open_dialog(dialog_type, window, callback, options?)
     core.set(
         "_open_dialog",
-        lua.create_function(|lua, (dialog_type, window, callback, options): (String, LuaValue, LuaFunction, Option<LuaValue>)| {
-            let core = get_core(lua)?;
-            let system_t: LuaTable = lua.globals().get("system")?;
-            let dialog_fn: LuaFunction = match dialog_type.as_str() {
-                "openfile" => system_t.get("open_file_dialog")?,
-                "opendirectory" => system_t.get("open_directory_dialog")?,
-                "savefile" => system_t.get("save_file_dialog")?,
-                _ => return Err(LuaError::runtime("Invalid dialog type")),
-            };
-            let dialogs: LuaTable = core.get("active_file_dialogs")?;
+        lua.create_function(
+            |lua,
+             (dialog_type, window, callback, options): (
+                String,
+                LuaValue,
+                LuaFunction,
+                Option<LuaValue>,
+            )| {
+                let core = get_core(lua)?;
+                let system_t: LuaTable = lua.globals().get("system")?;
+                let dialog_fn: LuaFunction = match dialog_type.as_str() {
+                    "openfile" => system_t.get("open_file_dialog")?,
+                    "opendirectory" => system_t.get("open_directory_dialog")?,
+                    "savefile" => system_t.get("save_file_dialog")?,
+                    _ => return Err(LuaError::runtime("Invalid dialog type")),
+                };
+                let dialogs: LuaTable = core.get("active_file_dialogs")?;
 
-            // Increment tag using the core table field.
-            let last_tag: i64 = core.get::<LuaValue>("_last_file_dialog_tag")?
-                .as_integer().unwrap_or(0);
-            let new_tag = last_tag + 1;
-            core.set("_last_file_dialog_tag", new_tag)?;
+                // Increment tag using the core table field.
+                let last_tag: i64 = core
+                    .get::<LuaValue>("_last_file_dialog_tag")?
+                    .as_integer()
+                    .unwrap_or(0);
+                let new_tag = last_tag + 1;
+                core.set("_last_file_dialog_tag", new_tag)?;
 
-            dialogs.set(new_tag, callback)?;
-            dialog_fn.call::<()>((window, new_tag, options))?;
-            Ok(())
-        })?,
+                dialogs.set(new_tag, callback)?;
+                dialog_fn.call::<()>((window, new_tag, options))?;
+                Ok(())
+            },
+        )?,
     )?;
 
     core.set("_last_file_dialog_tag", 0i64)?;
@@ -4574,34 +4998,40 @@ fn register_misc(
     // open_file_dialog(window, callback, options?)
     core.set(
         "open_file_dialog",
-        lua.create_function(|lua, (window, callback, options): (LuaValue, LuaFunction, Option<LuaValue>)| {
-            let core = get_core(lua)?;
-            let open_dialog: LuaFunction = core.get("_open_dialog")?;
-            open_dialog.call::<()>(("openfile", window, callback, options))?;
-            Ok(())
-        })?,
+        lua.create_function(
+            |lua, (window, callback, options): (LuaValue, LuaFunction, Option<LuaValue>)| {
+                let core = get_core(lua)?;
+                let open_dialog: LuaFunction = core.get("_open_dialog")?;
+                open_dialog.call::<()>(("openfile", window, callback, options))?;
+                Ok(())
+            },
+        )?,
     )?;
 
     // open_directory_dialog(window, callback, options?)
     core.set(
         "open_directory_dialog",
-        lua.create_function(|lua, (window, callback, options): (LuaValue, LuaFunction, Option<LuaValue>)| {
-            let core = get_core(lua)?;
-            let open_dialog: LuaFunction = core.get("_open_dialog")?;
-            open_dialog.call::<()>(("opendirectory", window, callback, options))?;
-            Ok(())
-        })?,
+        lua.create_function(
+            |lua, (window, callback, options): (LuaValue, LuaFunction, Option<LuaValue>)| {
+                let core = get_core(lua)?;
+                let open_dialog: LuaFunction = core.get("_open_dialog")?;
+                open_dialog.call::<()>(("opendirectory", window, callback, options))?;
+                Ok(())
+            },
+        )?,
     )?;
 
     // save_file_dialog(window, callback, options?)
     core.set(
         "save_file_dialog",
-        lua.create_function(|lua, (window, callback, options): (LuaValue, LuaFunction, Option<LuaValue>)| {
-            let core = get_core(lua)?;
-            let open_dialog: LuaFunction = core.get("_open_dialog")?;
-            open_dialog.call::<()>(("savefile", window, callback, options))?;
-            Ok(())
-        })?,
+        lua.create_function(
+            |lua, (window, callback, options): (LuaValue, LuaFunction, Option<LuaValue>)| {
+                let core = get_core(lua)?;
+                let open_dialog: LuaFunction = core.get("_open_dialog")?;
+                open_dialog.call::<()>(("savefile", window, callback, options))?;
+                Ok(())
+            },
+        )?,
     )?;
 
     // request_cursor(value)

@@ -45,7 +45,9 @@ fn collect_docviews(lua: &Lua, node: &LuaTable, out: &LuaTable, set: &LuaTable) 
     let docview_class: LuaTable = require_table(lua, "core.docview")?;
     let node_type: String = node.get("type")?;
     if node_type == "leaf" {
-        let views: LuaTable = node.get::<Option<LuaTable>>("views")?.unwrap_or(lua.create_table()?);
+        let views: LuaTable = node
+            .get::<Option<LuaTable>>("views")?
+            .unwrap_or(lua.create_table()?);
         for pair in views.sequence_values::<LuaTable>() {
             let view = pair?;
             let is_doc: bool = view.call_method("is", docview_class.clone())?;
@@ -89,8 +91,9 @@ fn serialize_node_ids(lua: &Lua, node: &LuaTable, view_to_id: &LuaTable) -> LuaR
         state.set("active_view", active_id)?;
         state.set("tab_offset", node.get::<LuaValue>("tab_offset")?)?;
 
-        let views: LuaTable =
-            node.get::<Option<LuaTable>>("views")?.unwrap_or(lua.create_table()?);
+        let views: LuaTable = node
+            .get::<Option<LuaTable>>("views")?
+            .unwrap_or(lua.create_table()?);
         for pair in views.sequence_values::<LuaTable>() {
             let view = pair?;
             let is_empty: bool = view.call_method("is", emptyview_class.clone())?;
@@ -126,8 +129,9 @@ fn build_view_maps(
     let emptyview_class: LuaTable = require_table(lua, "core.emptyview")?;
     let node_type: String = node.get("type")?;
     if node_type == "leaf" {
-        let views: LuaTable =
-            node.get::<Option<LuaTable>>("views")?.unwrap_or(lua.create_table()?);
+        let views: LuaTable = node
+            .get::<Option<LuaTable>>("views")?
+            .unwrap_or(lua.create_table()?);
         for pair in views.sequence_values::<LuaTable>() {
             let view = pair?;
             let is_empty: bool = view.call_method("is", emptyview_class.clone())?;
@@ -174,8 +178,9 @@ fn collect_live_view_ids_inner(
     let node_type: String = node.get("type")?;
     if node_type == "leaf" {
         let docview_class: LuaTable = require_table(lua, "core.docview")?;
-        let views: LuaTable =
-            node.get::<Option<LuaTable>>("views")?.unwrap_or(lua.create_table()?);
+        let views: LuaTable = node
+            .get::<Option<LuaTable>>("views")?
+            .unwrap_or(lua.create_table()?);
         for pair in views.sequence_values::<LuaTable>() {
             let view = pair?;
             let is_empty: bool = view.call_method("is", emptyview_class.clone())?;
@@ -364,12 +369,7 @@ fn is_session_view(view: &LuaTable) -> LuaResult<bool> {
 }
 
 /// Resizes a divider's child node, used during drag.
-fn resize_child_node(
-    node: &LuaTable,
-    axis: &str,
-    value: f64,
-    delta: f64,
-) -> LuaResult<()> {
+fn resize_child_node(node: &LuaTable, axis: &str, value: f64, delta: f64) -> LuaResult<()> {
     let a: LuaTable = node.get("a")?;
     let accept: bool = a
         .call_method::<LuaValue>("resize", (axis, value))?
@@ -502,19 +502,21 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     // RootView:defer_draw(fn, ...)
     root_view.set(
         "defer_draw",
-        lua.create_function(|lua, (this, func, rest): (LuaTable, LuaFunction, LuaMultiValue)| {
-            let deferred: LuaTable = this.get("deferred_draws")?;
-            let entry = lua.create_table()?;
-            entry.set("fn", func)?;
-            for (i, val) in rest.into_iter().enumerate() {
-                entry.raw_set((i + 1) as i64, val)?;
-            }
-            // Insert at position 1 (prepend)
-            let table_mod: LuaTable = lua.globals().get("table")?;
-            let insert: LuaFunction = table_mod.get("insert")?;
-            insert.call::<()>((deferred, 1, entry))?;
-            Ok(())
-        })?,
+        lua.create_function(
+            |lua, (this, func, rest): (LuaTable, LuaFunction, LuaMultiValue)| {
+                let deferred: LuaTable = this.get("deferred_draws")?;
+                let entry = lua.create_table()?;
+                entry.set("fn", func)?;
+                for (i, val) in rest.into_iter().enumerate() {
+                    entry.raw_set((i + 1) as i64, val)?;
+                }
+                // Insert at position 1 (prepend)
+                let table_mod: LuaTable = lua.globals().get("table")?;
+                let insert: LuaFunction = table_mod.get("insert")?;
+                insert.call::<()>((deferred, 1, entry))?;
+                Ok(())
+            },
+        )?,
     )?;
 
     // RootView:get_active_node()
@@ -618,70 +620,72 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
 
     // RootView:add_view(view, placement)
     root_view.set("add_view", {
-        lua.create_function(|lua, (this, view, placement): (LuaTable, LuaTable, Option<String>)| {
-            let placement = placement.unwrap_or_else(|| "tab".to_string());
-            let core: LuaTable = require_table(lua, "core")?;
-            let docview_class: LuaTable = require_table(lua, "core.docview")?;
-            let root_node: LuaTable = this.get("root_node")?;
+        lua.create_function(
+            |lua, (this, view, placement): (LuaTable, LuaTable, Option<String>)| {
+                let placement = placement.unwrap_or_else(|| "tab".to_string());
+                let core: LuaTable = require_table(lua, "core")?;
+                let docview_class: LuaTable = require_table(lua, "core.docview")?;
+                let root_node: LuaTable = this.get("root_node")?;
 
-            // Exit focus mode for non-tab or non-docview
-            let focus_mode: LuaValue = this.get("focus_mode")?;
-            if !matches!(focus_mode, LuaValue::Nil | LuaValue::Boolean(false)) {
-                let is_doc: bool = view.call_method("is", docview_class)?;
-                if placement != "tab" || !is_doc {
-                    this.call_method::<()>("exit_focus_mode", ())?;
+                // Exit focus mode for non-tab or non-docview
+                let focus_mode: LuaValue = this.get("focus_mode")?;
+                if !matches!(focus_mode, LuaValue::Nil | LuaValue::Boolean(false)) {
+                    let is_doc: bool = view.call_method("is", docview_class)?;
+                    if placement != "tab" || !is_doc {
+                        this.call_method::<()>("exit_focus_mode", ())?;
+                    }
                 }
-            }
 
-            if placement == "tab" {
-                let node: LuaTable = this.call_method("get_active_node_default", ())?;
-                node.call_method::<()>("add_view", view.clone())?;
+                if placement == "tab" {
+                    let node: LuaTable = this.call_method("get_active_node_default", ())?;
+                    node.call_method::<()>("add_view", view.clone())?;
+                    root_node.call_method::<()>("update_layout", ())?;
+                    let set_active: LuaFunction = core.get("set_active_view")?;
+                    set_active.call::<()>(view.clone())?;
+                    return Ok(view);
+                }
+
+                if let Some(edge) = get_edge_node(&root_node, &placement)? {
+                    edge.call_method::<()>("add_view", view.clone())?;
+                    root_node.call_method::<()>("update_layout", ())?;
+                    let set_active: LuaFunction = core.get("set_active_view")?;
+                    set_active.call::<()>(view.clone())?;
+                    return Ok(view);
+                }
+
+                let split_type_str = match placement.as_str() {
+                    "left" | "right" => "hsplit",
+                    "top" | "bottom" => "vsplit",
+                    _ => {
+                        return Err(LuaError::runtime(format!(
+                            "invalid root placement: {placement}"
+                        )));
+                    }
+                };
+
+                let node_class: LuaTable = require_table(lua, "core.node")?;
+                let existing: LuaTable = node_class.call(())?;
+                existing.call_method::<()>("consume", root_node.clone())?;
+
+                let sibling: LuaTable = node_class.call(())?;
+                sibling.set("views", lua.create_table()?)?;
+                sibling.call_method::<()>("add_view", view.clone())?;
+
+                let new_root: LuaTable = node_class.call(split_type_str)?;
+                new_root.set("a", existing.clone())?;
+                new_root.set("b", sibling.clone())?;
+                if placement == "left" || placement == "top" {
+                    new_root.set("a", sibling)?;
+                    new_root.set("b", existing)?;
+                }
+
+                root_node.call_method::<()>("consume", new_root)?;
                 root_node.call_method::<()>("update_layout", ())?;
                 let set_active: LuaFunction = core.get("set_active_view")?;
                 set_active.call::<()>(view.clone())?;
-                return Ok(view);
-            }
-
-            if let Some(edge) = get_edge_node(&root_node, &placement)? {
-                edge.call_method::<()>("add_view", view.clone())?;
-                root_node.call_method::<()>("update_layout", ())?;
-                let set_active: LuaFunction = core.get("set_active_view")?;
-                set_active.call::<()>(view.clone())?;
-                return Ok(view);
-            }
-
-            let split_type_str = match placement.as_str() {
-                "left" | "right" => "hsplit",
-                "top" | "bottom" => "vsplit",
-                _ => {
-                    return Err(LuaError::runtime(format!(
-                        "invalid root placement: {placement}"
-                    )))
-                }
-            };
-
-            let node_class: LuaTable = require_table(lua, "core.node")?;
-            let existing: LuaTable = node_class.call(())?;
-            existing.call_method::<()>("consume", root_node.clone())?;
-
-            let sibling: LuaTable = node_class.call(())?;
-            sibling.set("views", lua.create_table()?)?;
-            sibling.call_method::<()>("add_view", view.clone())?;
-
-            let new_root: LuaTable = node_class.call(split_type_str)?;
-            new_root.set("a", existing.clone())?;
-            new_root.set("b", sibling.clone())?;
-            if placement == "left" || placement == "top" {
-                new_root.set("a", sibling)?;
-                new_root.set("b", existing)?;
-            }
-
-            root_node.call_method::<()>("consume", new_root)?;
-            root_node.call_method::<()>("update_layout", ())?;
-            let set_active: LuaFunction = core.get("set_active_view")?;
-            set_active.call::<()>(view.clone())?;
-            Ok(view)
-        })?
+                Ok(view)
+            },
+        )?
     })?;
 
     // RootView:get_session_views()
@@ -704,8 +708,7 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                         .unwrap_or(lua.create_table()?);
                     for pair in node_views.sequence_values::<LuaTable>() {
                         let view = pair?;
-                        let is_empty: bool =
-                            view.call_method("is", emptyview_class.clone())?;
+                        let is_empty: bool = view.call_method("is", emptyview_class.clone())?;
                         if !is_empty && is_session_view(&view)? {
                             let entry = lua.create_table()?;
                             entry.set("node", node.clone())?;
@@ -873,8 +876,7 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                 target_view = core.get("active_view")?;
             }
             if let LuaValue::Table(ref tv) = target_view {
-                let node_for: LuaValue =
-                    root_node.call_method("get_node_for_view", tv.clone())?;
+                let node_for: LuaValue = root_node.call_method("get_node_for_view", tv.clone())?;
                 if matches!(node_for, LuaValue::Nil | LuaValue::Boolean(false)) {
                     target_view = focus_state.get("previous_active_view")?;
                 }
@@ -885,12 +887,11 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
             } else {
                 LuaValue::Nil
             };
-            let target_node: LuaTable =
-                if let LuaValue::Table(tn) = target_node_val {
-                    tn
-                } else {
-                    this.call_method("get_primary_node", ())?
-                };
+            let target_node: LuaTable = if let LuaValue::Table(tn) = target_node_val {
+                tn
+            } else {
+                this.call_method("get_primary_node", ())?
+            };
 
             let av_to_set: LuaValue = if !matches!(target_view, LuaValue::Nil) {
                 target_view
@@ -943,13 +944,9 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                             let v2 = v.clone();
                             let rn2 = root_node.clone();
                             let close_fn = _lua.create_function(move |_lua, ()| {
-                                let idx2: LuaValue =
-                                    n2.call_method("get_view_idx", v2.clone())?;
+                                let idx2: LuaValue = n2.call_method("get_view_idx", v2.clone())?;
                                 if !matches!(idx2, LuaValue::Nil | LuaValue::Boolean(false)) {
-                                    n2.call_method::<()>(
-                                        "remove_view",
-                                        (rn2.clone(), v2.clone()),
-                                    )?;
+                                    n2.call_method::<()>("remove_view", (rn2.clone(), v2.clone()))?;
                                 }
                                 Ok(())
                             })?;
@@ -993,10 +990,9 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
             let close_views_fn: LuaFunction = class.get("close_views")?;
             let this2 = this.clone();
             let entries2 = entries.clone();
-            let do_close =
-                lua.create_function(move |_lua, ()| {
-                    close_views_fn.call::<()>((this2.clone(), entries2.clone()))
-                })?;
+            let do_close = lua.create_function(move |_lua, ()| {
+                close_views_fn.call::<()>((this2.clone(), entries2.clone()))
+            })?;
 
             if docs.raw_len() > 0 {
                 let confirm: LuaFunction = core.get("confirm_close_docs")?;
@@ -1011,85 +1007,85 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     // RootView:show_tab_context_menu(node, idx, x, y)
     root_view.set(
         "show_tab_context_menu",
-        lua.create_function(|lua, (this, node, idx, x, y): (LuaTable, LuaTable, i64, f64, f64)| {
-            let views: LuaTable = node.get("views")?;
-            let view: LuaValue = views.get(idx)?;
-            let view = match view {
-                LuaValue::Table(v) => v,
-                _ => return Ok(LuaValue::Boolean(false)),
-            };
+        lua.create_function(
+            |lua, (this, node, idx, x, y): (LuaTable, LuaTable, i64, f64, f64)| {
+                let views: LuaTable = node.get("views")?;
+                let view: LuaValue = views.get(idx)?;
+                let view = match view {
+                    LuaValue::Table(v) => v,
+                    _ => return Ok(LuaValue::Boolean(false)),
+                };
 
-            // right entries
-            let right = lua.create_table()?;
-            let right_views: LuaTable = node.call_method("get_views_to_right", view.clone())?;
-            for entry_val in right_views.sequence_values::<LuaTable>() {
-                let entry = entry_val?;
-                let item = lua.create_table()?;
-                item.set("node", node.clone())?;
-                item.set("view", entry)?;
-                let len = right.raw_len();
-                right.raw_set(len + 1, item)?;
-            }
-
-            let all: LuaTable = this.call_method("get_session_views", ())?;
-            let others = lua.create_table()?;
-            let saved = lua.create_table()?;
-            for entry_val in all.sequence_values::<LuaTable>() {
-                let entry = entry_val?;
-                let entry_view: LuaTable = entry.get("view")?;
-                if entry_view != view {
-                    let len = others.raw_len();
-                    others.raw_set(len + 1, entry.clone())?;
+                // right entries
+                let right = lua.create_table()?;
+                let right_views: LuaTable = node.call_method("get_views_to_right", view.clone())?;
+                for entry_val in right_views.sequence_values::<LuaTable>() {
+                    let entry = entry_val?;
+                    let item = lua.create_table()?;
+                    item.set("node", node.clone())?;
+                    item.set("view", entry)?;
+                    let len = right.raw_len();
+                    right.raw_set(len + 1, item)?;
                 }
-                let doc_val: LuaValue = entry_view.get("doc")?;
-                if let LuaValue::Table(ref doc) = doc_val {
-                    let dirty: bool = doc.call_method("is_dirty", ())?;
-                    if !dirty {
-                        let len = saved.raw_len();
-                        saved.raw_set(len + 1, entry)?;
+
+                let all: LuaTable = this.call_method("get_session_views", ())?;
+                let others = lua.create_table()?;
+                let saved = lua.create_table()?;
+                for entry_val in all.sequence_values::<LuaTable>() {
+                    let entry = entry_val?;
+                    let entry_view: LuaTable = entry.get("view")?;
+                    if entry_view != view {
+                        let len = others.raw_len();
+                        others.raw_set(len + 1, entry.clone())?;
+                    }
+                    let doc_val: LuaValue = entry_view.get("doc")?;
+                    if let LuaValue::Table(ref doc) = doc_val {
+                        let dirty: bool = doc.call_method("is_dirty", ())?;
+                        if !dirty {
+                            let len = saved.raw_len();
+                            saved.raw_set(len + 1, entry)?;
+                        }
                     }
                 }
-            }
 
-            // Build menu items
-            let items = lua.create_table()?;
+                // Build menu items
+                let items = lua.create_table()?;
 
-            // Helper to create a menu item with a command closure
-            macro_rules! menu_item {
-                ($text:expr, $this:expr, $entries:expr) => {{
-                    let item = lua.create_table()?;
-                    item.set("text", $text)?;
-                    let this_ref = $this.clone();
-                    let entries_ref = $entries.clone();
-                    item.set(
-                        "command",
-                        lua.create_function(move |_lua, ()| {
-                            this_ref.call_method::<()>(
-                                "confirm_close_views",
-                                entries_ref.clone(),
-                            )
-                        })?,
-                    )?;
-                    item
-                }};
-            }
+                // Helper to create a menu item with a command closure
+                macro_rules! menu_item {
+                    ($text:expr, $this:expr, $entries:expr) => {{
+                        let item = lua.create_table()?;
+                        item.set("text", $text)?;
+                        let this_ref = $this.clone();
+                        let entries_ref = $entries.clone();
+                        item.set(
+                            "command",
+                            lua.create_function(move |_lua, ()| {
+                                this_ref
+                                    .call_method::<()>("confirm_close_views", entries_ref.clone())
+                            })?,
+                        )?;
+                        item
+                    }};
+                }
 
-            // Close single
-            let close_single = lua.create_table()?;
-            let single_entry = lua.create_table()?;
-            single_entry.set("node", node.clone())?;
-            single_entry.set("view", view)?;
-            close_single.raw_set(1, single_entry)?;
+                // Close single
+                let close_single = lua.create_table()?;
+                let single_entry = lua.create_table()?;
+                single_entry.set("node", node.clone())?;
+                single_entry.set("view", view)?;
+                close_single.raw_set(1, single_entry)?;
 
-            items.raw_set(1, menu_item!("Close", this, close_single))?;
-            items.raw_set(2, menu_item!("Close Right", this, right))?;
-            items.raw_set(3, menu_item!("Close Others", this, others))?;
-            items.raw_set(4, menu_item!("Close Saved", this, saved))?;
-            items.raw_set(5, menu_item!("Close All", this, all))?;
+                items.raw_set(1, menu_item!("Close", this, close_single))?;
+                items.raw_set(2, menu_item!("Close Right", this, right))?;
+                items.raw_set(3, menu_item!("Close Others", this, others))?;
+                items.raw_set(4, menu_item!("Close Saved", this, saved))?;
+                items.raw_set(5, menu_item!("Close All", this, all))?;
 
-            let ctx_menu: LuaTable = this.get("context_menu")?;
-            ctx_menu.call_method("show", (x, y, items))
-        })?,
+                let ctx_menu: LuaTable = this.get("context_menu")?;
+                ctx_menu.call_method("show", (x, y, items))
+            },
+        )?,
     )?;
 
     // RootView:close_all_docviews(keep_active)
@@ -1104,26 +1100,28 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     // RootView:grab_mouse(button, view)
     root_view.set(
         "grab_mouse",
-        lua.create_function(|lua, (this, button, view): (LuaTable, LuaValue, LuaTable)| {
-            let grab_val: LuaValue = this.get("grab")?;
-            if !matches!(grab_val, LuaValue::Nil) {
-                return Err(LuaError::runtime("grab_mouse: grab already held"));
-            }
-            let grab = lua.create_table()?;
-            grab.set("view", view)?;
-            grab.set("button", button)?;
-            this.set("grab", grab)?;
-            Ok(())
-        })?,
+        lua.create_function(
+            |lua, (this, button, view): (LuaTable, LuaValue, LuaTable)| {
+                let grab_val: LuaValue = this.get("grab")?;
+                if !matches!(grab_val, LuaValue::Nil) {
+                    return Err(LuaError::runtime("grab_mouse: grab already held"));
+                }
+                let grab = lua.create_table()?;
+                grab.set("view", view)?;
+                grab.set("button", button)?;
+                this.set("grab", grab)?;
+                Ok(())
+            },
+        )?,
     )?;
 
     // RootView:ungrab_mouse(button)
     root_view.set(
         "ungrab_mouse",
         lua.create_function(|_lua, (this, button): (LuaTable, LuaValue)| {
-            let grab: LuaTable = this.get::<LuaTable>("grab").map_err(|_| {
-                LuaError::runtime("ungrab_mouse: no grab held")
-            })?;
+            let grab: LuaTable = this
+                .get::<LuaTable>("grab")
+                .map_err(|_| LuaError::runtime("ungrab_mouse: no grab held"))?;
             let held: LuaValue = grab.get("button")?;
             if held != button {
                 return Err(LuaError::runtime(
@@ -1148,97 +1146,103 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     // RootView:on_mouse_pressed(button, x, y, clicks)
     root_view.set("on_mouse_pressed", {
         let k = Arc::clone(&class_key);
-        lua.create_function(move |lua, (this, button, x, y, clicks): (LuaTable, LuaValue, f64, f64, LuaValue)| {
-            // If there is a grab, release it first
-            let grab_val: LuaValue = this.get("grab")?;
-            if let LuaValue::Table(ref grab) = grab_val {
-                let held_button: LuaValue = grab.get("button")?;
-                this.call_method::<()>("on_mouse_released", (held_button, x, y))?;
-            }
+        lua.create_function(
+            move |lua, (this, button, x, y, clicks): (LuaTable, LuaValue, f64, f64, LuaValue)| {
+                // If there is a grab, release it first
+                let grab_val: LuaValue = this.get("grab")?;
+                if let LuaValue::Table(ref grab) = grab_val {
+                    let held_button: LuaValue = grab.get("button")?;
+                    this.call_method::<()>("on_mouse_released", (held_button, x, y))?;
+                }
 
-            let ctx_menu: LuaTable = this.get("context_menu")?;
-            let ctx_result: LuaValue = ctx_menu.call_method(
-                "on_mouse_pressed",
-                (button.clone(), x, y, clicks.clone()),
-            )?;
-            if !matches!(ctx_result, LuaValue::Nil | LuaValue::Boolean(false)) {
-                return Ok(LuaValue::Boolean(true));
-            }
-
-            let root_node: LuaTable = this.get("root_node")?;
-            let div: LuaValue = root_node.call_method("get_divider_overlapping_point", (x, y))?;
-            let node: LuaTable = root_node.call_method("get_child_overlapping_point", (x, y))?;
-
-            if let LuaValue::Table(ref div_tbl) = div {
-                let active_view: LuaTable = node.get("active_view")?;
-                let sb_overlaps: bool =
-                    active_view.call_method("scrollbar_overlaps_point", (x, y))?;
-                if !sb_overlaps {
-                    this.set("dragged_divider", div_tbl.clone())?;
+                let ctx_menu: LuaTable = this.get("context_menu")?;
+                let ctx_result: LuaValue = ctx_menu
+                    .call_method("on_mouse_pressed", (button.clone(), x, y, clicks.clone()))?;
+                if !matches!(ctx_result, LuaValue::Nil | LuaValue::Boolean(false)) {
                     return Ok(LuaValue::Boolean(true));
                 }
-            }
 
-            let hovered_scroll: i64 = node.get::<Option<i64>>("hovered_scroll_button")?.unwrap_or(0);
-            if hovered_scroll > 0 {
-                node.call_method::<()>("scroll_tabs", hovered_scroll)?;
-                return Ok(LuaValue::Boolean(true));
-            }
+                let root_node: LuaTable = this.get("root_node")?;
+                let div: LuaValue =
+                    root_node.call_method("get_divider_overlapping_point", (x, y))?;
+                let node: LuaTable =
+                    root_node.call_method("get_child_overlapping_point", (x, y))?;
 
-            let idx: LuaValue = node.call_method("get_tab_overlapping_point", (x, y))?;
-            if let LuaValue::Integer(tab_idx) = idx {
-                let button_str = match &button {
-                    LuaValue::String(s) => s.to_str().map(|s| s.to_string()).unwrap_or_default(),
-                    _ => String::new(),
-                };
-                if button_str == "right" {
+                if let LuaValue::Table(ref div_tbl) = div {
+                    let active_view: LuaTable = node.get("active_view")?;
+                    let sb_overlaps: bool =
+                        active_view.call_method("scrollbar_overlaps_point", (x, y))?;
+                    if !sb_overlaps {
+                        this.set("dragged_divider", div_tbl.clone())?;
+                        return Ok(LuaValue::Boolean(true));
+                    }
+                }
+
+                let hovered_scroll: i64 = node
+                    .get::<Option<i64>>("hovered_scroll_button")?
+                    .unwrap_or(0);
+                if hovered_scroll > 0 {
+                    node.call_method::<()>("scroll_tabs", hovered_scroll)?;
+                    return Ok(LuaValue::Boolean(true));
+                }
+
+                let idx: LuaValue = node.call_method("get_tab_overlapping_point", (x, y))?;
+                if let LuaValue::Integer(tab_idx) = idx {
+                    let button_str = match &button {
+                        LuaValue::String(s) => {
+                            s.to_str().map(|s| s.to_string()).unwrap_or_default()
+                        }
+                        _ => String::new(),
+                    };
+                    if button_str == "right" {
+                        let views: LuaTable = node.get("views")?;
+                        let view: LuaTable = views.get(tab_idx)?;
+                        node.call_method::<()>("set_active_view", view)?;
+                        return this.call_method("show_tab_context_menu", (node, tab_idx, x, y));
+                    }
+                    let hovered_close: i64 = node.get::<Option<i64>>("hovered_close")?.unwrap_or(0);
+                    if button_str == "middle" || hovered_close == tab_idx {
+                        let views: LuaTable = node.get("views")?;
+                        let view: LuaTable = views.get(tab_idx)?;
+                        node.call_method::<()>("close_view", (root_node, view))?;
+                        return Ok(LuaValue::Boolean(true));
+                    }
+                    if button_str == "left" {
+                        let dn = lua.create_table()?;
+                        dn.set("node", node.clone())?;
+                        dn.set("idx", tab_idx)?;
+                        dn.set("dragging", false)?;
+                        dn.set("drag_start_x", x)?;
+                        dn.set("drag_start_y", y)?;
+                        this.set("dragged_node", dn)?;
+                    }
                     let views: LuaTable = node.get("views")?;
                     let view: LuaTable = views.get(tab_idx)?;
                     node.call_method::<()>("set_active_view", view)?;
-                    return this.call_method("show_tab_context_menu", (node, tab_idx, x, y));
-                }
-                let hovered_close: i64 = node.get::<Option<i64>>("hovered_close")?.unwrap_or(0);
-                if button_str == "middle" || hovered_close == tab_idx {
-                    let views: LuaTable = node.get("views")?;
-                    let view: LuaTable = views.get(tab_idx)?;
-                    node.call_method::<()>("close_view", (root_node, view))?;
                     return Ok(LuaValue::Boolean(true));
                 }
-                if button_str == "left" {
-                    let dn = lua.create_table()?;
-                    dn.set("node", node.clone())?;
-                    dn.set("idx", tab_idx)?;
-                    dn.set("dragging", false)?;
-                    dn.set("drag_start_x", x)?;
-                    dn.set("drag_start_y", y)?;
-                    this.set("dragged_node", dn)?;
-                }
-                let views: LuaTable = node.get("views")?;
-                let view: LuaTable = views.get(tab_idx)?;
-                node.call_method::<()>("set_active_view", view)?;
-                return Ok(LuaValue::Boolean(true));
-            }
 
-            // No tab clicked and not dragging a node
-            let dn_val: LuaValue = this.get("dragged_node")?;
-            if matches!(dn_val, LuaValue::Nil) {
-                let core: LuaTable = require_table(lua, "core")?;
-                let active_view: LuaTable = node.get("active_view")?;
-                let set_active: LuaFunction = core.get("set_active_view")?;
-                set_active.call::<()>(active_view.clone())?;
-                this.call_method::<()>("grab_mouse", (button.clone(), active_view.clone()))?;
-                let class: LuaTable = lua.registry_value(&k)?;
-                let on_view_fn: LuaFunction = class.get("on_view_mouse_pressed")?;
-                let view_result: LuaValue =
-                    on_view_fn.call((button.clone(), x, y, clicks.clone()))?;
-                if !matches!(view_result, LuaValue::Nil | LuaValue::Boolean(false)) {
-                    return Ok(view_result);
+                // No tab clicked and not dragging a node
+                let dn_val: LuaValue = this.get("dragged_node")?;
+                if matches!(dn_val, LuaValue::Nil) {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let active_view: LuaTable = node.get("active_view")?;
+                    let set_active: LuaFunction = core.get("set_active_view")?;
+                    set_active.call::<()>(active_view.clone())?;
+                    this.call_method::<()>("grab_mouse", (button.clone(), active_view.clone()))?;
+                    let class: LuaTable = lua.registry_value(&k)?;
+                    let on_view_fn: LuaFunction = class.get("on_view_mouse_pressed")?;
+                    let view_result: LuaValue =
+                        on_view_fn.call((button.clone(), x, y, clicks.clone()))?;
+                    if !matches!(view_result, LuaValue::Nil | LuaValue::Boolean(false)) {
+                        return Ok(view_result);
+                    }
+                    return active_view.call_method("on_mouse_pressed", (button, x, y, clicks));
                 }
-                return active_view.call_method("on_mouse_pressed", (button, x, y, clicks));
-            }
 
-            Ok(LuaValue::Nil)
-        })?
+                Ok(LuaValue::Nil)
+            },
+        )?
     })?;
 
     // RootView:get_overlay_base_color(overlay)
@@ -1258,23 +1262,25 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     // RootView:set_show_overlay(overlay, status)
     root_view.set(
         "set_show_overlay",
-        lua.create_function(|_lua, (this, overlay, status): (LuaTable, LuaTable, bool)| {
-            overlay.set("visible", status)?;
-            if status {
-                let base_color: LuaValue =
-                    this.call_method("get_overlay_base_color", overlay.clone())?;
-                overlay.set("base_color", base_color.clone())?;
-                if let LuaValue::Table(ref bc) = base_color {
-                    let color: LuaTable = overlay.get("color")?;
-                    color.raw_set(1, bc.get::<LuaValue>(1)?)?;
-                    color.raw_set(2, bc.get::<LuaValue>(2)?)?;
-                    color.raw_set(3, bc.get::<LuaValue>(3)?)?;
-                    color.raw_set(4, bc.get::<LuaValue>(4)?)?;
+        lua.create_function(
+            |_lua, (this, overlay, status): (LuaTable, LuaTable, bool)| {
+                overlay.set("visible", status)?;
+                if status {
+                    let base_color: LuaValue =
+                        this.call_method("get_overlay_base_color", overlay.clone())?;
+                    overlay.set("base_color", base_color.clone())?;
+                    if let LuaValue::Table(ref bc) = base_color {
+                        let color: LuaTable = overlay.get("color")?;
+                        color.raw_set(1, bc.get::<LuaValue>(1)?)?;
+                        color.raw_set(2, bc.get::<LuaValue>(2)?)?;
+                        color.raw_set(3, bc.get::<LuaValue>(3)?)?;
+                        color.raw_set(4, bc.get::<LuaValue>(4)?)?;
+                    }
+                    overlay.set("opacity", 0.0)?;
                 }
-                overlay.set("opacity", 0.0)?;
-            }
-            Ok(())
-        })?,
+                Ok(())
+            },
+        )?,
     )?;
 
     // RootView:on_mouse_released(button, x, y, ...)
@@ -1315,8 +1321,7 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                 for v in rest.iter() {
                     ctx_args.push_back(v.clone());
                 }
-                let ctx_result: LuaValue =
-                    ctx_menu.call_method("on_mouse_released", ctx_args)?;
+                let ctx_result: LuaValue = ctx_menu.call_method("on_mouse_released", ctx_args)?;
                 if !matches!(ctx_result, LuaValue::Nil | LuaValue::Boolean(false)) {
                     return Ok(LuaValue::Boolean(true));
                 }
@@ -1329,7 +1334,9 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                 let dn_val: LuaValue = this.get("dragged_node")?;
                 if let LuaValue::Table(ref dn) = dn_val {
                     let button_str = match &button {
-                        LuaValue::String(s) => s.to_str().map(|s| s.to_string()).unwrap_or_default(),
+                        LuaValue::String(s) => {
+                            s.to_str().map(|s| s.to_string()).unwrap_or_default()
+                        }
                         _ => String::new(),
                     };
                     if button_str == "left" {
@@ -1357,18 +1364,15 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                                         let view: LuaTable = dragged_views.get(idx)?;
 
                                         if split_type_val != "middle" && split_type_val != "tab" {
-                                            let new_node: LuaTable = node_tbl
-                                                .call_method("split", split_type_val)?;
-                                            let src_node: LuaTable = root_node.call_method(
-                                                "get_node_for_view",
-                                                view.clone(),
-                                            )?;
+                                            let new_node: LuaTable =
+                                                node_tbl.call_method("split", split_type_val)?;
+                                            let src_node: LuaTable = root_node
+                                                .call_method("get_node_for_view", view.clone())?;
                                             src_node.call_method::<()>(
                                                 "remove_view",
                                                 (root_node.clone(), view.clone()),
                                             )?;
-                                            new_node
-                                                .call_method::<()>("add_view", view)?;
+                                            new_node.call_method::<()>("add_view", view)?;
                                         } else if split_type_val == "middle"
                                             && *node_tbl != dragged_node_ref
                                         {
@@ -1376,16 +1380,10 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                                                 "remove_view",
                                                 (root_node.clone(), view.clone()),
                                             )?;
-                                            node_tbl
-                                                .call_method::<()>("add_view", view.clone())?;
-                                            let set_node: LuaTable = root_node.call_method(
-                                                "get_node_for_view",
-                                                view.clone(),
-                                            )?;
-                                            set_node.call_method::<()>(
-                                                "set_active_view",
-                                                view,
-                                            )?;
+                                            node_tbl.call_method::<()>("add_view", view.clone())?;
+                                            let set_node: LuaTable = root_node
+                                                .call_method("get_node_for_view", view.clone())?;
+                                            set_node.call_method::<()>("set_active_view", view)?;
                                         } else if split_type_val == "tab" {
                                             let tab_index: i64 = node_tbl.call_method(
                                                 "get_drag_overlay_tab_position",
@@ -1395,10 +1393,8 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                                                 let views: LuaTable =
                                                     dragged_node_ref.get("views")?;
                                                 lua_table_move_element(&views, idx, tab_index)?;
-                                                node_tbl.call_method::<()>(
-                                                    "set_active_view",
-                                                    view,
-                                                )?;
+                                                node_tbl
+                                                    .call_method::<()>("set_active_view", view)?;
                                             } else {
                                                 dragged_node_ref.call_method::<()>(
                                                     "remove_view",
@@ -1408,15 +1404,12 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                                                     "add_view",
                                                     (view.clone(), tab_index),
                                                 )?;
-                                                let set_node: LuaTable =
-                                                    root_node.call_method(
-                                                        "get_node_for_view",
-                                                        view.clone(),
-                                                    )?;
-                                                set_node.call_method::<()>(
-                                                    "set_active_view",
-                                                    view,
+                                                let set_node: LuaTable = root_node.call_method(
+                                                    "get_node_for_view",
+                                                    view.clone(),
                                                 )?;
+                                                set_node
+                                                    .call_method::<()>("set_active_view", view)?;
                                             }
                                         }
                                         root_node.call_method::<()>("update_layout", ())?;
@@ -1426,25 +1419,18 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                             }
                         }
 
-                        this.call_method::<()>(
-                            "set_show_overlay",
-                            {
-                                let ov: LuaTable = this.get("drag_overlay")?;
-                                (ov, false)
-                            },
-                        )?;
-                        this.call_method::<()>(
-                            "set_show_overlay",
-                            {
-                                let ov: LuaTable = this.get("drag_overlay_tab")?;
-                                (ov, false)
-                            },
-                        )?;
+                        this.call_method::<()>("set_show_overlay", {
+                            let ov: LuaTable = this.get("drag_overlay")?;
+                            (ov, false)
+                        })?;
+                        this.call_method::<()>("set_show_overlay", {
+                            let ov: LuaTable = this.get("drag_overlay_tab")?;
+                            (ov, false)
+                        })?;
 
                         let dn2: LuaValue = this.get("dragged_node")?;
                         if let LuaValue::Table(ref dn_tbl) = dn2 {
-                            let d: bool =
-                                dn_tbl.get::<Option<bool>>("dragging")?.unwrap_or(false);
+                            let d: bool = dn_tbl.get::<Option<bool>>("dragging")?.unwrap_or(false);
                             if d {
                                 let core: LuaTable = require_table(lua, "core")?;
                                 let req_cursor: LuaFunction = core.get("request_cursor")?;
@@ -1462,146 +1448,148 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     // RootView:on_mouse_moved(x, y, dx, dy)
     root_view.set(
         "on_mouse_moved",
-        lua.create_function(|lua, (this, x, y, dx, dy): (LuaTable, f64, f64, f64, f64)| {
-            let mouse: LuaTable = this.get("mouse")?;
-            mouse.set("x", x)?;
-            mouse.set("y", y)?;
+        lua.create_function(
+            |lua, (this, x, y, dx, dy): (LuaTable, f64, f64, f64, f64)| {
+                let mouse: LuaTable = this.get("mouse")?;
+                mouse.set("x", x)?;
+                mouse.set("y", y)?;
 
-            let grab_val: LuaValue = this.get("grab")?;
-            if let LuaValue::Table(ref grab) = grab_val {
-                let grabbed_view: LuaTable = grab.get("view")?;
-                grabbed_view.call_method::<()>("on_mouse_moved", (x, y, dx, dy))?;
+                let grab_val: LuaValue = this.get("grab")?;
+                if let LuaValue::Table(ref grab) = grab_val {
+                    let grabbed_view: LuaTable = grab.get("view")?;
+                    grabbed_view.call_method::<()>("on_mouse_moved", (x, y, dx, dy))?;
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let cursor: String = grabbed_view.get("cursor")?;
+                    let req_cursor: LuaFunction = core.get("request_cursor")?;
+                    req_cursor.call::<()>(cursor)?;
+                    return Ok(LuaValue::Nil);
+                }
+
+                let ctx_menu: LuaTable = this.get("context_menu")?;
+                let ctx_result: LuaValue =
+                    ctx_menu.call_method("on_mouse_moved", (x, y, dx, dy))?;
+                if !matches!(ctx_result, LuaValue::Nil | LuaValue::Boolean(false)) {
+                    return Ok(LuaValue::Boolean(true));
+                }
+
                 let core: LuaTable = require_table(lua, "core")?;
-                let cursor: String = grabbed_view.get("cursor")?;
-                let req_cursor: LuaFunction = core.get("request_cursor")?;
-                req_cursor.call::<()>(cursor)?;
-                return Ok(LuaValue::Nil);
-            }
-
-            let ctx_menu: LuaTable = this.get("context_menu")?;
-            let ctx_result: LuaValue =
-                ctx_menu.call_method("on_mouse_moved", (x, y, dx, dy))?;
-            if !matches!(ctx_result, LuaValue::Nil | LuaValue::Boolean(false)) {
-                return Ok(LuaValue::Boolean(true));
-            }
-
-            let core: LuaTable = require_table(lua, "core")?;
-            let nag_view: LuaValue = core.get("nag_view")?;
-            let active_view: LuaValue = core.get("active_view")?;
-            if active_view == nag_view {
-                let req_cursor: LuaFunction = core.get("request_cursor")?;
-                req_cursor.call::<()>("arrow")?;
-                if let LuaValue::Table(ref av) = active_view {
-                    av.call_method::<()>("on_mouse_moved", (x, y, dx, dy))?;
-                }
-                return Ok(LuaValue::Nil);
-            }
-
-            let div_val: LuaValue = this.get("dragged_divider")?;
-            if let LuaValue::Table(ref div_node) = div_val {
-                let common: LuaTable = require_table(lua, "core.common")?;
-                let node_type: String = div_node.get("type")?;
-                let root_node: LuaTable = this.get("root_node")?;
-                if node_type == "hsplit" {
-                    let pos: LuaTable = div_node.get("position")?;
-                    let pos_x: f64 = pos.get("x")?;
-                    let rn_size: LuaTable = root_node.get("size")?;
-                    let rn_sx: f64 = rn_size.get("x")?;
-                    let clamped: f64 =
-                        common.call_function("clamp", (x - pos_x, 0.0, rn_sx * 0.95))?;
-                    resize_child_node(div_node, "x", clamped, dx)?;
-                } else if node_type == "vsplit" {
-                    let pos: LuaTable = div_node.get("position")?;
-                    let pos_y: f64 = pos.get("y")?;
-                    let rn_size: LuaTable = root_node.get("size")?;
-                    let rn_sy: f64 = rn_size.get("y")?;
-                    let clamped: f64 =
-                        common.call_function("clamp", (y - pos_y, 0.0, rn_sy * 0.95))?;
-                    resize_child_node(div_node, "y", clamped, dy)?;
-                }
-                let divider: f64 = div_node.get("divider")?;
-                let clamped_div: f64 = common.call_function("clamp", (divider, 0.01, 0.99))?;
-                div_node.set("divider", clamped_div)?;
-                return Ok(LuaValue::Nil);
-            }
-
-            let dn_val: LuaValue = this.get("dragged_node")?;
-            if let LuaValue::Table(ref dn) = dn_val {
-                let dragging: bool = dn.get::<Option<bool>>("dragging")?.unwrap_or(false);
-                if !dragging {
-                    let common: LuaTable = require_table(lua, "core.common")?;
-                    let style: LuaTable = require_table(lua, "core.style")?;
-                    let dsx: f64 = dn.get("drag_start_x")?;
-                    let dsy: f64 = dn.get("drag_start_y")?;
-                    let dist: f64 = common.call_function("distance", (x, y, dsx, dsy))?;
-                    let tab_width: f64 = style.get("tab_width")?;
-                    if dist > tab_width * 0.05 {
-                        dn.set("dragging", true)?;
-                        let req_cursor: LuaFunction = core.get("request_cursor")?;
-                        req_cursor.call::<()>("hand")?;
-                    }
-                }
-                return Ok(LuaValue::Nil);
-            }
-
-            let last_overlapping: LuaValue = this.get("overlapping_view")?;
-            let root_node: LuaTable = this.get("root_node")?;
-            let overlapping_node: LuaValue =
-                root_node.call_method("get_child_overlapping_point", (x, y))?;
-
-            let new_overlapping: LuaValue = if let LuaValue::Table(ref on) = overlapping_node {
-                on.get("active_view")?
-            } else {
-                LuaValue::Nil
-            };
-            this.set("overlapping_view", new_overlapping.clone())?;
-
-            if let LuaValue::Table(ref last) = last_overlapping {
-                if LuaValue::Table(last.clone()) != new_overlapping {
-                    last.call_method::<()>("on_mouse_left", ())?;
-                }
-            }
-
-            if matches!(new_overlapping, LuaValue::Nil) {
-                return Ok(LuaValue::Nil);
-            }
-
-            if let LuaValue::Table(ref ov) = new_overlapping {
-                ov.call_method::<()>("on_mouse_moved", (x, y, dx, dy))?;
-                let cursor: String = ov.get("cursor")?;
-                let req_cursor: LuaFunction = core.get("request_cursor")?;
-                req_cursor.call::<()>(cursor)?;
-            }
-
-            if let LuaValue::Table(ref on) = overlapping_node {
-                let scroll_btn: LuaValue = on.call_method("get_scroll_button_index", (x, y))?;
-                let in_tab: bool = on.call_method("is_in_tab_area", (x, y))?;
-                if !matches!(scroll_btn, LuaValue::Nil | LuaValue::Boolean(false)) || in_tab {
+                let nag_view: LuaValue = core.get("nag_view")?;
+                let active_view: LuaValue = core.get("active_view")?;
+                if active_view == nag_view {
                     let req_cursor: LuaFunction = core.get("request_cursor")?;
                     req_cursor.call::<()>("arrow")?;
+                    if let LuaValue::Table(ref av) = active_view {
+                        av.call_method::<()>("on_mouse_moved", (x, y, dx, dy))?;
+                    }
+                    return Ok(LuaValue::Nil);
+                }
+
+                let div_val: LuaValue = this.get("dragged_divider")?;
+                if let LuaValue::Table(ref div_node) = div_val {
+                    let common: LuaTable = require_table(lua, "core.common")?;
+                    let node_type: String = div_node.get("type")?;
+                    let root_node: LuaTable = this.get("root_node")?;
+                    if node_type == "hsplit" {
+                        let pos: LuaTable = div_node.get("position")?;
+                        let pos_x: f64 = pos.get("x")?;
+                        let rn_size: LuaTable = root_node.get("size")?;
+                        let rn_sx: f64 = rn_size.get("x")?;
+                        let clamped: f64 =
+                            common.call_function("clamp", (x - pos_x, 0.0, rn_sx * 0.95))?;
+                        resize_child_node(div_node, "x", clamped, dx)?;
+                    } else if node_type == "vsplit" {
+                        let pos: LuaTable = div_node.get("position")?;
+                        let pos_y: f64 = pos.get("y")?;
+                        let rn_size: LuaTable = root_node.get("size")?;
+                        let rn_sy: f64 = rn_size.get("y")?;
+                        let clamped: f64 =
+                            common.call_function("clamp", (y - pos_y, 0.0, rn_sy * 0.95))?;
+                        resize_child_node(div_node, "y", clamped, dy)?;
+                    }
+                    let divider: f64 = div_node.get("divider")?;
+                    let clamped_div: f64 = common.call_function("clamp", (divider, 0.01, 0.99))?;
+                    div_node.set("divider", clamped_div)?;
+                    return Ok(LuaValue::Nil);
+                }
+
+                let dn_val: LuaValue = this.get("dragged_node")?;
+                if let LuaValue::Table(ref dn) = dn_val {
+                    let dragging: bool = dn.get::<Option<bool>>("dragging")?.unwrap_or(false);
+                    if !dragging {
+                        let common: LuaTable = require_table(lua, "core.common")?;
+                        let style: LuaTable = require_table(lua, "core.style")?;
+                        let dsx: f64 = dn.get("drag_start_x")?;
+                        let dsy: f64 = dn.get("drag_start_y")?;
+                        let dist: f64 = common.call_function("distance", (x, y, dsx, dsy))?;
+                        let tab_width: f64 = style.get("tab_width")?;
+                        if dist > tab_width * 0.05 {
+                            dn.set("dragging", true)?;
+                            let req_cursor: LuaFunction = core.get("request_cursor")?;
+                            req_cursor.call::<()>("hand")?;
+                        }
+                    }
+                    return Ok(LuaValue::Nil);
+                }
+
+                let last_overlapping: LuaValue = this.get("overlapping_view")?;
+                let root_node: LuaTable = this.get("root_node")?;
+                let overlapping_node: LuaValue =
+                    root_node.call_method("get_child_overlapping_point", (x, y))?;
+
+                let new_overlapping: LuaValue = if let LuaValue::Table(ref on) = overlapping_node {
+                    on.get("active_view")?
                 } else {
-                    let div: LuaValue =
-                        root_node.call_method("get_divider_overlapping_point", (x, y))?;
-                    if let LuaValue::Table(ref div_tbl) = div {
-                        if let LuaValue::Table(ref ov) = new_overlapping {
-                            let sb_overlaps: bool =
-                                ov.call_method("scrollbar_overlaps_point", (x, y))?;
-                            if !sb_overlaps {
-                                let div_type: String = div_tbl.get("type")?;
-                                let cursor = if div_type == "hsplit" {
-                                    "sizeh"
-                                } else {
-                                    "sizev"
-                                };
-                                let req_cursor: LuaFunction = core.get("request_cursor")?;
-                                req_cursor.call::<()>(cursor)?;
+                    LuaValue::Nil
+                };
+                this.set("overlapping_view", new_overlapping.clone())?;
+
+                if let LuaValue::Table(ref last) = last_overlapping {
+                    if LuaValue::Table(last.clone()) != new_overlapping {
+                        last.call_method::<()>("on_mouse_left", ())?;
+                    }
+                }
+
+                if matches!(new_overlapping, LuaValue::Nil) {
+                    return Ok(LuaValue::Nil);
+                }
+
+                if let LuaValue::Table(ref ov) = new_overlapping {
+                    ov.call_method::<()>("on_mouse_moved", (x, y, dx, dy))?;
+                    let cursor: String = ov.get("cursor")?;
+                    let req_cursor: LuaFunction = core.get("request_cursor")?;
+                    req_cursor.call::<()>(cursor)?;
+                }
+
+                if let LuaValue::Table(ref on) = overlapping_node {
+                    let scroll_btn: LuaValue = on.call_method("get_scroll_button_index", (x, y))?;
+                    let in_tab: bool = on.call_method("is_in_tab_area", (x, y))?;
+                    if !matches!(scroll_btn, LuaValue::Nil | LuaValue::Boolean(false)) || in_tab {
+                        let req_cursor: LuaFunction = core.get("request_cursor")?;
+                        req_cursor.call::<()>("arrow")?;
+                    } else {
+                        let div: LuaValue =
+                            root_node.call_method("get_divider_overlapping_point", (x, y))?;
+                        if let LuaValue::Table(ref div_tbl) = div {
+                            if let LuaValue::Table(ref ov) = new_overlapping {
+                                let sb_overlaps: bool =
+                                    ov.call_method("scrollbar_overlaps_point", (x, y))?;
+                                if !sb_overlaps {
+                                    let div_type: String = div_tbl.get("type")?;
+                                    let cursor = if div_type == "hsplit" {
+                                        "sizeh"
+                                    } else {
+                                        "sizev"
+                                    };
+                                    let req_cursor: LuaFunction = core.get("request_cursor")?;
+                                    req_cursor.call::<()>(cursor)?;
+                                }
                             }
                         }
                     }
                 }
-            }
-            Ok(LuaValue::Nil)
-        })?,
+                Ok(LuaValue::Nil)
+            },
+        )?,
     )?;
 
     // RootView:on_mouse_left()
@@ -1743,8 +1731,7 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                 let y: f64 = drop.get(3)?;
                 let try_fn: LuaFunction = core.get("try")?;
                 let open_doc: LuaFunction = core.get("open_doc")?;
-                let (ok, doc): (bool, LuaValue) =
-                    try_fn.call((open_doc, filename))?;
+                let (ok, doc): (bool, LuaValue) = try_fn.call((open_doc, filename))?;
                 if ok {
                     if let LuaValue::Table(ref doc_tbl) = doc {
                         let root_view_tbl: LuaTable = core.get("root_view")?;
@@ -1811,15 +1798,7 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
     root_view.set(
         "on_touch_moved",
         lua.create_function(
-            |lua,
-             (this, x, y, dx, dy, rest): (
-                LuaTable,
-                f64,
-                f64,
-                f64,
-                f64,
-                LuaMultiValue,
-            )| {
+            |lua, (this, x, y, dx, dy, rest): (LuaTable, f64, f64, f64, f64, LuaMultiValue)| {
                 let touched: LuaValue = this.get("touched_view")?;
                 if matches!(touched, LuaValue::Nil) {
                     return Ok(());
@@ -1866,8 +1845,7 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                         resize_child_node(div_node, "y", clamped, dy)?;
                     }
                     let divider: f64 = div_node.get("divider")?;
-                    let clamped_div: f64 =
-                        common.call_function("clamp", (divider, 0.01, 0.99))?;
+                    let clamped_div: f64 = common.call_function("clamp", (divider, 0.01, 0.99))?;
                     div_node.set("divider", clamped_div)?;
                     return Ok(());
                 }
@@ -1962,7 +1940,13 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
             let target_opacity = if visible { 100.0 } else { 0.0 };
             this.call_method::<()>(
                 "move_towards",
-                (overlay.clone(), "opacity", target_opacity, LuaValue::Nil, "tab_drag"),
+                (
+                    overlay.clone(),
+                    "opacity",
+                    target_opacity,
+                    LuaValue::Nil,
+                    "tab_drag",
+                ),
             )?;
             let base_color: LuaTable = overlay.get("base_color")?;
             let color: LuaTable = overlay.get("color")?;
@@ -2081,26 +2065,22 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                             f64,
                             f64,
                             f64,
-                        ) = over_tbl.call_method(
-                            "get_drag_overlay_tab_position",
-                            (mx, my),
-                        )?;
-                        let offset_x = if matches!(tab_index, LuaValue::Nil | LuaValue::Boolean(false))
-                        {
-                            tab_w
-                        } else {
-                            0.0
-                        };
+                        ) = over_tbl.call_method("get_drag_overlay_tab_position", (mx, my))?;
+                        let offset_x =
+                            if matches!(tab_index, LuaValue::Nil | LuaValue::Boolean(false)) {
+                                tab_w
+                            } else {
+                                0.0
+                            };
                         let caret_width: f64 = style.get("caret_width")?;
 
                         let drag_overlay_tab: LuaTable = this.get("drag_overlay_tab")?;
                         let last_over: LuaValue = drag_overlay_tab.get("last_over")?;
-                        let immediate =
-                            if let LuaValue::Table(ref lo) = last_over {
-                                *lo != *over_tbl
-                            } else {
-                                true
-                            };
+                        let immediate = if let LuaValue::Table(ref lo) = last_over {
+                            *lo != *over_tbl
+                        } else {
+                            true
+                        };
 
                         this.call_method::<()>(
                             "set_drag_overlay",
@@ -2130,15 +2110,9 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                             h = sh;
                         }
                         let drag_overlay: LuaTable = this.get("drag_overlay")?;
-                        this.call_method::<()>(
-                            "set_drag_overlay",
-                            (drag_overlay, x, y, w, h),
-                        )?;
+                        this.call_method::<()>("set_drag_overlay", (drag_overlay, x, y, w, h))?;
                         let drag_overlay_tab: LuaTable = this.get("drag_overlay_tab")?;
-                        this.call_method::<()>(
-                            "set_show_overlay",
-                            (drag_overlay_tab, false),
-                        )?;
+                        this.call_method::<()>("set_show_overlay", (drag_overlay_tab, false))?;
                     }
                     return Ok(());
                 }

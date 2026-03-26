@@ -6,11 +6,7 @@ fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
 }
 
 /// Recursively collects non-EmptyView views from unlocked leaf nodes.
-fn collect_views(
-    node: &LuaTable,
-    empty_view: &LuaTable,
-    out: &LuaTable,
-) -> LuaResult<()> {
+fn collect_views(node: &LuaTable, empty_view: &LuaTable, out: &LuaTable) -> LuaResult<()> {
     let node_type: String = node.get("type")?;
     if node_type == "leaf" {
         let locked: bool = node.get::<bool>("locked").unwrap_or(false);
@@ -250,10 +246,14 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                         root_node.call_method("get_child_overlapping_point", (x, y))?;
                     let locked: LuaMultiValue = target.call_method("get_locked_size", ())?;
                     let vals: Vec<LuaValue> = locked.into_iter().collect();
-                    let sx_nil =
-                        vals.first().map(|v| matches!(v, LuaValue::Nil)).unwrap_or(true);
-                    let sy_nil =
-                        vals.get(1).map(|v| matches!(v, LuaValue::Nil)).unwrap_or(true);
+                    let sx_nil = vals
+                        .first()
+                        .map(|v| matches!(v, LuaValue::Nil))
+                        .unwrap_or(true);
+                    let sy_nil = vals
+                        .get(1)
+                        .map(|v| matches!(v, LuaValue::Nil))
+                        .unwrap_or(true);
                     if sx_nil && sy_nil {
                         let av: LuaTable = target.get("active_view")?;
                         core.call_function::<()>("set_active_view", av)?;
@@ -271,8 +271,14 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         let node: LuaTable = root_view.call_method("get_active_node", ())?;
         let locked: LuaMultiValue = node.call_method("get_locked_size", ())?;
         let vals: Vec<LuaValue> = locked.into_iter().collect();
-        let sx_nil = vals.first().map(|v| matches!(v, LuaValue::Nil)).unwrap_or(true);
-        let sy_nil = vals.get(1).map(|v| matches!(v, LuaValue::Nil)).unwrap_or(true);
+        let sx_nil = vals
+            .first()
+            .map(|v| matches!(v, LuaValue::Nil))
+            .unwrap_or(true);
+        let sy_nil = vals
+            .get(1)
+            .map(|v| matches!(v, LuaValue::Nil))
+            .unwrap_or(true);
         if sx_nil && sy_nil {
             Ok(LuaMultiValue::from_vec(vec![
                 LuaValue::Boolean(true),
@@ -470,16 +476,12 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
 
     tab_cmds.set(
         "root:scroll-tabs-backward",
-        lua.create_function(|_lua, node: LuaTable| {
-            node.call_method::<()>("scroll_tabs", 1)
-        })?,
+        lua.create_function(|_lua, node: LuaTable| node.call_method::<()>("scroll_tabs", 1))?,
     )?;
 
     tab_cmds.set(
         "root:scroll-tabs-forward",
-        lua.create_function(|_lua, node: LuaTable| {
-            node.call_method::<()>("scroll_tabs", 2)
-        })?,
+        lua.create_function(|_lua, node: LuaTable| node.call_method::<()>("scroll_tabs", 2))?,
     )?;
 
     add_fn.call::<()>((node_predicate, tab_cmds))?;
@@ -496,8 +498,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
 
         let hovered_tab: LuaValue = node.get("hovered_tab")?;
         let hovered_scroll: i64 = node.get::<i64>("hovered_scroll_button").unwrap_or(0);
-        let has_hover = !matches!(hovered_tab, LuaValue::Nil | LuaValue::Boolean(false))
-            || hovered_scroll > 0;
+        let has_hover =
+            !matches!(hovered_tab, LuaValue::Nil | LuaValue::Boolean(false)) || hovered_scroll > 0;
 
         if has_hover {
             Ok(LuaMultiValue::from_vec(vec![

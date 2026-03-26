@@ -34,7 +34,11 @@ fn status_view_get_items(lua: &Lua) -> LuaResult<LuaFunction> {
             let name: String = ranked.get(i)?;
             let item: LuaTable = status_view.call_method("get_item", name.clone())?;
             let alignment: LuaValue = item.get("alignment")?;
-            let info = if alignment == left_val { "Left" } else { "Right" };
+            let info = if alignment == left_val {
+                "Left"
+            } else {
+                "Right"
+            };
             let prettified: String = command.call_function("prettify_name", name.clone())?;
 
             let entry = lua.create_table()?;

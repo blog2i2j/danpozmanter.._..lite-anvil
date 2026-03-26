@@ -31,15 +31,16 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     let path = vals.next().unwrap_or(LuaValue::Nil);
                     if !success.as_boolean().unwrap_or(false) {
                         let err_str = match &err {
-                            LuaValue::String(s) => s.to_str()
+                            LuaValue::String(s) => s
+                                .to_str()
                                 .map(|b| b.to_string())
                                 .unwrap_or_else(|_| "unknown".to_string()),
                             _ => "unknown".to_string(),
                         };
                         let path_str = match &path {
-                            LuaValue::String(s) => s.to_str()
-                                .map(|b| b.to_string())
-                                .unwrap_or_default(),
+                            LuaValue::String(s) => {
+                                s.to_str().map(|b| b.to_string()).unwrap_or_default()
+                            }
                             _ => String::new(),
                         };
                         core.call_function::<()>(

@@ -43,7 +43,10 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
 
     let enabled_entry = lua.create_table()?;
     enabled_entry.set("label", "Enabled")?;
-    enabled_entry.set("description", "Disable or enable drawing of the line guide.")?;
+    enabled_entry.set(
+        "description",
+        "Disable or enable drawing of the line guide.",
+    )?;
     enabled_entry.set("path", "enabled")?;
     enabled_entry.set("type", "toggle")?;
     enabled_entry.set("default", true)?;
@@ -122,7 +125,10 @@ fn set_config_defaults(lua: &Lua) -> LuaResult<()> {
 
     let use_custom_entry = lua.create_table()?;
     use_custom_entry.set("label", "Use Custom Color")?;
-    use_custom_entry.set("description", "Enable the utilization of a custom line color.")?;
+    use_custom_entry.set(
+        "description",
+        "Enable the utilization of a custom line color.",
+    )?;
     use_custom_entry.set("path", "use_custom_color")?;
     use_custom_entry.set("type", "toggle")?;
     use_custom_entry.set("default", false)?;
@@ -168,7 +174,8 @@ fn patch_draw_overlay(lua: &Lua) -> LuaResult<()> {
                     let size_y: f64 = size.get("y")?;
 
                     // get_line_screen_position(1) returns (x, y) — only x is needed.
-                    let mvs: LuaMultiValue = this.call_method("get_line_screen_position", 1usize)?;
+                    let mvs: LuaMultiValue =
+                        this.call_method("get_line_screen_position", 1usize)?;
                     let line_x = get_f64(mvs.front().unwrap_or(&LuaValue::Nil));
 
                     let font: LuaValue = this.call_method("get_font", ())?;

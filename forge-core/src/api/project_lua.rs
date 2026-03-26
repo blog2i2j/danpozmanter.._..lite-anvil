@@ -63,8 +63,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             };
                             entry.set("use_path", has_slash_not_end)?;
                             // match_dir: pattern ends with / or /$
-                            let match_dir =
-                                pattern.ends_with('/') || pattern.ends_with("/$");
+                            let match_dir = pattern.ends_with('/') || pattern.ends_with("/$");
                             entry.set("match_dir", match_dir)?;
                             entry.set("pattern", pattern)?;
                             compiled.raw_set(idx, entry)?;
@@ -117,7 +116,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 .call_function("absolute_path", (path.clone(), filename))?;
                             return Ok(result);
                         }
-                        let is_abs: bool = common.call_function("is_absolute_path", filename.clone())?;
+                        let is_abs: bool =
+                            common.call_function("is_absolute_path", filename.clone())?;
                         if is_abs {
                             return common.call_function("normalize_path", filename);
                         }
@@ -147,14 +147,18 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let normalized: String =
                             common.call_function("normalize_path", filename)?;
                         let self_path: String = this.get("path")?;
-                        let belongs: bool =
-                            common.call_function("path_belongs_to", (normalized.clone(), self_path.clone()))?;
+                        let belongs: bool = common.call_function(
+                            "path_belongs_to",
+                            (normalized.clone(), self_path.clone()),
+                        )?;
                         let final_name = if belongs {
-                            common.call_function("relative_path", (self_path.clone(), normalized))?
+                            common
+                                .call_function("relative_path", (self_path.clone(), normalized))?
                         } else {
                             normalized
                         };
-                        native_project_model.call_function("normalize_path", (self_path, final_name))
+                        native_project_model
+                            .call_function("normalize_path", (self_path, final_name))
                     }
                 })?,
             )?;
@@ -178,7 +182,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
                     for entry in ignore_compiled.sequence_values::<LuaTable>() {
                         let entry = entry?;
-                        let use_path: bool = entry.get::<Option<bool>>("use_path")?.unwrap_or(false);
+                        let use_path: bool =
+                            entry.get::<Option<bool>>("use_path")?.unwrap_or(false);
                         let match_dir: bool =
                             entry.get::<Option<bool>>("match_dir")?.unwrap_or(false);
                         let pattern: String = entry.get("pattern")?;
@@ -199,8 +204,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 }
                             }
                         } else {
-                            let matched: LuaValue =
-                                string_match.call((test, pattern.clone()))?;
+                            let matched: LuaValue = string_match.call((test, pattern.clone()))?;
                             if !matched.is_nil() {
                                 return Ok(false);
                             }
@@ -217,7 +221,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 lua.create_function({
                     let config = config.clone();
                     let gitignore = gitignore.clone();
-                    move |lua, (this, info, path): (LuaTable, LuaValue, Option<String>)| -> LuaResult<bool> {
+                    move |lua,
+                          (this, info, path): (LuaTable, LuaValue, Option<String>)|
+                          -> LuaResult<bool> {
                         let info_table = match info {
                             LuaValue::Table(ref t) => t,
                             _ => return Ok(false),
@@ -250,8 +256,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                     _ => self_path,
                                 }
                             };
-                            let matched: bool = gitignore
-                                .call_function("match", (root, p, info_table))?;
+                            let matched: bool =
+                                gitignore.call_function("match", (root, p, info_table))?;
                             return Ok(matched);
                         }
                         Ok(false)
@@ -262,18 +268,16 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // ── Project:get_file_info ────────────────────────────────────
             project.set(
                 "get_file_info",
-                lua.create_function(|lua, (this, path): (LuaTable, String)| -> LuaResult<LuaValue> {
-                    let system: LuaTable = lua.globals().get("system")?;
-                    let get_file_info: LuaFunction = system.get("get_file_info")?;
-                    let info: LuaValue = get_file_info.call(path.clone())?;
-                    let is_ignored: LuaFunction = this.get("is_ignored")?;
-                    let ignored: bool = is_ignored.call((&this, &info, path))?;
-                    if ignored {
-                        Ok(LuaValue::Nil)
-                    } else {
-                        Ok(info)
-                    }
-                })?,
+                lua.create_function(
+                    |lua, (this, path): (LuaTable, String)| -> LuaResult<LuaValue> {
+                        let system: LuaTable = lua.globals().get("system")?;
+                        let get_file_info: LuaFunction = system.get("get_file_info")?;
+                        let info: LuaValue = get_file_info.call(path.clone())?;
+                        let is_ignored: LuaFunction = this.get("is_ignored")?;
+                        let ignored: bool = is_ignored.call((&this, &info, path))?;
+                        if ignored { Ok(LuaValue::Nil) } else { Ok(info) }
+                    },
+                )?,
             )?;
 
             // ── Project:files ────────────────────────────────────────────
@@ -298,10 +302,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         opts.set("max_files", max_files)?;
                         opts.set("exclude_dirs", exclude_dirs)?;
 
-                        let get_files: LuaFunction =
-                            native_project_model.get("get_files")?;
-                        let cached: LuaTable =
-                            get_files.call((self_path, opts))?;
+                        let get_files: LuaFunction = native_project_model.get("get_files")?;
+                        let cached: LuaTable = get_files.call((self_path, opts))?;
 
                         // Build a table of non-ignored file info entries.
                         let results = lua.create_table()?;
@@ -313,8 +315,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             info.set("size", 0)?;
                             info.set("filename", filename.clone())?;
 
-                            let ignored: bool = is_ignored
-                                .call((&this, &info, filename))?;
+                            let ignored: bool = is_ignored.call((&this, &info, filename))?;
                             if !ignored {
                                 count += 1;
                                 results.raw_set(count, info)?;
@@ -328,19 +329,20 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let results_key = lua.create_registry_value(results)?;
                         let this_key = lua.create_registry_value(this)?;
 
-                        let iterator = lua.create_function(move |lua, ()| -> LuaResult<LuaMultiValue> {
-                            let idx: i64 = state.get("idx")?;
-                            let len: i64 = state.get("len")?;
-                            let next = idx + 1;
-                            if next > len {
-                                return Ok(LuaMultiValue::new());
-                            }
-                            state.set("idx", next)?;
-                            let results: LuaTable = lua.registry_value(&results_key)?;
-                            let info: LuaValue = results.raw_get(next)?;
-                            let this: LuaTable = lua.registry_value(&this_key)?;
-                            Ok(LuaMultiValue::from_vec(vec![LuaValue::Table(this), info]))
-                        })?;
+                        let iterator =
+                            lua.create_function(move |lua, ()| -> LuaResult<LuaMultiValue> {
+                                let idx: i64 = state.get("idx")?;
+                                let len: i64 = state.get("len")?;
+                                let next = idx + 1;
+                                if next > len {
+                                    return Ok(LuaMultiValue::new());
+                                }
+                                state.set("idx", next)?;
+                                let results: LuaTable = lua.registry_value(&results_key)?;
+                                let info: LuaValue = results.raw_get(next)?;
+                                let this: LuaTable = lua.registry_value(&this_key)?;
+                                Ok(LuaMultiValue::from_vec(vec![LuaValue::Table(this), info]))
+                            })?;
                         Ok(iterator)
                     }
                 })?,

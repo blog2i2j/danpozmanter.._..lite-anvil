@@ -126,9 +126,7 @@ fn ensure_project(
                     || entry.exclude_dirs != exclude_dirs;
                 let is_dirty = entry.dirty.load(Ordering::Relaxed);
 
-                if entry.rebuilding.load(Ordering::Relaxed)
-                    || (!config_changed && !is_dirty)
-                {
+                if entry.rebuilding.load(Ordering::Relaxed) || (!config_changed && !is_dirty) {
                     Work::None
                 } else {
                     // Debounce: skip the rebuild if the last fs event was very

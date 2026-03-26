@@ -629,8 +629,8 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     }
                     if opts.backup_originals {
                         if let Err(e) = fs::write(format!("{file}.bak"), &content) {
-                        log::warn!("failed to write backup {file}.bak: {e}");
-                    }
+                            log::warn!("failed to write backup {file}.bak: {e}");
+                        }
                     }
                     if let Err(err) = fs::write(path, new_content) {
                         let _ = tx.send(ReplaceMsg::Error(err.to_string()));

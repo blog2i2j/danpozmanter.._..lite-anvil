@@ -1,6 +1,6 @@
 # Change Log
 
-## [1.0.0] - 2026-03-26 1.0.0 Release - stability and performance fixes + minimap and find in selection.
+## [1.0.0] - 2026-03-26 1.0.0 Release - stability and performance fixes + minimap, find in selection, unsaved file persistence.
 
 * Find in selection — when a multi-line selection is active and Find is opened, search is limited to the selected region. Toggle with Alt+S. Status bar shows [S] when active.
 * Tab reordering — drag tabs within the same pane to reorder them (previously only cross-pane moves worked).
@@ -12,6 +12,11 @@
 * SAFETY comments on all 40+ unsafe blocks. All are FFI (SDL3, FreeType, libc).
 * `let _ =` silent error swallows upgraded to `log::warn`.
 * Optional minimap.
+* Unsaved file persistence (Sublime-style) — dirty/unsaved buffers are backed up to `USERDIR/backups/` on session save and restored on next launch. Files that no longer exist on disk remain open instead of being closed.
+* LSP typing debounce — rapid keystrokes are coalesced with a 150ms debounce before sending `textDocument/didChange` to the language server, preventing server flooding.
+* LSP robustness — malformed JSON from language servers is now logged via `log::warn` instead of silently dropped or panicking. LSP panics are caught gracefully.
+* SIGINT/SIGTERM signal handler — graceful shutdown on Unix signals. Session is saved (including unsaved file backups) before exiting.
+* Linter cleanup across 75 files: replaced `unwrap_or_else` error swallows with proper propagation, tightened borrow patterns, removed unused variables.
 
 ## [0.20.0] - 2026-03-25 — Stability hardening for 1.0.
 * Atomic file writes for doc save and session save (write to .tmp, fsync, rename). Prevents data corruption on power loss or crash mid-write.

@@ -19,7 +19,11 @@ fn collect_selections(
     let mut ret_vals = ret.into_iter();
     let iter_fn = match ret_vals.next() {
         Some(LuaValue::Function(f)) => f,
-        _ => return Err(mlua::Error::runtime("get_selections: expected iterator function")),
+        _ => {
+            return Err(mlua::Error::runtime(
+                "get_selections: expected iterator function",
+            ));
+        }
     };
     let invariant = ret_vals.next().unwrap_or(LuaValue::Nil);
     let mut control = ret_vals.next().unwrap_or(LuaValue::Nil);
@@ -73,8 +77,7 @@ fn get_find_tooltip(lua: &Lua, state: &LuaTable) -> LuaResult<String> {
     let ti: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-sensitivity")?;
     let tr: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-regex")?;
     let tw: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-whole-word")?;
-    let ts: LuaValue =
-        keymap.call_function("get_binding", "find-replace:toggle-in-selection")?;
+    let ts: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-in-selection")?;
 
     let mut result = String::new();
     if find_regex {
@@ -250,8 +253,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
     let sk = state_key.clone();
     let select_next_fn = lua.create_function(move |lua, reverse: LuaValue| {
         let state: LuaTable = lua.registry_value(&sk)?;
-        let doc =
-            get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
+        let doc = get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
         let search: LuaTable = require_table(lua, "core.doc.search")?;
         let whole_word: bool = state.get("whole_word")?;
         let sel: LuaMultiValue = doc.call_method("get_selection", true)?;
@@ -273,11 +275,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             opt.set("reverse", true)?;
         }
 
-        let (start_line, start_col) = if is_reverse {
-            (l1, c1)
-        } else {
-            (l2, c2)
-        };
+        let (start_line, start_col) = if is_reverse { (l1, c1) } else { (l2, c2) };
 
         let result: LuaMultiValue =
             search.call_function("find", (doc.clone(), start_line, start_col, text, opt))?;
@@ -314,8 +312,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
     let sk = state_key.clone();
     let select_add_next_fn = lua.create_function(move |lua, all: LuaValue| {
         let state: LuaTable = lua.registry_value(&sk)?;
-        let doc =
-            get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
+        let doc = get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
         let search: LuaTable = require_table(lua, "core.doc.search")?;
         let core: LuaTable = require_table(lua, "core")?;
         let all = matches!(all, LuaValue::Boolean(true));
@@ -340,23 +337,19 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 il1 = Some(l1.clone());
                 ic1 = Some(c1.clone());
             }
-            let text: String =
-                doc.call_method("get_text", (l1, c1, l2.clone(), c2.clone()))?;
+            let text: String = doc.call_method("get_text", (l1, c1, l2.clone(), c2.clone()))?;
             let mut search_l = l2;
             let mut search_c = c2;
             loop {
                 let opt = lua.create_table()?;
                 opt.set("wrap", true)?;
-                let result: LuaMultiValue = search.call_function(
-                    "find",
-                    (doc.clone(), search_l, search_c, text.clone(), opt),
-                )?;
+                let result: LuaMultiValue = search
+                    .call_function("find", (doc.clone(), search_l, search_c, text.clone(), opt))?;
                 let r: Vec<LuaValue> = result.into_iter().collect();
                 if r[0].is_nil() {
                     break;
                 }
-                let (rl1, rc1, rl2, rc2) =
-                    (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone());
+                let (rl1, rc1, rl2, rc2) = (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone());
 
                 if rl1 == *il1.as_ref().unwrap() && rc1 == *ic1.as_ref().unwrap() {
                     break;
@@ -379,8 +372,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     )?;
                     if !all {
                         let active_view: LuaTable = core.get("active_view")?;
-                        active_view
-                            .call_method::<()>("scroll_to_make_visible", (rl2, rc2))?;
+                        active_view.call_method::<()>("scroll_to_make_visible", (rl2, rc2))?;
                         return Ok(());
                     }
                 }
@@ -466,69 +458,71 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             // Create the search_fn that wraps search.find with options,
             // constraining results to selection bounds when in_selection is active.
             let sk2 = sk.clone();
-            let search_fn = lua.create_function(move |lua, args: LuaMultiValue| -> LuaResult<LuaMultiValue> {
-                let state: LuaTable = lua.registry_value(&sk2)?;
-                let search: LuaTable = require_table(lua, "core.doc.search")?;
-                let whole_word: bool = state.get("whole_word")?;
-                let in_selection: bool = state.get("in_selection")?;
-                let a: Vec<LuaValue> = args.into_iter().collect();
-                // args: doc, line, col, text, case_sensitive, find_regex, find_reverse, _whole_word
-                let case_sensitive = matches!(a.get(4), Some(LuaValue::Boolean(true)));
-                let find_regex = matches!(a.get(5), Some(LuaValue::Boolean(true)));
-                let find_reverse = matches!(a.get(6), Some(LuaValue::Boolean(true)));
-                let opt = lua.create_table()?;
-                opt.set("no_case", !case_sensitive)?;
-                opt.set("regex", find_regex)?;
-                opt.set("reverse", find_reverse)?;
-                opt.set("whole_word", whole_word)?;
+            let search_fn = lua.create_function(
+                move |lua, args: LuaMultiValue| -> LuaResult<LuaMultiValue> {
+                    let state: LuaTable = lua.registry_value(&sk2)?;
+                    let search: LuaTable = require_table(lua, "core.doc.search")?;
+                    let whole_word: bool = state.get("whole_word")?;
+                    let in_selection: bool = state.get("in_selection")?;
+                    let a: Vec<LuaValue> = args.into_iter().collect();
+                    // args: doc, line, col, text, case_sensitive, find_regex, find_reverse, _whole_word
+                    let case_sensitive = matches!(a.get(4), Some(LuaValue::Boolean(true)));
+                    let find_regex = matches!(a.get(5), Some(LuaValue::Boolean(true)));
+                    let find_reverse = matches!(a.get(6), Some(LuaValue::Boolean(true)));
+                    let opt = lua.create_table()?;
+                    opt.set("no_case", !case_sensitive)?;
+                    opt.set("regex", find_regex)?;
+                    opt.set("reverse", find_reverse)?;
+                    opt.set("whole_word", whole_word)?;
 
-                // When constraining to selection, disable wrap to avoid infinite loops
-                let bounds = if in_selection {
-                    match state.get::<LuaValue>("selection_bounds")? {
-                        LuaValue::Table(b) => {
-                            opt.set("wrap", false)?;
-                            let bl1 = lua_to_i64(&b.get::<LuaValue>(1)?);
-                            let bc1 = lua_to_i64(&b.get::<LuaValue>(2)?);
-                            let bl2 = lua_to_i64(&b.get::<LuaValue>(3)?);
-                            let bc2 = lua_to_i64(&b.get::<LuaValue>(4)?);
-                            Some((bl1, bc1, bl2, bc2))
+                    // When constraining to selection, disable wrap to avoid infinite loops
+                    let bounds = if in_selection {
+                        match state.get::<LuaValue>("selection_bounds")? {
+                            LuaValue::Table(b) => {
+                                opt.set("wrap", false)?;
+                                let bl1 = lua_to_i64(&b.get::<LuaValue>(1)?);
+                                let bc1 = lua_to_i64(&b.get::<LuaValue>(2)?);
+                                let bl2 = lua_to_i64(&b.get::<LuaValue>(3)?);
+                                let bc2 = lua_to_i64(&b.get::<LuaValue>(4)?);
+                                Some((bl1, bc1, bl2, bc2))
+                            }
+                            _ => {
+                                opt.set("wrap", true)?;
+                                None
+                            }
                         }
-                        _ => {
-                            opt.set("wrap", true)?;
-                            None
+                    } else {
+                        opt.set("wrap", true)?;
+                        None
+                    };
+
+                    let result: LuaMultiValue = search.call_function(
+                        "find",
+                        (a[0].clone(), a[1].clone(), a[2].clone(), a[3].clone(), opt),
+                    )?;
+
+                    if let Some((bl1, bc1, bl2, bc2)) = bounds {
+                        let r: Vec<LuaValue> = result.into_iter().collect();
+                        if r.len() >= 4 && !r[0].is_nil() {
+                            let rl1 = lua_to_i64(&r[0]);
+                            let rc1 = lua_to_i64(&r[1]);
+                            let rl2 = lua_to_i64(&r[2]);
+                            let rc2 = lua_to_i64(&r[3]);
+                            // Match start must be at or after selection start
+                            let start_ok = rl1 > bl1 || (rl1 == bl1 && rc1 >= bc1);
+                            // Match end must be at or before selection end
+                            let end_ok = rl2 < bl2 || (rl2 == bl2 && rc2 <= bc2);
+                            if start_ok && end_ok {
+                                return Ok(LuaMultiValue::from_vec(r));
+                            }
+                            return Ok(LuaMultiValue::new());
                         }
+                        return Ok(LuaMultiValue::from_vec(r));
                     }
-                } else {
-                    opt.set("wrap", true)?;
-                    None
-                };
 
-                let result: LuaMultiValue = search.call_function(
-                    "find",
-                    (a[0].clone(), a[1].clone(), a[2].clone(), a[3].clone(), opt),
-                )?;
-
-                if let Some((bl1, bc1, bl2, bc2)) = bounds {
-                    let r: Vec<LuaValue> = result.into_iter().collect();
-                    if r.len() >= 4 && !r[0].is_nil() {
-                        let rl1 = lua_to_i64(&r[0]);
-                        let rc1 = lua_to_i64(&r[1]);
-                        let rl2 = lua_to_i64(&r[2]);
-                        let rc2 = lua_to_i64(&r[3]);
-                        // Match start must be at or after selection start
-                        let start_ok = rl1 > bl1 || (rl1 == bl1 && rc1 >= bc1);
-                        // Match end must be at or before selection end
-                        let end_ok = rl2 < bl2 || (rl2 == bl2 && rc2 <= bc2);
-                        if start_ok && end_ok {
-                            return Ok(LuaMultiValue::from_vec(r));
-                        }
-                        return Ok(LuaMultiValue::new());
-                    }
-                    return Ok(LuaMultiValue::from_vec(r));
-                }
-
-                Ok(result)
-            })?;
+                    Ok(result)
+                },
+            )?;
 
             let sk3 = sk.clone();
             let sfn_key = Arc::new(lua.create_registry_value(search_fn)?);
@@ -651,8 +645,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         lua.create_function(move |lua, ()| {
             let state: LuaTable = lua.registry_value(&sk)?;
             let config: LuaTable = require_table(lua, "core.config")?;
-            let doc = get_doc(lua, &state)?
-                .ok_or_else(|| LuaError::runtime("no doc"))?;
+            let doc = get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
 
             let mut first = String::new();
             let has_sel: bool = doc.call_method("has_selection", ())?;
@@ -668,8 +661,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 }
             }
 
-            let fn_replace = lua
-                .create_function(|lua, (text, old, new): (String, String, String)| -> LuaResult<LuaMultiValue> {
+            let fn_replace = lua.create_function(
+                |lua, (text, old, new): (String, String, String)| -> LuaResult<LuaMultiValue> {
                     let config: LuaTable = require_table(lua, "core.config")?;
                     let symbol_pattern: String = config.get("symbol_pattern")?;
                     let string_mod: LuaTable = lua.globals().get("string")?;
@@ -687,7 +680,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                         }
                     })?;
                     string_mod.call_function("gsub", (text, symbol_pattern, replacer))
-                })?;
+                },
+            )?;
 
             do_replace(lua, &state, "Symbol", &first, fn_replace)
         })?,
@@ -874,8 +868,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 if r[0].is_nil() {
                     break;
                 }
-                let (l1, c1, l2, c2) =
-                    (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone());
+                let (l1, c1, l2, c2) = (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone());
                 matches.push((l2.clone(), c2.clone(), l1.clone(), c1.clone()));
 
                 // Advance past match
@@ -1099,7 +1092,10 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         })?,
     )?;
 
-    item_tbl.set("tooltip", "Search toggles: case, regex, whole word, in selection")?;
+    item_tbl.set(
+        "tooltip",
+        "Search toggles: case, regex, whole word, in selection",
+    )?;
     sv.call_method::<()>("add_item", item_tbl)?;
 
     Ok(())
@@ -1151,8 +1147,7 @@ fn do_find_replace(lua: &Lua, state: &LuaTable, in_selection: bool) -> LuaResult
 
     let mut default = String::new();
     if !in_selection {
-        let text: String =
-            doc.call_method("get_text", (l1.clone(), c1, l2.clone(), c2.clone()))?;
+        let text: String = doc.call_method("get_text", (l1.clone(), c1, l2.clone(), c2.clone()))?;
         doc.call_method::<()>("set_selection", (l2.clone(), c2.clone(), l2.clone(), c2))?;
         if l1 == l2 {
             default = text;
@@ -1169,10 +1164,8 @@ fn do_find_replace(lua: &Lua, state: &LuaTable, in_selection: bool) -> LuaResult
             if !find_regex {
                 let opts = lua.create_table()?;
                 opts.set("regex", false)?;
-                let result: LuaTable = doc_native.call_function(
-                    "replace",
-                    (text.clone(), old.clone(), new.clone(), opts),
-                )?;
+                let result: LuaTable = doc_native
+                    .call_function("replace", (text.clone(), old.clone(), new.clone(), opts))?;
                 let native_text: LuaValue = result.get("text")?;
                 let native_count: LuaValue = result.get("count")?;
                 if !native_text.is_nil() {
@@ -1180,19 +1173,15 @@ fn do_find_replace(lua: &Lua, state: &LuaTable, in_selection: bool) -> LuaResult
                 }
                 // Fallback to Lua gsub
                 let string_mod: LuaTable = lua.globals().get("string")?;
-                let escaped_old: String =
-                    string_mod.call_function("gsub", (old, "%W", "%%%1"))?;
-                let escaped_new: String =
-                    string_mod.call_function("gsub", (new, "%%", "%%%%"))?;
+                let escaped_old: String = string_mod.call_function("gsub", (old, "%W", "%%%1"))?;
+                let escaped_new: String = string_mod.call_function("gsub", (new, "%%", "%%%%"))?;
                 return string_mod.call_function("gsub", (text, escaped_old, escaped_new));
             }
 
             let opts = lua.create_table()?;
             opts.set("regex", true)?;
-            let result: LuaTable = doc_native.call_function(
-                "replace",
-                (text.clone(), old.clone(), new.clone(), opts),
-            )?;
+            let result: LuaTable = doc_native
+                .call_function("replace", (text.clone(), old.clone(), new.clone(), opts))?;
             let native_text: LuaValue = result.get("text")?;
             let native_count: LuaValue = result.get("count")?;
             if !native_text.is_nil() {
@@ -1262,8 +1251,7 @@ fn do_replace(
                     let prev_replace: LuaTable = core.get("previous_replace")?;
                     insert_unique(lua, &prev_replace, &new)?;
 
-                    let doc =
-                        get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
+                    let doc = get_doc(lua, &state)?.ok_or_else(|| LuaError::runtime("no doc"))?;
                     let fn_replace: LuaFunction = lua.registry_value(&frk2)?;
 
                     let replacer = lua.create_function({

@@ -3,12 +3,14 @@ mod lua_vm;
 #[cfg(feature = "sdl")]
 mod renderer;
 mod runtime;
+mod signal;
 mod time;
 #[cfg(feature = "sdl")]
 mod window;
 
 fn main() {
     env_logger::init();
+    signal::install_handlers();
     let args: Vec<String> = std::env::args().collect();
     if let Err(e) = run(&args) {
         eprintln!("Fatal: {e:#}");

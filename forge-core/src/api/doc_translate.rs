@@ -32,8 +32,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let is_utf8_cont: LuaFunction = common.get("is_utf8_cont")?;
                     let pos_offset: LuaFunction = doc.get("position_offset")?;
                     let get_char: LuaFunction = doc.get("get_char")?;
-                    let (mut l, mut c): (i64, i64) =
-                        pos_offset.call((&doc, line, col, -1))?;
+                    let (mut l, mut c): (i64, i64) = pos_offset.call((&doc, line, col, -1))?;
                     loop {
                         let ch: LuaString = get_char.call((&doc, l, c))?;
                         if !is_utf8_cont.call::<bool>(ch)? {
@@ -59,8 +58,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let is_utf8_cont: LuaFunction = common.get("is_utf8_cont")?;
                     let pos_offset: LuaFunction = doc.get("position_offset")?;
                     let get_char: LuaFunction = doc.get("get_char")?;
-                    let (mut l, mut c): (i64, i64) =
-                        pos_offset.call((&doc, line, col, 1))?;
+                    let (mut l, mut c): (i64, i64) = pos_offset.call((&doc, line, col, 1))?;
                     loop {
                         let ch: LuaString = get_char.call((&doc, l, c))?;
                         if !is_utf8_cont.call::<bool>(ch)? {
@@ -85,8 +83,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let get_char: LuaFunction = doc.get("get_char")?;
                     let (mut l, mut c) = (line, col);
                     loop {
-                        let (l2, c2): (i64, i64) =
-                            pos_offset.call((&doc, l, c, -1))?;
+                        let (l2, c2): (i64, i64) = pos_offset.call((&doc, l, c, -1))?;
                         let ch: LuaString = get_char.call((&doc, l2, c2))?;
                         if is_non_word.call::<bool>(ch)? || (l == l2 && c == c2) {
                             break;
@@ -106,8 +103,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let get_char: LuaFunction = doc.get("get_char")?;
                     let (mut l, mut c) = (line, col);
                     loop {
-                        let (l2, c2): (i64, i64) =
-                            pos_offset.call((&doc, l, c, 1))?;
+                        let (l2, c2): (i64, i64) = pos_offset.call((&doc, l, c, 1))?;
                         let ch: LuaString = get_char.call((&doc, l, c))?;
                         if is_non_word.call::<bool>(ch)? || (l == l2 && c == c2) {
                             break;
@@ -133,8 +129,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let (mut l, mut c) = (line, col);
                     let mut prev: Option<Vec<u8>> = None;
                     while l > 1 || c > 1 {
-                        let (nl, nc): (i64, i64) =
-                            pos_offset.call((&doc, l, c, -1))?;
+                        let (nl, nc): (i64, i64) = pos_offset.call((&doc, l, c, -1))?;
                         let ch: LuaString = get_char.call((&doc, nl, nc))?;
                         let is_nw = is_non_word.call::<bool>(ch.clone())?;
                         let ch_bytes: &[u8] = &ch.as_bytes();
@@ -161,8 +156,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         .call("core.doc.translate")?;
                     let end_of_word: LuaFunction = translate.get("end_of_word")?;
                     let end_of_doc: LuaFunction = translate.get("end_of_doc")?;
-                    let (end_line, end_col): (i64, i64) =
-                        end_of_doc.call((&doc, line, col))?;
+                    let (end_line, end_col): (i64, i64) = end_of_doc.call((&doc, line, col))?;
                     let (mut l, mut c) = (line, col);
                     let mut prev: Option<Vec<u8>> = None;
                     while l < end_line || c < end_col {
@@ -239,10 +233,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 lua.create_function(|_, (doc, line, col): (LuaTable, i64, i64)| {
                     let lines: LuaTable = doc.get("lines")?;
                     let line_text: String = lines.raw_get(line)?;
-                    let indent_end = line_text
-                        .find(|c: char| !c.is_whitespace())
-                        .unwrap_or(0) as i64
-                        + 1;
+                    let indent_end =
+                        line_text.find(|c: char| !c.is_whitespace()).unwrap_or(0) as i64 + 1;
                     let result_col = if col > indent_end { indent_end } else { 1 };
                     Ok((line, result_col))
                 })?,

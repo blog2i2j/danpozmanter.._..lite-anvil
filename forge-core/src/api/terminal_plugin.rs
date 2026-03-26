@@ -66,7 +66,10 @@ fn build_config_defaults(lua: &Lua, scheme_names: &[String]) -> LuaResult<LuaTab
 
     let scrollback_entry = lua.create_table()?;
     scrollback_entry.set("label", "Scrollback")?;
-    scrollback_entry.set("description", "Maximum number of terminal history lines to keep.")?;
+    scrollback_entry.set(
+        "description",
+        "Maximum number of terminal history lines to keep.",
+    )?;
     scrollback_entry.set("path", "scrollback")?;
     scrollback_entry.set("type", "number")?;
     scrollback_entry.set("default", 5000)?;
@@ -204,7 +207,12 @@ fn get_default_cwd(lua: &Lua) -> LuaResult<String> {
     Ok(home.unwrap_or_else(|| ".".to_owned()))
 }
 
-fn open_terminal(_lua: &Lua, terminal_view: &LuaTable, cwd: String, position: Option<&str>) -> LuaResult<()> {
+fn open_terminal(
+    _lua: &Lua,
+    terminal_view: &LuaTable,
+    cwd: String,
+    position: Option<&str>,
+) -> LuaResult<()> {
     match position {
         Some(pos) => {
             terminal_view.call_function::<()>("open", (cwd, LuaValue::Nil, LuaValue::Nil, pos))?
@@ -236,7 +244,8 @@ fn register_commands(lua: &Lua, terminal_view_key: &LuaRegistryKey) -> LuaResult
         ("terminal:new-right", "right"),
         ("terminal:new-top", "top"),
     ] {
-        let tv_key = lua.create_registry_value(lua.registry_value::<LuaTable>(terminal_view_key)?)?;
+        let tv_key =
+            lua.create_registry_value(lua.registry_value::<LuaTable>(terminal_view_key)?)?;
         let pos = *pos;
         cmds.set(
             *cmd_name,
@@ -249,7 +258,8 @@ fn register_commands(lua: &Lua, terminal_view_key: &LuaRegistryKey) -> LuaResult
     }
 
     {
-        let tv_key = lua.create_registry_value(lua.registry_value::<LuaTable>(terminal_view_key)?)?;
+        let tv_key =
+            lua.create_registry_value(lua.registry_value::<LuaTable>(terminal_view_key)?)?;
         cmds.set(
             "terminal:new-in-project",
             lua.create_function(move |lua, ()| {
@@ -275,7 +285,8 @@ fn register_commands(lua: &Lua, terminal_view_key: &LuaRegistryKey) -> LuaResult
     }
 
     {
-        let tv_key = lua.create_registry_value(lua.registry_value::<LuaTable>(terminal_view_key)?)?;
+        let tv_key =
+            lua.create_registry_value(lua.registry_value::<LuaTable>(terminal_view_key)?)?;
         cmds.set(
             "terminal:new-next-to-file",
             lua.create_function(move |lua, ()| {

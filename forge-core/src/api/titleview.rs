@@ -45,40 +45,52 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // restore_command and maximize_command
             let restore_command = lua.create_table()?;
             restore_command.set("symbol", "w")?;
-            restore_command.set("action", lua.create_function(|lua, ()| {
-                let core: LuaTable = require_table(lua, "core")?;
-                let system: LuaTable = lua.globals().get("system")?;
-                let window: LuaValue = core.get("window")?;
-                system.call_function::<()>("set_window_mode", (window, "normal"))
-            })?)?;
+            restore_command.set(
+                "action",
+                lua.create_function(|lua, ()| {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let system: LuaTable = lua.globals().get("system")?;
+                    let window: LuaValue = core.get("window")?;
+                    system.call_function::<()>("set_window_mode", (window, "normal"))
+                })?,
+            )?;
 
             let maximize_command = lua.create_table()?;
             maximize_command.set("symbol", "W")?;
-            maximize_command.set("action", lua.create_function(|lua, ()| {
-                let core: LuaTable = require_table(lua, "core")?;
-                let system: LuaTable = lua.globals().get("system")?;
-                let window: LuaValue = core.get("window")?;
-                system.call_function::<()>("set_window_mode", (window, "maximized"))
-            })?)?;
+            maximize_command.set(
+                "action",
+                lua.create_function(|lua, ()| {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let system: LuaTable = lua.globals().get("system")?;
+                    let window: LuaValue = core.get("window")?;
+                    system.call_function::<()>("set_window_mode", (window, "maximized"))
+                })?,
+            )?;
 
             // title_commands table
             let title_commands = lua.create_table()?;
             let minimize = lua.create_table()?;
             minimize.set("symbol", "_")?;
-            minimize.set("action", lua.create_function(|lua, ()| {
-                let core: LuaTable = require_table(lua, "core")?;
-                let system: LuaTable = lua.globals().get("system")?;
-                let window: LuaValue = core.get("window")?;
-                system.call_function::<()>("set_window_mode", (window, "minimized"))
-            })?)?;
+            minimize.set(
+                "action",
+                lua.create_function(|lua, ()| {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    let system: LuaTable = lua.globals().get("system")?;
+                    let window: LuaValue = core.get("window")?;
+                    system.call_function::<()>("set_window_mode", (window, "minimized"))
+                })?,
+            )?;
             title_commands.raw_set(1, minimize)?;
             title_commands.raw_set(2, maximize_command.clone())?;
             let close = lua.create_table()?;
             close.set("symbol", "X")?;
-            close.set("action", lua.create_function(|lua, ()| {
-                let core: LuaTable = require_table(lua, "core")?;
-                core.call_function::<()>("quit", ())
-            })?)?;
+            close.set(
+                "action",
+                lua.create_function(|lua, ()| {
+                    let core: LuaTable = require_table(lua, "core")?;
+                    core.call_function::<()>("quit", ())
+                })?,
+            )?;
             title_commands.raw_set(3, close)?;
 
             let cmds_key = Arc::new(lua.create_registry_value(title_commands)?);
@@ -134,7 +146,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let cached_font: LuaValue = m.get("font")?;
                         let same = match (&cached_font, &icon_font) {
                             (LuaValue::Table(a), LuaValue::Table(b)) => a == b,
-                            (LuaValue::UserData(a), LuaValue::UserData(b)) => a.to_pointer() == b.to_pointer(),
+                            (LuaValue::UserData(a), LuaValue::UserData(b)) => {
+                                a.to_pointer() == b.to_pointer()
+                            }
                             _ => false,
                         };
                         if same {
@@ -192,7 +206,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let cmds_tbl: LuaTable = lua.registry_value(&cmds)?;
                         let n = cmds_tbl.raw_len() as f64;
                         let controls_width = hit_width * n + spacing;
-                        system.call_function::<()>("set_window_hit_test", (window, title_height, controls_width, spacing))?;
+                        system.call_function::<()>(
+                            "set_window_hit_test",
+                            (window, title_height, controls_width, spacing),
+                        )?;
                     } else {
                         system.call_function::<()>("set_window_hit_test", window)?;
                     }
@@ -205,7 +222,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 "on_scale_change",
                 lua.create_function(|_lua, this: LuaTable| {
                     this.set("_control_metrics", LuaValue::Nil)?;
-                    let visible: bool = this.get::<LuaValue>("visible")?.as_boolean().unwrap_or(false);
+                    let visible: bool = this
+                        .get::<LuaValue>("visible")?
+                        .as_boolean()
+                        .unwrap_or(false);
                     this.call_method::<()>("configure_hit_test", visible)
                 })?,
             )?;
@@ -218,7 +238,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 let restore = Arc::clone(&restore_key);
                 let maximize = Arc::clone(&maximize_key);
                 lua.create_function(move |lua, this: LuaTable| {
-                    let visible: bool = this.get::<LuaValue>("visible")?.as_boolean().unwrap_or(false);
+                    let visible: bool = this
+                        .get::<LuaValue>("visible")?
+                        .as_boolean()
+                        .unwrap_or(false);
                     let size: LuaTable = this.get("size")?;
                     if visible {
                         let tvh_fn: LuaFunction = lua.registry_value(&tvh)?;
@@ -228,8 +251,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         size.set("y", 0.0)?;
                     }
                     let core: LuaTable = require_table(lua, "core")?;
-                    let window_mode: String = core.get::<LuaValue>("window_mode")?
-                        .as_string().and_then(|s| s.to_str().ok().map(|s| s.to_string())).unwrap_or_default();
+                    let window_mode: String = core
+                        .get::<LuaValue>("window_mode")?
+                        .as_string()
+                        .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+                        .unwrap_or_default();
                     let cmds_tbl: LuaTable = lua.registry_value(&cmds)?;
                     if window_mode == "maximized" {
                         let rc: LuaTable = lua.registry_value(&restore)?;
@@ -282,15 +308,41 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let y = oy + py;
 
                     let draw_text: LuaFunction = common.get("draw_text")?;
-                    for (color_key, symbol) in &[("bg", "5"), ("color6", "6"), ("color7", "7"), ("color8", "8")] {
+                    for (color_key, symbol) in &[
+                        ("bg", "5"),
+                        ("color6", "6"),
+                        ("color7", "7"),
+                        ("color8", "8"),
+                    ] {
                         let c: LuaValue = icon_colors.get(*color_key)?;
-                        draw_text.call::<LuaValue>((icon_font.clone(), c, *symbol, LuaValue::Nil, x, y, 0.0, fh))?;
+                        draw_text.call::<LuaValue>((
+                            icon_font.clone(),
+                            c,
+                            *symbol,
+                            LuaValue::Nil,
+                            x,
+                            y,
+                            0.0,
+                            fh,
+                        ))?;
                     }
                     let c9: LuaValue = icon_colors.get("color9")?;
-                    let x_after: f64 = draw_text.call((icon_font.clone(), c9, "9 ", LuaValue::Nil, x, y, 0.0, fh))?;
+                    let x_after: f64 = draw_text.call((
+                        icon_font.clone(),
+                        c9,
+                        "9 ",
+                        LuaValue::Nil,
+                        x,
+                        y,
+                        0.0,
+                        fh,
+                    ))?;
                     x = x_after;
 
-                    let title: String = core.call_function("compose_window_title", core.get::<LuaValue>("window_title")?)?;
+                    let title: String = core.call_function(
+                        "compose_window_title",
+                        core.get::<LuaValue>("window_title")?,
+                    )?;
                     let size: LuaTable = this.get("size")?;
                     let size_x: f64 = size.get("x")?;
                     let size_y: f64 = size.get("y")?;
@@ -300,7 +352,16 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
                     let push_clip: LuaFunction = core.get("push_clip_rect")?;
                     push_clip.call::<()>((x, pos_y, title_width, size_y))?;
-                    draw_text.call::<LuaValue>((font, color, title, LuaValue::Nil, x, y, title_width, fh))?;
+                    draw_text.call::<LuaValue>((
+                        font,
+                        color,
+                        title,
+                        LuaValue::Nil,
+                        x,
+                        y,
+                        title_width,
+                        fh,
+                    ))?;
                     let pop_clip: LuaFunction = core.get("pop_clip_rect")?;
                     pop_clip.call::<()>(())?;
 
@@ -382,16 +443,32 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             Some(LuaValue::Table(t)) => t,
                             _ => break,
                         };
-                        let x: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        let y: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        let w: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        let h: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
+                        let x: f64 = match vals.next() {
+                            Some(LuaValue::Number(n)) => n,
+                            _ => break,
+                        };
+                        let y: f64 = match vals.next() {
+                            Some(LuaValue::Number(n)) => n,
+                            _ => break,
+                        };
+                        let w: f64 = match vals.next() {
+                            Some(LuaValue::Number(n)) => n,
+                            _ => break,
+                        };
+                        let h: f64 = match vals.next() {
+                            Some(LuaValue::Number(n)) => n,
+                            _ => break,
+                        };
 
                         let is_hovered = match &hovered {
                             LuaValue::Table(t) => *t == item,
                             _ => false,
                         };
-                        let color = if is_hovered { style_text.clone() } else { style_dim.clone() };
+                        let color = if is_hovered {
+                            style_text.clone()
+                        } else {
+                            style_dim.clone()
+                        };
                         if is_hovered {
                             let hover_bg = lua.create_table()?;
                             for i in 1..=line_highlight.raw_len() as i64 {
@@ -402,7 +479,16 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             draw_rect.call::<()>((x, pos_y, w, size_y, hover_bg))?;
                         }
                         let symbol: String = item.get("symbol")?;
-                        draw_text.call::<LuaValue>((icon_font.clone(), color, symbol, "center", x, y, w, h))?;
+                        draw_text.call::<LuaValue>((
+                            icon_font.clone(),
+                            color,
+                            symbol,
+                            "center",
+                            x,
+                            y,
+                            w,
+                            h,
+                        ))?;
                     }
                     Ok(())
                 })?,
@@ -411,24 +497,34 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // TitleView:on_mouse_pressed(button, x, y, clicks)
             title_view.set("on_mouse_pressed", {
                 let k = Arc::clone(&class_key);
-                lua.create_function(move |lua, (this, button, x, y, clicks): (LuaTable, LuaValue, f64, f64, LuaValue)| {
-                    let class: LuaTable = lua.registry_value(&k)?;
-                    let super_tbl: LuaTable = class.get("super")?;
-                    let super_fn: LuaFunction = super_tbl.get("on_mouse_pressed")?;
-                    let caught: LuaValue = super_fn.call((this.clone(), button, x, y, clicks))?;
-                    if !matches!(caught, LuaValue::Nil | LuaValue::Boolean(false)) {
-                        return Ok(());
-                    }
-                    let core: LuaTable = require_table(lua, "core")?;
-                    let last_av: LuaValue = core.get("last_active_view")?;
-                    core.call_function::<()>("set_active_view", last_av)?;
-                    let hovered: LuaValue = this.get("hovered_item")?;
-                    if let LuaValue::Table(item) = hovered {
-                        let action: LuaFunction = item.get("action")?;
-                        action.call::<()>(())?;
-                    }
-                    Ok(())
-                })?
+                lua.create_function(
+                    move |lua,
+                          (this, button, x, y, clicks): (
+                        LuaTable,
+                        LuaValue,
+                        f64,
+                        f64,
+                        LuaValue,
+                    )| {
+                        let class: LuaTable = lua.registry_value(&k)?;
+                        let super_tbl: LuaTable = class.get("super")?;
+                        let super_fn: LuaFunction = super_tbl.get("on_mouse_pressed")?;
+                        let caught: LuaValue =
+                            super_fn.call((this.clone(), button, x, y, clicks))?;
+                        if !matches!(caught, LuaValue::Nil | LuaValue::Boolean(false)) {
+                            return Ok(());
+                        }
+                        let core: LuaTable = require_table(lua, "core")?;
+                        let last_av: LuaValue = core.get("last_active_view")?;
+                        core.call_function::<()>("set_active_view", last_av)?;
+                        let hovered: LuaValue = this.get("hovered_item")?;
+                        if let LuaValue::Table(item) = hovered {
+                            let action: LuaFunction = item.get("action")?;
+                            action.call::<()>(())?;
+                        }
+                        Ok(())
+                    },
+                )?
             })?;
 
             // TitleView:on_mouse_left()
@@ -446,36 +542,58 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // TitleView:on_mouse_moved(px, py, ...)
             title_view.set("on_mouse_moved", {
                 let k = Arc::clone(&class_key);
-                lua.create_function(move |lua, (this, px, py, rest): (LuaTable, f64, f64, LuaMultiValue)| {
-                    let size: LuaTable = this.get("size")?;
-                    let size_y: f64 = size.get("y")?;
-                    if size_y == 0.0 { return Ok(()); }
-                    let class: LuaTable = lua.registry_value(&k)?;
-                    let super_tbl: LuaTable = class.get("super")?;
-                    let super_fn: LuaFunction = super_tbl.get("on_mouse_moved")?;
-                    let mut args = vec![LuaValue::Table(this.clone()), LuaValue::Number(px), LuaValue::Number(py)];
-                    for v in rest { args.push(v); }
-                    super_fn.call::<()>(LuaMultiValue::from_vec(args))?;
-                    this.set("hovered_item", LuaValue::Nil)?;
-                    let iter: LuaFunction = this.call_method("each_control_item", ())?;
-                    loop {
-                        let results: LuaMultiValue = iter.call(())?;
-                        let mut vals = results.into_iter();
-                        let item = match vals.next() {
-                            Some(LuaValue::Table(t)) => t,
-                            _ => break,
-                        };
-                        let x: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        let y: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        let w: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        let h: f64 = match vals.next() { Some(LuaValue::Number(n)) => n, _ => break };
-                        if px > x && py > y && px <= x + w && py <= y + h {
-                            this.set("hovered_item", item)?;
+                lua.create_function(
+                    move |lua, (this, px, py, rest): (LuaTable, f64, f64, LuaMultiValue)| {
+                        let size: LuaTable = this.get("size")?;
+                        let size_y: f64 = size.get("y")?;
+                        if size_y == 0.0 {
                             return Ok(());
                         }
-                    }
-                    Ok(())
-                })?
+                        let class: LuaTable = lua.registry_value(&k)?;
+                        let super_tbl: LuaTable = class.get("super")?;
+                        let super_fn: LuaFunction = super_tbl.get("on_mouse_moved")?;
+                        let mut args = vec![
+                            LuaValue::Table(this.clone()),
+                            LuaValue::Number(px),
+                            LuaValue::Number(py),
+                        ];
+                        for v in rest {
+                            args.push(v);
+                        }
+                        super_fn.call::<()>(LuaMultiValue::from_vec(args))?;
+                        this.set("hovered_item", LuaValue::Nil)?;
+                        let iter: LuaFunction = this.call_method("each_control_item", ())?;
+                        loop {
+                            let results: LuaMultiValue = iter.call(())?;
+                            let mut vals = results.into_iter();
+                            let item = match vals.next() {
+                                Some(LuaValue::Table(t)) => t,
+                                _ => break,
+                            };
+                            let x: f64 = match vals.next() {
+                                Some(LuaValue::Number(n)) => n,
+                                _ => break,
+                            };
+                            let y: f64 = match vals.next() {
+                                Some(LuaValue::Number(n)) => n,
+                                _ => break,
+                            };
+                            let w: f64 = match vals.next() {
+                                Some(LuaValue::Number(n)) => n,
+                                _ => break,
+                            };
+                            let h: f64 = match vals.next() {
+                                Some(LuaValue::Number(n)) => n,
+                                _ => break,
+                            };
+                            if px > x && py > y && px <= x + w && py <= y + h {
+                                this.set("hovered_item", item)?;
+                                return Ok(());
+                            }
+                        }
+                        Ok(())
+                    },
+                )?
             })?;
 
             // TitleView:draw()

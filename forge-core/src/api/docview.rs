@@ -1,6 +1,5 @@
 use mlua::prelude::*;
 
-
 fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
     let require: LuaFunction = lua.globals().get("require")?;
     require.call(name)
@@ -145,7 +144,12 @@ fn gutter_width_from_method(this: &LuaTable) -> LuaResult<(f64, f64)> {
         Some(LuaValue::Number(n)) => *n,
         Some(LuaValue::Integer(i)) => *i as f64,
         Some(LuaValue::String(s)) => s.to_str()?.parse::<f64>().map_err(LuaError::external)?,
-        Some(v) => return Err(LuaError::runtime(format!("invalid gutter width type: {}", v.type_name()))),
+        Some(v) => {
+            return Err(LuaError::runtime(format!(
+                "invalid gutter width type: {}",
+                v.type_name()
+            )));
+        }
         None => return Err(LuaError::runtime("missing gutter width")),
     };
     let gpad = match values.get(1) {
@@ -153,7 +157,12 @@ fn gutter_width_from_method(this: &LuaTable) -> LuaResult<(f64, f64)> {
         Some(LuaValue::Integer(i)) => *i as f64,
         Some(LuaValue::String(s)) => s.to_str()?.parse::<f64>().map_err(LuaError::external)?,
         Some(LuaValue::Nil) | None => 0.0,
-        Some(v) => return Err(LuaError::runtime(format!("invalid gutter padding type: {}", v.type_name()))),
+        Some(v) => {
+            return Err(LuaError::runtime(format!(
+                "invalid gutter padding type: {}",
+                v.type_name()
+            )));
+        }
     };
     Ok((gw, gpad))
 }
@@ -250,7 +259,12 @@ fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize)
         let cell_width: f64 = font_call_method(&font, "get_width", "M")?;
         return native_doc_layout.call_function(
             "col_x_offset",
-            (line_text(&doc, line).unwrap_or_else(|_| "\n".to_string()), col, indent_size, cell_width),
+            (
+                line_text(&doc, line).unwrap_or_else(|_| "\n".to_string()),
+                col,
+                indent_size,
+                cell_width,
+            ),
         );
     }
 
@@ -305,10 +319,8 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
         let native_doc_layout = require_table(lua, "doc_layout")?;
         let font = docview_get_font(lua, this)?;
         let cell_width: f64 = font_call_method(&font, "get_width", "M")?;
-        let col: i64 = native_doc_layout.call_function(
-            "x_offset_col",
-            (line_text, x, indent_size, cell_width),
-        )?;
+        let col: i64 = native_doc_layout
+            .call_function("x_offset_col", (line_text, x, indent_size, cell_width))?;
         return Ok(col as usize);
     }
 
@@ -338,7 +350,11 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
                 opts.set("tab_offset", xoffset)?;
                 let w: f64 = font_call_method(&font, "get_width", (ch.to_string(), opts))?;
                 if xoffset + w >= x {
-                    return Ok(if x <= xoffset + (w / 2.0) { i } else { i + ch.len_utf8() });
+                    return Ok(if x <= xoffset + (w / 2.0) {
+                        i
+                    } else {
+                        i + ch.len_utf8()
+                    });
                 }
                 xoffset += w;
                 i += ch.len_utf8();
@@ -349,7 +365,13 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
     Ok(line_text.len())
 }
 
-fn move_to_line_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize, offset: isize) -> LuaResult<(usize, usize)> {
+fn move_to_line_offset(
+    lua: &Lua,
+    this: &LuaTable,
+    line: usize,
+    col: usize,
+    offset: isize,
+) -> LuaResult<(usize, usize)> {
     let last_x_offset: LuaTable = match this.get::<Option<LuaTable>>("last_x_offset")? {
         Some(t) => t,
         None => {
@@ -372,12 +394,18 @@ fn move_to_line_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize, offs
     Ok((target_line, target_col))
 }
 
-fn translate_previous_page(_: &Lua, (_doc, line, _col, dv): (LuaTable, usize, usize, LuaTable)) -> LuaResult<(usize, usize)> {
+fn translate_previous_page(
+    _: &Lua,
+    (_doc, line, _col, dv): (LuaTable, usize, usize, LuaTable),
+) -> LuaResult<(usize, usize)> {
     let (min, max): (usize, usize) = dv.call_method("get_visible_line_range", ())?;
     Ok((line.saturating_sub(max.saturating_sub(min)), 1))
 }
 
-fn translate_next_page(_: &Lua, (doc, line, _col, dv): (LuaTable, usize, usize, LuaTable)) -> LuaResult<(usize, usize)> {
+fn translate_next_page(
+    _: &Lua,
+    (doc, line, _col, dv): (LuaTable, usize, usize, LuaTable),
+) -> LuaResult<(usize, usize)> {
     let lines = line_count(&doc)?;
     if line == lines {
         let text = line_text(&doc, line)?;
@@ -387,7 +415,10 @@ fn translate_next_page(_: &Lua, (doc, line, _col, dv): (LuaTable, usize, usize, 
     Ok((line + max.saturating_sub(min), 1))
 }
 
-fn translate_previous_line(lua: &Lua, (_doc, line, col, dv): (LuaTable, usize, usize, LuaTable)) -> LuaResult<(usize, usize)> {
+fn translate_previous_line(
+    lua: &Lua,
+    (_doc, line, col, dv): (LuaTable, usize, usize, LuaTable),
+) -> LuaResult<(usize, usize)> {
     if super::linewrap::is_active(&dv)? {
         let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&dv, line, Some(col), false)?;
         if idx <= 1 {
@@ -403,7 +434,10 @@ fn translate_previous_line(lua: &Lua, (_doc, line, col, dv): (LuaTable, usize, u
     }
 }
 
-fn translate_next_line(lua: &Lua, (doc, line, col, dv): (LuaTable, usize, usize, LuaTable)) -> LuaResult<(usize, usize)> {
+fn translate_next_line(
+    lua: &Lua,
+    (doc, line, col, dv): (LuaTable, usize, usize, LuaTable),
+) -> LuaResult<(usize, usize)> {
     if super::linewrap::is_active(&dv)? {
         let total = super::linewrap::get_total_wrapped_lines(&dv)?;
         let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&dv, line, Some(col), false)?;
@@ -459,7 +493,8 @@ fn docview_new(lua: &Lua, (this, doc): (LuaTable, Option<LuaTable>)) -> LuaResul
     this.set("last_x_offset", lua.create_table()?)?;
     // Initialize wrapping state so linewrap helpers always find these fields.
     let cfg = require_table(lua, "core.config");
-    let enable_by_default = cfg.ok()
+    let enable_by_default = cfg
+        .ok()
         .and_then(|c| c.get::<LuaTable>("plugins").ok())
         .and_then(|p| p.get::<Option<LuaTable>>("linewrapping").ok().flatten())
         .and_then(|lw| lw.get::<Option<bool>>("enable_by_default").ok().flatten())
@@ -570,14 +605,16 @@ fn docview_get_scrollable_size(lua: &Lua, this: LuaTable) -> LuaResult<f64> {
     let scroll_past_end: bool = config.get("scroll_past_end")?;
     if !scroll_past_end {
         let h_scrollbar: LuaTable = this.get("h_scrollbar")?;
-        let (_, _, _, h_scroll): (f64, f64, f64, f64) = h_scrollbar.call_method("get_track_rect", ())?;
+        let (_, _, _, h_scroll): (f64, f64, f64, f64) =
+            h_scrollbar.call_method("get_track_rect", ())?;
         let doc: LuaTable = this.get("doc")?;
         let style = require_table(lua, "core.style")?;
         let padding_y: f64 = style.get::<LuaTable>("padding")?.get("y")?;
         return Ok(lh * line_count(&doc)? as f64 + padding_y * 2.0 + h_scroll);
     }
     let doc: LuaTable = this.get("doc")?;
-    Ok(lh * line_count(&doc)?.saturating_sub(1) as f64 + this.get::<LuaTable>("size")?.get::<f64>("y")?)
+    Ok(lh * line_count(&doc)?.saturating_sub(1) as f64
+        + this.get::<LuaTable>("size")?.get::<f64>("y")?)
 }
 
 fn docview_get_h_scrollable_size(_: &Lua, this: LuaTable) -> LuaResult<f64> {
@@ -617,14 +654,20 @@ fn docview_get_visible_line_range_lua(lua: &Lua, this: LuaTable) -> LuaResult<(u
     docview_get_visible_line_range(lua, &this)
 }
 
-fn docview_get_col_x_offset_lua(lua: &Lua, (this, line, col, line_end): (LuaTable, usize, usize, Option<bool>)) -> LuaResult<f64> {
+fn docview_get_col_x_offset_lua(
+    lua: &Lua,
+    (this, line, col, line_end): (LuaTable, usize, usize, Option<bool>),
+) -> LuaResult<f64> {
     if super::linewrap::is_active(&this)? {
         return super::linewrap::get_col_x_offset(lua, &this, line, col, line_end.unwrap_or(false));
     }
     docview_get_col_x_offset(lua, &this, line, col)
 }
 
-fn docview_get_x_offset_col_lua(lua: &Lua, (this, line, x): (LuaTable, usize, f64)) -> LuaResult<usize> {
+fn docview_get_x_offset_col_lua(
+    lua: &Lua,
+    (this, line, x): (LuaTable, usize, f64),
+) -> LuaResult<usize> {
     if super::linewrap::is_active(&this)? {
         let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&this, line, None, false)?;
         let (_, col) = super::linewrap::get_line_col_from_x(lua, &this, idx, x)?;
@@ -633,7 +676,10 @@ fn docview_get_x_offset_col_lua(lua: &Lua, (this, line, x): (LuaTable, usize, f6
     docview_get_x_offset_col(lua, &this, line, x)
 }
 
-fn docview_resolve_screen_position(lua: &Lua, (this, x, y): (LuaTable, f64, f64)) -> LuaResult<(usize, usize)> {
+fn docview_resolve_screen_position(
+    lua: &Lua,
+    (this, x, y): (LuaTable, f64, f64),
+) -> LuaResult<(usize, usize)> {
     let (ox, oy): (f64, f64) = this.call_method("get_line_screen_position", (1, LuaValue::Nil))?;
     let lh = docview_get_line_height(lua, &this)?;
 
@@ -659,10 +705,12 @@ fn docview_scroll_to_line(
     }
     let (min, max): (usize, usize) = this.call_method("get_visible_line_range", ())?;
     if !(ignore_if_visible.unwrap_or(false) && line > min && line < max) {
-        let (_, y): (f64, f64) = this.call_method("get_line_screen_position", (line, LuaValue::Nil))?;
+        let (_, y): (f64, f64) =
+            this.call_method("get_line_screen_position", (line, LuaValue::Nil))?;
         let (_, oy): (f64, f64) = this.call_method("get_content_offset", ())?;
         let h_scrollbar: LuaTable = this.get("h_scrollbar")?;
-        let (_, _, _, scroll_h): (f64, f64, f64, f64) = h_scrollbar.call_method("get_track_rect", ())?;
+        let (_, _, _, scroll_h): (f64, f64, f64, f64) =
+            h_scrollbar.call_method("get_track_rect", ())?;
         let size: LuaTable = this.get("size")?;
         let scroll: LuaTable = this.get("scroll")?;
         let to: LuaTable = scroll.get("to")?;
@@ -679,7 +727,10 @@ fn docview_supports_text_input(_: &Lua, _: LuaTable) -> LuaResult<bool> {
     Ok(true)
 }
 
-fn docview_scroll_to_make_visible(lua: &Lua, (this, line, col): (LuaTable, usize, usize)) -> LuaResult<()> {
+fn docview_scroll_to_make_visible(
+    lua: &Lua,
+    (this, line, col): (LuaTable, usize, usize),
+) -> LuaResult<()> {
     if this.get::<bool>("wrapping_enabled").unwrap_or(false) {
         super::linewrap::update_docview_breaks(lua, &this)?;
     }
@@ -687,7 +738,8 @@ fn docview_scroll_to_make_visible(lua: &Lua, (this, line, col): (LuaTable, usize
     let (_, ly): (f64, f64) = this.call_method("get_line_screen_position", (line, col))?;
     let lh = docview_get_line_height(lua, &this)?;
     let h_scrollbar: LuaTable = this.get("h_scrollbar")?;
-    let (_, _, _, scroll_h): (f64, f64, f64, f64) = h_scrollbar.call_method("get_track_rect", ())?;
+    let (_, _, _, scroll_h): (f64, f64, f64, f64) =
+        h_scrollbar.call_method("get_track_rect", ())?;
     let size: LuaTable = this.get("size")?;
     let overscroll = (lh * 2.0).min(size.get::<f64>("y")?);
     let scroll: LuaTable = this.get("scroll")?;
@@ -707,7 +759,8 @@ fn docview_scroll_to_make_visible(lua: &Lua, (this, line, col): (LuaTable, usize
     let xsup = xoffset + gw + xmargin;
     let xinf = xoffset - xmargin;
     let v_scrollbar: LuaTable = this.get("v_scrollbar")?;
-    let (_, _, scroll_w, _): (f64, f64, f64, f64) = v_scrollbar.call_method("get_track_rect", ())?;
+    let (_, _, scroll_w, _): (f64, f64, f64, f64) =
+        v_scrollbar.call_method("get_track_rect", ())?;
     let size_x = (size.get::<f64>("x")? - scroll_w).max(0.0);
     let scroll_x: f64 = scroll.get("x")?;
     if xsup > scroll_x + size_x {
@@ -736,7 +789,8 @@ fn docview_mouse_selection(
         (line1, col1, line2, col2) = (line2, col2, line1, col1);
     }
     if snap_type == "word" {
-        let res: (usize, usize) = translate.call_function("start_of_word", (doc.clone(), line1, col1))?;
+        let res: (usize, usize) =
+            translate.call_function("start_of_word", (doc.clone(), line1, col1))?;
         (line1, col1) = res;
         let res: (usize, usize) = translate.call_function("end_of_word", (doc, line2, col2))?;
         (line2, col2) = res;
@@ -762,7 +816,9 @@ fn docview_on_mouse_moved(
     let (gw, _) = gutter_width_from_method(&this)?;
     let position: LuaTable = this.get("position")?;
     let px: f64 = position.get("x")?;
-    if this.call_method::<bool>("scrollbar_hovering", ())? || this.call_method::<bool>("scrollbar_dragging", ())? {
+    if this.call_method::<bool>("scrollbar_hovering", ())?
+        || this.call_method::<bool>("scrollbar_dragging", ())?
+    {
         this.set("cursor", "arrow")?;
     } else if gw > 0.0 && x >= px && x <= px + gw {
         this.set("cursor", "arrow")?;
@@ -771,7 +827,8 @@ fn docview_on_mouse_moved(
         this.set("cursor", "ibeam")?;
     }
     if let Some(mouse_selecting) = this.get::<Option<LuaTable>>("mouse_selecting")? {
-        let (mut l1, mut c1): (usize, usize) = this.call_method("resolve_screen_position", (x, y))?;
+        let (mut l1, mut c1): (usize, usize) =
+            this.call_method("resolve_screen_position", (x, y))?;
         let mut l2: usize = mouse_selecting.get(1)?;
         let mut c2: usize = mouse_selecting.get(2)?;
         let snap_type: Option<String> = mouse_selecting.get(3)?;
@@ -792,8 +849,10 @@ fn docview_on_mouse_moved(
         } else {
             if let Some(snap) = snap_type {
                 let doc: LuaTable = this.get("doc")?;
-                (l1, c1, l2, c2) =
-                    docview_mouse_selection(lua, (this.clone(), doc.clone(), snap, l1, c1, l2, c2))?;
+                (l1, c1, l2, c2) = docview_mouse_selection(
+                    lua,
+                    (this.clone(), doc.clone(), snap, l1, c1, l2, c2),
+                )?;
             }
             let doc: LuaTable = this.get("doc")?;
             doc.call_method::<()>("set_selection", (l1, c1, l2, c2))?;
@@ -808,14 +867,21 @@ fn docview_on_mouse_pressed(
 ) -> LuaResult<LuaValue> {
     let hovering_gutter: bool = this.get("hovering_gutter")?;
     if button != "left" || !hovering_gutter {
-        return call_class_method(lua, "core.view", &this, "on_mouse_pressed", (button, x, y, clicks));
+        return call_class_method(
+            lua,
+            "core.view",
+            &this,
+            "on_mouse_pressed",
+            (button, x, y, clicks),
+        );
     }
     let (line, _): (usize, usize) = this.call_method("resolve_screen_position", (x, y))?;
     let keymap = require_table(lua, "core.keymap")?;
     let modkeys: LuaTable = keymap.get("modkeys")?;
     let doc: LuaTable = this.get("doc")?;
     if modkeys.get::<Option<bool>>("shift")?.unwrap_or(false) {
-        let (sline, _scol, sline2, _scol2): (usize, usize, usize, usize) = doc.call_method("get_selection", true)?;
+        let (sline, _scol, sline2, _scol2): (usize, usize, usize, usize) =
+            doc.call_method("get_selection", true)?;
         if line > sline {
             let end_len = line_text(&doc, line)?.len();
             doc.call_method::<()>("set_selection", (sline, 1, line, end_len))?;
@@ -859,10 +925,14 @@ fn docview_on_ime_text_editing(
     let ime_selection: LuaTable = this.get("ime_selection")?;
     ime_selection.set("from", start)?;
     ime_selection.set("size", length)?;
-    let (line1, col1, _line2, col2): (usize, usize, usize, usize) = doc.call_method("get_selection", true)?;
+    let (line1, col1, _line2, col2): (usize, usize, usize, usize) =
+        doc.call_method("get_selection", true)?;
     let col = col1.min(col2);
     this.call_method::<()>("update_ime_location", ())?;
-    this.call_method::<()>("scroll_to_make_visible", (line1, (col as i64 + start) as usize))?;
+    this.call_method::<()>(
+        "scroll_to_make_visible",
+        (line1, (col as i64 + start) as usize),
+    )?;
     Ok(())
 }
 
@@ -871,8 +941,10 @@ fn docview_update_ime_location(lua: &Lua, this: LuaTable) -> LuaResult<()> {
         return Ok(());
     }
     let doc: LuaTable = this.get("doc")?;
-    let (line1, col1, line2, col2): (usize, usize, usize, usize) = doc.call_method("get_selection", true)?;
-    let (x, y): (f64, f64) = this.call_method("get_line_screen_position", (line1, LuaValue::Nil))?;
+    let (line1, col1, line2, col2): (usize, usize, usize, usize) =
+        doc.call_method("get_selection", true)?;
+    let (x, y): (f64, f64) =
+        this.call_method("get_line_screen_position", (line1, LuaValue::Nil))?;
     let h = docview_get_line_height(lua, &this)?;
     let col = col1.min(col2);
     let ime_selection: LuaTable = this.get("ime_selection")?;
@@ -919,7 +991,8 @@ fn docview_update(lua: &Lua, this: LuaTable) -> LuaResult<()> {
     let core = require_table(lua, "core")?;
     let mouse_selecting = this.get::<Option<LuaTable>>("mouse_selecting")?.is_some();
     if !config.get::<bool>("disable_blink")?
-        && require_table(lua, "system")?.call_function::<bool>("window_has_focus", core.get::<LuaValue>("window")?)?
+        && require_table(lua, "system")?
+            .call_function::<bool>("window_has_focus", core.get::<LuaValue>("window")?)?
         && active_view_is(lua, &this)?
         && !mouse_selecting
     {
@@ -1008,7 +1081,10 @@ fn docview_draw_line_highlight(lua: &Lua, (this, x, y): (LuaTable, f64, f64)) ->
     )
 }
 
-fn docview_draw_line_text(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, f64)) -> LuaResult<f64> {
+fn docview_draw_line_text(
+    lua: &Lua,
+    (this, line, x, y): (LuaTable, usize, f64, f64),
+) -> LuaResult<f64> {
     let doc: LuaTable = this.get("doc")?;
     let lh = docview_get_line_height(lua, &this)?;
 
@@ -1077,7 +1153,8 @@ fn docview_draw_line_text_wrapped(
     let offsets: LuaTable = this.get("wrapped_line_offsets")?;
     let begin_width: f64 = offsets.get(line).unwrap_or(0.0);
 
-    let (mut vis_idx, _, count, _) = super::linewrap::get_line_idx_col_count(this, line, None, false)?;
+    let (mut vis_idx, _, count, _) =
+        super::linewrap::get_line_idx_col_count(this, line, None, false)?;
     let mut tx = x;
     let mut ty = y + ty_offset;
 
@@ -1124,7 +1201,10 @@ fn docview_draw_line_text_wrapped(
             // Strip trailing newline — the font renders it as a visible glyph.
             let draw_text = rendered.trim_end_matches('\n');
             if !draw_text.is_empty() {
-                tx = renderer.call_function("draw_text", (font.clone(), draw_text, tx, ty, color.clone()))?;
+                tx = renderer.call_function(
+                    "draw_text",
+                    (font.clone(), draw_text, tx, ty, color.clone()),
+                )?;
             }
             total_offset += render_len;
 
@@ -1142,13 +1222,22 @@ fn docview_draw_line_text_wrapped(
     Ok(lh * count as f64)
 }
 
-fn docview_draw_overwrite_caret(lua: &Lua, (this, x, y, width): (LuaTable, f64, f64, f64)) -> LuaResult<()> {
+fn docview_draw_overwrite_caret(
+    lua: &Lua,
+    (this, x, y, width): (LuaTable, f64, f64, f64),
+) -> LuaResult<()> {
     let style = require_table(lua, "core.style")?;
     let lh = docview_get_line_height(lua, &this)?;
     let caret_width: f64 = style.get("caret_width")?;
     renderer_draw_rect(
         lua,
-        (x, y + lh - caret_width, width, caret_width, style.get::<LuaValue>("caret")?),
+        (
+            x,
+            y + lh - caret_width,
+            width,
+            caret_width,
+            style.get::<LuaValue>("caret")?,
+        ),
     )
 }
 
@@ -1186,7 +1275,10 @@ fn is_word_char_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-fn docview_draw_selection_matches(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, f64)) -> LuaResult<()> {
+fn docview_draw_selection_matches(
+    lua: &Lua,
+    (this, line, x, y): (LuaTable, usize, f64, f64),
+) -> LuaResult<()> {
     let doc: LuaTable = this.get("doc")?;
     let Some((text, sel_line, sel_col1, sel_col2)) = selection_match_text(&doc)? else {
         return Ok(());
@@ -1197,12 +1289,20 @@ fn docview_draw_selection_matches(lua: &Lua, (this, line, x, y): (LuaTable, usiz
     let style = require_table(lua, "core.style")?;
     let color = style
         .get::<Option<LuaValue>>("selection_match")?
-        .or_else(|| style.get::<Option<LuaValue>>("line_highlight").ok().flatten())
+        .or_else(|| {
+            style
+                .get::<Option<LuaValue>>("line_highlight")
+                .ok()
+                .flatten()
+        })
         .unwrap_or(style.get("selection")?);
     let lh = docview_get_line_height(lua, &this)?;
     let mut start = 0usize;
     while start <= bytes.len() {
-        let Some(off) = bytes[start..].windows(needle.len()).position(|w| w == needle) else {
+        let Some(off) = bytes[start..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+        else {
             break;
         };
         let s = start + off + 1;
@@ -1220,7 +1320,10 @@ fn docview_draw_selection_matches(lua: &Lua, (this, line, x, y): (LuaTable, usiz
     Ok(())
 }
 
-fn docview_draw_line_body(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, f64)) -> LuaResult<f64> {
+fn docview_draw_line_body(
+    lua: &Lua,
+    (this, line, x, y): (LuaTable, usize, f64, f64),
+) -> LuaResult<f64> {
     let config = require_table(lua, "core.config")?;
     let doc: LuaTable = this.get("doc")?;
     let lh = docview_get_line_height(lua, &this)?;
@@ -1268,13 +1371,21 @@ fn docview_draw_line_body(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, 
     for (line1, mut col1, line2, mut col2) in selection_ranges(&doc, true)? {
         if line >= line1 && line <= line2 {
             let text = line_text(&doc, line)?;
-            if line1 != line { col1 = 1; }
-            if line2 != line { col2 = text.len() + 1; }
-            if col1 == col2 { continue; }
+            if line1 != line {
+                col1 = 1;
+            }
+            if line2 != line {
+                col2 = text.len() + 1;
+            }
+            if col1 == col2 {
+                continue;
+            }
 
             if is_wrapped {
-                let (idx1, _, _, _) = super::linewrap::get_line_idx_col_count(&this, line, Some(col1), false)?;
-                let (idx2, _, _, _) = super::linewrap::get_line_idx_col_count(&this, line, Some(col2), false)?;
+                let (idx1, _, _, _) =
+                    super::linewrap::get_line_idx_col_count(&this, line, Some(col1), false)?;
+                let (idx2, _, _, _) =
+                    super::linewrap::get_line_idx_col_count(&this, line, Some(col2), false)?;
                 let mut start_col_acc = 0usize;
                 for i in idx1..=idx2 {
                     let x1 = if i == idx1 {
@@ -1286,16 +1397,31 @@ fn docview_draw_line_body(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, 
                         x + this.call_method::<f64>("get_col_x_offset", (line, col2))?
                     } else {
                         start_col_acc += super::linewrap::get_idx_line_length(&this, i)?;
-                        x + this.call_method::<f64>("get_col_x_offset", (line, start_col_acc + 1, true))?
+                        x + this.call_method::<f64>(
+                            "get_col_x_offset",
+                            (line, start_col_acc + 1, true),
+                        )?
                     };
                     let row_y = y + (i - idx0) as f64 * lh;
-                    renderer_draw_rect(lua, (x1, row_y, (x2 - x1).max(0.0), lh, style.get::<LuaValue>("selection")?))?;
+                    renderer_draw_rect(
+                        lua,
+                        (
+                            x1,
+                            row_y,
+                            (x2 - x1).max(0.0),
+                            lh,
+                            style.get::<LuaValue>("selection")?,
+                        ),
+                    )?;
                 }
             } else {
                 let x1: f64 = this.call_method("get_col_x_offset", (line, col1))?;
                 let x2: f64 = this.call_method("get_col_x_offset", (line, col2))?;
                 if x1 != x2 {
-                    renderer_draw_rect(lua, (x + x1, y, x2 - x1, lh, style.get::<LuaValue>("selection")?))?;
+                    renderer_draw_rect(
+                        lua,
+                        (x + x1, y, x2 - x1, lh, style.get::<LuaValue>("selection")?),
+                    )?;
                 }
             }
         }
@@ -1304,7 +1430,10 @@ fn docview_draw_line_body(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, 
     let result = this.call_method::<f64>("draw_line_text", (line, x, y))?;
     if let Some(bm_pos) = this.get::<Option<LuaTable>>("_bm_pos")? {
         let style = require_table(lua, "core.style")?;
-        let plugins: Option<LuaTable> = config.get::<LuaTable>("plugins").ok().and_then(|p| p.get("bracketmatch").ok().flatten());
+        let plugins: Option<LuaTable> = config
+            .get::<LuaTable>("plugins")
+            .ok()
+            .and_then(|p| p.get("bracketmatch").ok().flatten());
         let color = plugins
             .as_ref()
             .and_then(|t| t.get::<Option<LuaValue>>("highlight_color").ok().flatten())
@@ -1325,7 +1454,10 @@ fn docview_draw_line_body(lua: &Lua, (this, line, x, y): (LuaTable, usize, f64, 
     Ok(result)
 }
 
-fn docview_draw_line_gutter(lua: &Lua, (this, line, x, y, width): (LuaTable, usize, f64, f64, f64)) -> LuaResult<f64> {
+fn docview_draw_line_gutter(
+    lua: &Lua,
+    (this, line, x, y, width): (LuaTable, usize, f64, f64, f64),
+) -> LuaResult<f64> {
     let style = require_table(lua, "core.style")?;
     let doc: LuaTable = this.get("doc")?;
     let mut color: LuaValue = style.get("line_number")?;
@@ -1340,7 +1472,16 @@ fn docview_draw_line_gutter(lua: &Lua, (this, line, x, y, width): (LuaTable, usi
     let lh = docview_get_line_height(lua, &this)?;
     common.call_function::<()>(
         "draw_text",
-        (docview_get_font(lua, &this)?, color, line, "right", x + padding_x, y, width, lh),
+        (
+            docview_get_font(lua, &this)?,
+            color,
+            line,
+            "right",
+            x + padding_x,
+            y,
+            width,
+            lh,
+        ),
     )?;
     if super::linewrap::is_active(&this)? {
         let (_, _, count, _) = super::linewrap::get_line_idx_col_count(&this, line, None, false)?;
@@ -1353,7 +1494,8 @@ fn docview_draw_ime_decoration(
     lua: &Lua,
     (this, line1, col1, line2, col2): (LuaTable, usize, usize, usize, usize),
 ) -> LuaResult<()> {
-    let (x, y): (f64, f64) = this.call_method("get_line_screen_position", (line1, LuaValue::Nil))?;
+    let (x, y): (f64, f64) =
+        this.call_method("get_line_screen_position", (line1, LuaValue::Nil))?;
     let style = require_table(lua, "core.style")?;
     let mut line_size = 1.0f64.max(lua.globals().get::<f64>("SCALE")?);
     let lh = docview_get_line_height(lua, &this)?;
@@ -1429,17 +1571,22 @@ fn docview_draw_overlay(lua: &Lua, this: LuaTable) -> LuaResult<()> {
         for (line1, col1, line2, col2) in selection_ranges(&doc, false)? {
             if line1 >= minline
                 && line1 <= maxline
-                && system.call_function::<bool>("window_has_focus", core.get::<LuaValue>("window")?)?
+                && system
+                    .call_function::<bool>("window_has_focus", core.get::<LuaValue>("window")?)?
             {
                 if ime.get::<bool>("editing")? {
                     this.call_method::<()>("draw_ime_decoration", (line1, col1, line2, col2))?;
                 } else if config.get::<bool>("disable_blink")?
-                    || ((core.get::<f64>("blink_timer")? - core.get::<f64>("blink_start")?) % period) < period / 2.0
+                    || ((core.get::<f64>("blink_timer")? - core.get::<f64>("blink_start")?)
+                        % period)
+                        < period / 2.0
                 {
-                    let (x, y): (f64, f64) = this.call_method("get_line_screen_position", (line1, col1))?;
+                    let (x, y): (f64, f64) =
+                        this.call_method("get_line_screen_position", (line1, col1))?;
                     if doc.get::<bool>("overwrite")? {
                         let ch: LuaString = doc.call_method("get_char", (line1, col1))?;
-                        let width: f64 = font_call_method(&docview_get_font(lua, &this)?, "get_width", ch)?;
+                        let width: f64 =
+                            font_call_method(&docview_get_font(lua, &this)?, "get_width", ch)?;
                         this.call_method::<()>("draw_overwrite_caret", (x, y, width))?;
                     } else {
                         this.call_method::<()>("draw_caret", (x, y))?;
@@ -1461,14 +1608,24 @@ fn docview_draw(lua: &Lua, this: LuaTable) -> LuaResult<()> {
     font_call_method::<()>(&font, "set_tab_size", indent_size)?;
     let (minline, maxline): (usize, usize) = this.call_method("get_visible_line_range", ())?;
     let lh = docview_get_line_height(lua, &this)?;
-    let (_, mut y): (f64, f64) = this.call_method("get_line_screen_position", (minline, LuaValue::Nil))?;
+    let (_, mut y): (f64, f64) =
+        this.call_method("get_line_screen_position", (minline, LuaValue::Nil))?;
     let (gw, gpad) = gutter_width_from_method(&this)?;
     for i in minline..=maxline {
-        let dy: f64 = this.call_method("draw_line_gutter", (i, this.get::<LuaTable>("position")?.get::<f64>("x")?, y, gw - gpad))?;
+        let dy: f64 = this.call_method(
+            "draw_line_gutter",
+            (
+                i,
+                this.get::<LuaTable>("position")?.get::<f64>("x")?,
+                y,
+                gw - gpad,
+            ),
+        )?;
         y += if dy == 0.0 { lh } else { dy };
     }
     let pos: LuaTable = this.get("position")?;
-    let (x, mut y): (f64, f64) = this.call_method("get_line_screen_position", (minline, LuaValue::Nil))?;
+    let (x, mut y): (f64, f64) =
+        this.call_method("get_line_screen_position", (minline, LuaValue::Nil))?;
     let core = require_table(lua, "core")?;
     core.call_function::<()>(
         "push_clip_rect",
@@ -1505,8 +1662,14 @@ fn docview_on_context_menu(lua: &Lua, this: LuaTable) -> LuaResult<LuaMultiValue
     items.set(2, mk(lua, "Copy", "doc:copy")?)?;
     items.set(3, mk(lua, "Paste", "doc:paste")?)?;
     items.set(4, divider.clone())?;
-    items.set(5, mk(lua, "Add Next Occurrence", "find-replace:select-add-next")?)?;
-    items.set(6, mk(lua, "Add All Occurrences", "find-replace:select-add-all")?)?;
+    items.set(
+        5,
+        mk(lua, "Add Next Occurrence", "find-replace:select-add-next")?,
+    )?;
+    items.set(
+        6,
+        mk(lua, "Add All Occurrences", "find-replace:select-add-all")?,
+    )?;
     items.set(7, divider)?;
     items.set(8, mk(lua, "Find", "find-replace:find")?)?;
     items.set(9, mk(lua, "Replace", "find-replace:replace")?)?;
@@ -1520,20 +1683,38 @@ fn docview_on_context_menu(lua: &Lua, this: LuaTable) -> LuaResult<LuaMultiValue
 
 fn populate_class(lua: &Lua, class: LuaTable) -> LuaResult<()> {
     let translate = lua.create_table()?;
-    translate.set("previous_page", lua.create_function(translate_previous_page)?)?;
+    translate.set(
+        "previous_page",
+        lua.create_function(translate_previous_page)?,
+    )?;
     translate.set("next_page", lua.create_function(translate_next_page)?)?;
-    translate.set("previous_line", lua.create_function(translate_previous_line)?)?;
+    translate.set(
+        "previous_line",
+        lua.create_function(translate_previous_line)?,
+    )?;
     translate.set("next_line", lua.create_function(translate_next_line)?)?;
     class.set("translate", translate)?;
     class.set("new", lua.create_function(docview_new)?)?;
     class.set("try_close", lua.create_function(docview_try_close)?)?;
     class.set("get_name", lua.create_function(docview_get_name)?)?;
     class.set("get_filename", lua.create_function(docview_get_filename)?)?;
-    class.set("get_scrollable_size", lua.create_function(docview_get_scrollable_size)?)?;
-    class.set("get_h_scrollable_size", lua.create_function(docview_get_h_scrollable_size)?)?;
+    class.set(
+        "get_scrollable_size",
+        lua.create_function(docview_get_scrollable_size)?,
+    )?;
+    class.set(
+        "get_h_scrollable_size",
+        lua.create_function(docview_get_h_scrollable_size)?,
+    )?;
     class.set("get_font", lua.create_function(docview_get_font_lua)?)?;
-    class.set("get_line_height", lua.create_function(docview_get_line_height_lua)?)?;
-    class.set("get_gutter_width", lua.create_function(docview_get_gutter_width_lua)?)?;
+    class.set(
+        "get_line_height",
+        lua.create_function(docview_get_line_height_lua)?,
+    )?;
+    class.set(
+        "get_gutter_width",
+        lua.create_function(docview_get_gutter_width_lua)?,
+    )?;
     class.set(
         "get_line_screen_position",
         lua.create_function(docview_get_line_screen_position_lua)?,
@@ -1546,13 +1727,22 @@ fn populate_class(lua: &Lua, class: LuaTable) -> LuaResult<()> {
         "get_visible_line_range",
         lua.create_function(docview_get_visible_line_range_lua)?,
     )?;
-    class.set("get_col_x_offset", lua.create_function(docview_get_col_x_offset_lua)?)?;
-    class.set("get_x_offset_col", lua.create_function(docview_get_x_offset_col_lua)?)?;
+    class.set(
+        "get_col_x_offset",
+        lua.create_function(docview_get_col_x_offset_lua)?,
+    )?;
+    class.set(
+        "get_x_offset_col",
+        lua.create_function(docview_get_x_offset_col_lua)?,
+    )?;
     class.set(
         "resolve_screen_position",
         lua.create_function(docview_resolve_screen_position)?,
     )?;
-    class.set("scroll_to_line", lua.create_function(docview_scroll_to_line)?)?;
+    class.set(
+        "scroll_to_line",
+        lua.create_function(docview_scroll_to_line)?,
+    )?;
     class.set(
         "supports_text_input",
         lua.create_function(docview_supports_text_input)?,
@@ -1561,10 +1751,22 @@ fn populate_class(lua: &Lua, class: LuaTable) -> LuaResult<()> {
         "scroll_to_make_visible",
         lua.create_function(docview_scroll_to_make_visible)?,
     )?;
-    class.set("on_mouse_moved", lua.create_function(docview_on_mouse_moved)?)?;
-    class.set("mouse_selection", lua.create_function(docview_mouse_selection)?)?;
-    class.set("on_mouse_pressed", lua.create_function(docview_on_mouse_pressed)?)?;
-    class.set("on_mouse_released", lua.create_function(docview_on_mouse_released)?)?;
+    class.set(
+        "on_mouse_moved",
+        lua.create_function(docview_on_mouse_moved)?,
+    )?;
+    class.set(
+        "mouse_selection",
+        lua.create_function(docview_mouse_selection)?,
+    )?;
+    class.set(
+        "on_mouse_pressed",
+        lua.create_function(docview_on_mouse_pressed)?,
+    )?;
+    class.set(
+        "on_mouse_released",
+        lua.create_function(docview_on_mouse_released)?,
+    )?;
     class.set("on_text_input", lua.create_function(docview_on_text_input)?)?;
     class.set(
         "on_ime_text_editing",
@@ -1579,7 +1781,10 @@ fn populate_class(lua: &Lua, class: LuaTable) -> LuaResult<()> {
         "draw_line_highlight",
         lua.create_function(docview_draw_line_highlight)?,
     )?;
-    class.set("draw_line_text", lua.create_function(docview_draw_line_text)?)?;
+    class.set(
+        "draw_line_text",
+        lua.create_function(docview_draw_line_text)?,
+    )?;
     class.set(
         "draw_overwrite_caret",
         lua.create_function(docview_draw_overwrite_caret)?,
@@ -1589,21 +1794,33 @@ fn populate_class(lua: &Lua, class: LuaTable) -> LuaResult<()> {
         "draw_selection_matches",
         lua.create_function(docview_draw_selection_matches)?,
     )?;
-    class.set("draw_line_body", lua.create_function(docview_draw_line_body)?)?;
-    class.set("draw_line_gutter", lua.create_function(docview_draw_line_gutter)?)?;
+    class.set(
+        "draw_line_body",
+        lua.create_function(docview_draw_line_body)?,
+    )?;
+    class.set(
+        "draw_line_gutter",
+        lua.create_function(docview_draw_line_gutter)?,
+    )?;
     class.set(
         "draw_ime_decoration",
         lua.create_function(docview_draw_ime_decoration)?,
     )?;
     class.set("draw_overlay", lua.create_function(docview_draw_overlay)?)?;
     class.set("draw", lua.create_function(docview_draw)?)?;
-    class.set("on_context_menu", lua.create_function(docview_on_context_menu)?)?;
+    class.set(
+        "on_context_menu",
+        lua.create_function(docview_on_context_menu)?,
+    )?;
     Ok(())
 }
 
 fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     let module = lua.create_table()?;
-    module.set("populate", lua.create_function(|lua, class: LuaTable| populate_class(lua, class))?)?;
+    module.set(
+        "populate",
+        lua.create_function(|lua, class: LuaTable| populate_class(lua, class))?,
+    )?;
     Ok(module)
 }
 
@@ -1621,7 +1838,10 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             let view: LuaTable = require_table(lua, "core.view")?;
             let context_menu: LuaTable = require_table(lua, "core.contextmenu")?;
             let docview: LuaTable = view.call_method("extend", ())?;
-            docview.set("__tostring", lua.create_function(|_, _: LuaValue| Ok("DocView"))?)?;
+            docview.set(
+                "__tostring",
+                lua.create_function(|_, _: LuaValue| Ok("DocView"))?,
+            )?;
             docview.set("context", "session")?;
             let divider: LuaValue = context_menu.get("DIVIDER")?;
             docview.set("_context_menu_divider", divider)?;

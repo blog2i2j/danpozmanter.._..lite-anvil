@@ -6,7 +6,6 @@ mod bracketmatch;
 mod builtin_embeds;
 mod colors;
 mod command;
-mod commandview;
 mod commands_command;
 mod commands_contextmenu;
 mod commands_core;
@@ -14,99 +13,100 @@ mod commands_dialog;
 mod commands_doc;
 mod commands_files;
 mod commands_findreplace;
+mod commands_git;
 mod commands_log;
 mod commands_root;
 mod commands_statusbar;
+mod commandview;
 mod common;
 mod config;
 mod contextmenu;
 mod detectindent;
+mod dirmonitor;
 mod dirwatch;
+mod doc;
+mod doc_layout;
+mod doc_module;
 mod doc_search;
-mod drawwhitespace;
 mod doc_translate;
+mod docview;
+mod drawwhitespace;
 mod emptyview;
 mod findfile;
 mod folding;
-mod commands_git;
+mod git;
 mod git_view;
 mod gitignore;
 mod highlighter;
 mod ime;
-mod keymap_macos;
 mod keymap;
+mod keymap_macos;
 mod language_md;
 mod lineguide;
 mod linewrap;
 mod linewrapping;
 mod logview;
-mod plugin_macro;
-mod markdown_preview;
-mod minimap;
-mod modkeys_generic;
-mod modkeys_macos;
-mod nagview;
-mod object;
-mod plugin_api;
-mod process_lua;
-mod project_lua;
-mod projectreplace;
-mod projectsearch;
-mod quote;
-mod reflow;
-mod regex_lua;
-mod remotessh;
-mod storage_lua;
-mod scale;
-mod strict;
-mod tabularize;
-mod theme_toggle;
-mod titleview;
-mod toolbarview;
-mod trimwhitespace;
-mod utf8string;
-mod dirmonitor;
-mod doc_module;
-mod docview;
-mod doc_layout;
-mod doc;
-mod git;
 mod lsp_manager;
 mod lsp_plugin_preloads;
 mod lsp_protocol;
 mod lsp_transport;
 mod markdown;
-mod node_model;
+mod markdown_preview;
+mod minimap;
+mod modkeys_generic;
+mod modkeys_macos;
+mod nagview;
 mod node;
+mod node_model;
+mod object;
 mod picker;
+mod plugin_api;
+mod plugin_macro;
 #[cfg(unix)]
 mod process;
+mod process_lua;
 mod project_fs;
+mod project_lua;
 mod project_manifest;
 mod project_model;
 mod project_search;
+mod projectreplace;
+mod projectsearch;
+mod quote;
+mod reflow;
 mod regex;
+mod regex_lua;
+mod remotessh;
 mod root_model;
 mod rootview;
+mod scale;
+mod scrollbar;
 mod session;
 mod status_model;
-mod scrollbar;
 mod statusview;
-mod style;
-mod syntax;
-mod terminal_plugin;
-mod terminal_view;
-mod view;
 mod storage;
+mod storage_lua;
+mod strict;
+mod style;
 mod symbol_index;
+mod syntax;
+mod tabularize;
 #[cfg(unix)]
 mod terminal;
 mod terminal_buffer;
+mod terminal_plugin;
+mod terminal_view;
+mod theme_toggle;
+mod titleview;
 mod tokenizer;
 mod tokenizer_shim;
+mod toolbarview;
 mod tree_model;
 mod treeview;
+mod trimwhitespace;
 mod utf8extra;
+mod utf8string;
+mod view;
 mod workspace;
 
 use mlua::prelude::*;
@@ -1165,33 +1165,78 @@ fn make_renderer(lua: &Lua) -> LuaResult<LuaTable> {
 fn make_renderer(lua: &Lua) -> LuaResult<LuaTable> {
     let font_mt = lua.create_table()?;
     font_mt.set("__index", font_mt.clone())?;
-    font_mt.set("load", lua.create_function(|lua, _: LuaMultiValue| {
-        let mt: LuaTable = lua.globals().get::<LuaTable>("renderer")?.get::<LuaTable>("font")?;
-        let obj = lua.create_table()?;
-        obj.set_metatable(Some(mt))?;
-        Ok(obj)
-    })?)?;
-    font_mt.set("copy", lua.create_function(|lua, _: LuaMultiValue| {
-        let mt: LuaTable = lua.globals().get::<LuaTable>("renderer")?.get::<LuaTable>("font")?;
-        let obj = lua.create_table()?;
-        obj.set_metatable(Some(mt))?;
-        Ok(obj)
-    })?)?;
-    font_mt.set("get_width", lua.create_function(|_, _: LuaMultiValue| Ok(0))?)?;
-    font_mt.set("get_height", lua.create_function(|_, _: LuaMultiValue| Ok(14))?)?;
-    font_mt.set("get_size", lua.create_function(|_, _: LuaMultiValue| Ok(14))?)?;
-    font_mt.set("set_size", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
-    font_mt.set("set_tab_size", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
-    font_mt.set("get_tab_size", lua.create_function(|_, _: LuaMultiValue| Ok(4))?)?;
+    font_mt.set(
+        "load",
+        lua.create_function(|lua, _: LuaMultiValue| {
+            let mt: LuaTable = lua
+                .globals()
+                .get::<LuaTable>("renderer")?
+                .get::<LuaTable>("font")?;
+            let obj = lua.create_table()?;
+            obj.set_metatable(Some(mt))?;
+            Ok(obj)
+        })?,
+    )?;
+    font_mt.set(
+        "copy",
+        lua.create_function(|lua, _: LuaMultiValue| {
+            let mt: LuaTable = lua
+                .globals()
+                .get::<LuaTable>("renderer")?
+                .get::<LuaTable>("font")?;
+            let obj = lua.create_table()?;
+            obj.set_metatable(Some(mt))?;
+            Ok(obj)
+        })?,
+    )?;
+    font_mt.set(
+        "get_width",
+        lua.create_function(|_, _: LuaMultiValue| Ok(0))?,
+    )?;
+    font_mt.set(
+        "get_height",
+        lua.create_function(|_, _: LuaMultiValue| Ok(14))?,
+    )?;
+    font_mt.set(
+        "get_size",
+        lua.create_function(|_, _: LuaMultiValue| Ok(14))?,
+    )?;
+    font_mt.set(
+        "set_size",
+        lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+    )?;
+    font_mt.set(
+        "set_tab_size",
+        lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+    )?;
+    font_mt.set(
+        "get_tab_size",
+        lua.create_function(|_, _: LuaMultiValue| Ok(4))?,
+    )?;
     let r = lua.create_table()?;
     r.set("font", font_mt)?;
-    r.set("begin_frame", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
-    r.set("end_frame", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
-    r.set("set_clip_rect", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
-    r.set("draw_rect", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
-    r.set("draw_text", lua.create_function(
-        |_, (_f, _t, x, _y, _c): (LuaValue, LuaValue, f64, LuaValue, LuaValue)| Ok(x),
-    )?)?;
+    r.set(
+        "begin_frame",
+        lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+    )?;
+    r.set(
+        "end_frame",
+        lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+    )?;
+    r.set(
+        "set_clip_rect",
+        lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+    )?;
+    r.set(
+        "draw_rect",
+        lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+    )?;
+    r.set(
+        "draw_text",
+        lua.create_function(
+            |_, (_f, _t, x, _y, _c): (LuaValue, LuaValue, f64, LuaValue, LuaValue)| Ok(x),
+        )?,
+    )?;
     Ok(r)
 }
 
@@ -1286,9 +1331,18 @@ fn make_renwindow(lua: &Lua) -> LuaResult<LuaTable> {
     {
         let win_mt = lua.create_table()?;
         win_mt.set("__index", win_mt.clone())?;
-        win_mt.set("get_size", lua.create_function(|_, _: LuaMultiValue| Ok((800, 600)))?)?;
-        win_mt.set("get_content_scale", lua.create_function(|_, _: LuaMultiValue| Ok(1.0f64))?)?;
-        win_mt.set("_persist", lua.create_function(|_, _: LuaMultiValue| Ok(()))?)?;
+        win_mt.set(
+            "get_size",
+            lua.create_function(|_, _: LuaMultiValue| Ok((800, 600)))?,
+        )?;
+        win_mt.set(
+            "get_content_scale",
+            lua.create_function(|_, _: LuaMultiValue| Ok(1.0f64))?,
+        )?;
+        win_mt.set(
+            "_persist",
+            lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
+        )?;
         let win = lua.create_table()?;
         win.set_metatable(Some(win_mt))?;
         let win_clone = win.clone();

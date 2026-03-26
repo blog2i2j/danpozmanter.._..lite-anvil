@@ -106,95 +106,99 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         let string_find: LuaFunction =
                             lua.globals().get::<LuaTable>("string")?.get("find")?;
 
-                        let search_line = |line_idx: i64,
-                                           start_col: i64,
-                                           reverse: bool|
-                         -> LuaResult<Option<(i64, i64)>> {
-                            let mut line_text: String = lines.raw_get(line_idx)?;
-                            if no_case && !use_regex {
-                                line_text = line_text.to_lowercase();
-                            }
-                            if reverse {
-                                rfind(
-                                    lua,
-                                    &string_find,
-                                    compiled_re.as_ref(),
-                                    &line_text,
-                                    &text,
-                                    start_col - 1,
-                                    plain,
-                                )
-                            } else if let Some(re) = compiled_re.as_ref() {
-                                let cmatch: LuaFunction =
-                                    re.as_table().ok_or_else(|| {
-                                        LuaError::RuntimeError("regex not a table".into())
-                                    })?
-                                    .get("cmatch")?;
-                                let result: LuaMultiValue =
-                                    cmatch.call((re.clone(), line_text.clone(), start_col))?;
-                                if result.len() >= 2 {
-                                    let s = result[0]
-                                        .as_integer()
+                        let search_line =
+                            |line_idx: i64,
+                             start_col: i64,
+                             reverse: bool|
+                             -> LuaResult<Option<(i64, i64)>> {
+                                let mut line_text: String = lines.raw_get(line_idx)?;
+                                if no_case && !use_regex {
+                                    line_text = line_text.to_lowercase();
+                                }
+                                if reverse {
+                                    rfind(
+                                        lua,
+                                        &string_find,
+                                        compiled_re.as_ref(),
+                                        &line_text,
+                                        &text,
+                                        start_col - 1,
+                                        plain,
+                                    )
+                                } else if let Some(re) = compiled_re.as_ref() {
+                                    let cmatch: LuaFunction = re
+                                        .as_table()
                                         .ok_or_else(|| {
+                                            LuaError::RuntimeError("regex not a table".into())
+                                        })?
+                                        .get("cmatch")?;
+                                    let result: LuaMultiValue =
+                                        cmatch.call((re.clone(), line_text.clone(), start_col))?;
+                                    if result.len() >= 2 {
+                                        let s = result[0].as_integer().ok_or_else(|| {
                                             LuaError::RuntimeError("bad regex match".into())
                                         })?;
-                                    let e = result[1]
-                                        .as_integer()
-                                        .ok_or_else(|| {
+                                        let e = result[1].as_integer().ok_or_else(|| {
                                             LuaError::RuntimeError("bad regex match".into())
-                                        })?
-                                        - 1;
-                                    Ok(Some((s, e)))
-                                } else {
-                                    Ok(None)
-                                }
-                            } else {
-                                let result: LuaMultiValue = string_find
-                                    .call((line_text.clone(), text.clone(), start_col, plain))?;
-                                if result.len() >= 2 {
-                                    let s = result[0].as_integer().ok_or_else(|| {
-                                        LuaError::RuntimeError("bad find result".into())
-                                    })?;
-                                    let e = result[1].as_integer().ok_or_else(|| {
-                                        LuaError::RuntimeError("bad find result".into())
-                                    })?;
-                                    Ok(Some((s, e)))
-                                } else {
-                                    Ok(None)
-                                }
-                            }
-                        };
-
-                        let try_search =
-                            |start: i64, finish: i64, step: i64, init_col: i64| -> LuaResult<LuaMultiValue> {
-                                let mut col = init_col;
-                                let mut l = start;
-                                loop {
-                                    if let Some((s, e)) = search_line(l, col, reverse)? {
-                                        let line_text: String = lines.raw_get(l)?;
-                                        let mut line2 = l;
-                                        let mut end_col = e + 1;
-                                        if e as usize >= line_text.len() {
-                                            line2 = l + 1;
-                                            end_col = 1;
-                                        }
-                                        if line2 <= num_lines {
-                                            return Ok(LuaMultiValue::from_vec(vec![
-                                                LuaValue::Integer(l),
-                                                LuaValue::Integer(s),
-                                                LuaValue::Integer(line2),
-                                                LuaValue::Integer(end_col),
-                                            ]));
-                                        }
+                                        })? - 1;
+                                        Ok(Some((s, e)))
+                                    } else {
+                                        Ok(None)
                                     }
-                                    col = if reverse { -1 } else { 1 };
-                                    if (step > 0 && l >= finish) || (step < 0 && l <= finish) {
-                                        break;
+                                } else {
+                                    let result: LuaMultiValue = string_find.call((
+                                        line_text.clone(),
+                                        text.clone(),
+                                        start_col,
+                                        plain,
+                                    ))?;
+                                    if result.len() >= 2 {
+                                        let s = result[0].as_integer().ok_or_else(|| {
+                                            LuaError::RuntimeError("bad find result".into())
+                                        })?;
+                                        let e = result[1].as_integer().ok_or_else(|| {
+                                            LuaError::RuntimeError("bad find result".into())
+                                        })?;
+                                        Ok(Some((s, e)))
+                                    } else {
+                                        Ok(None)
                                     }
-                                    l += step;
                                 }
-                                Ok(LuaMultiValue::new())
                             };
+
+                        let try_search = |start: i64,
+                                          finish: i64,
+                                          step: i64,
+                                          init_col: i64|
+                         -> LuaResult<LuaMultiValue> {
+                            let mut col = init_col;
+                            let mut l = start;
+                            loop {
+                                if let Some((s, e)) = search_line(l, col, reverse)? {
+                                    let line_text: String = lines.raw_get(l)?;
+                                    let mut line2 = l;
+                                    let mut end_col = e + 1;
+                                    if e as usize >= line_text.len() {
+                                        line2 = l + 1;
+                                        end_col = 1;
+                                    }
+                                    if line2 <= num_lines {
+                                        return Ok(LuaMultiValue::from_vec(vec![
+                                            LuaValue::Integer(l),
+                                            LuaValue::Integer(s),
+                                            LuaValue::Integer(line2),
+                                            LuaValue::Integer(end_col),
+                                        ]));
+                                    }
+                                }
+                                col = if reverse { -1 } else { 1 };
+                                if (step > 0 && l >= finish) || (step < 0 && l <= finish) {
+                                    break;
+                                }
+                                l += step;
+                            }
+                            Ok(LuaMultiValue::new())
+                        };
 
                         let (start, finish, step) = if reverse {
                             (line, 1i64, -1i64)
@@ -250,8 +254,7 @@ fn rfind(
                 .as_table()
                 .ok_or_else(|| LuaError::RuntimeError("regex not a table".into()))?
                 .get("cmatch")?;
-            let result: LuaMultiValue =
-                cmatch.call((re.clone(), text.to_string(), pos))?;
+            let result: LuaMultiValue = cmatch.call((re.clone(), text.to_string(), pos))?;
             if result.len() >= 2 {
                 let s = result[0]
                     .as_integer()

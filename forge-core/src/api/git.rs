@@ -109,8 +109,7 @@ struct CommandResult {
     stderr: String,
 }
 
-static REPOS: Lazy<Mutex<HashMap<String, RepoState>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static REPOS: Lazy<Mutex<HashMap<String, RepoState>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static PATH_ROOTS: Lazy<Mutex<HashMap<String, Option<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static PENDING: Lazy<Mutex<VecDeque<(String, RefreshOutcome)>>> =
@@ -198,7 +197,13 @@ fn parse_status_raw(root: &str, stdout: &str, stderr: &str, success: bool) -> Re
             a.rel.cmp(&b.rel)
         }
     });
-    RefreshOutcome::Success { branch, ahead, behind, detached, ordered: entries }
+    RefreshOutcome::Success {
+        branch,
+        ahead,
+        behind,
+        detached,
+        ordered: entries,
+    }
 }
 
 /// Spawns a background refresh thread for `root` if none is already running.
@@ -541,8 +546,17 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     )
                 })
             };
-            let Some((branch, ahead, behind, detached, dirty, refreshing, last_refresh, error, ordered)) =
-                data
+            let Some((
+                branch,
+                ahead,
+                behind,
+                detached,
+                dirty,
+                refreshing,
+                last_refresh,
+                error,
+                ordered,
+            )) = data
             else {
                 return Ok(LuaValue::Nil);
             };
@@ -584,7 +598,10 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let entry = {
                 let repos = REPOS.lock();
                 repos.get(&root).and_then(|s| {
-                    s.files_by_path.get(&norm).and_then(|&i| s.ordered.get(i)).cloned()
+                    s.files_by_path
+                        .get(&norm)
+                        .and_then(|&i| s.ordered.get(i))
+                        .cloned()
                 })
             };
             match entry {
@@ -646,7 +663,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     s.refreshing = false;
                     s.last_refresh = monotonic_secs();
                     match outcome {
-                        RefreshOutcome::Success { branch, ahead, behind, detached, ordered } => {
+                        RefreshOutcome::Success {
+                            branch,
+                            ahead,
+                            behind,
+                            detached,
+                            ordered,
+                        } => {
                             s.files_by_path.clear();
                             for (i, e) in ordered.iter().enumerate() {
                                 s.files_by_path.insert(e.path.clone(), i);

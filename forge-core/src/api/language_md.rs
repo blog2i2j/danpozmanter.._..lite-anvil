@@ -156,7 +156,8 @@ fn install(lua: &Lua) -> LuaResult<()> {
         .call::<LuaFunction>(tick)?;
 
     let core = require_table(lua, "core")?;
-    core.get::<LuaFunction>("add_thread")?.call::<()>(thread_fn)?;
+    core.get::<LuaFunction>("add_thread")?
+        .call::<()>(thread_fn)?;
 
     Ok(())
 }

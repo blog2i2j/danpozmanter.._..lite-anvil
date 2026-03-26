@@ -29,11 +29,7 @@ fn doc_selections(doc: &LuaTable) -> LuaResult<Vec<usize>> {
     selections.sequence_values::<usize>().collect()
 }
 
-fn selection_ranges(
-    doc: &LuaTable,
-    sort: bool,
-    reverse: bool,
-) -> LuaResult<Vec<SelectionRange>> {
+fn selection_ranges(doc: &LuaTable, sort: bool, reverse: bool) -> LuaResult<Vec<SelectionRange>> {
     let selections = doc_selections(doc)?;
     let mut out = Vec::with_capacity(selections.len() / 4);
     for (n, chunk) in selections.chunks_exact(4).enumerate() {
@@ -51,16 +47,16 @@ fn selection_ranges(
     Ok(out)
 }
 
-fn multiline_selection_ranges(
-    doc: &LuaTable,
-    sort: bool,
-) -> LuaResult<Vec<SelectionRange>> {
+fn multiline_selection_ranges(doc: &LuaTable, sort: bool) -> LuaResult<Vec<SelectionRange>> {
     let lines: LuaTable = doc.get("lines")?;
     let mut out = Vec::new();
     for (idx, line1, col1, mut line2, mut col2) in selection_ranges(doc, sort, false)? {
         if line2 > line1 && col2 == 1 {
             line2 -= 1;
-            col2 = lines.get::<Option<String>>(line2)?.map(|s| s.len()).unwrap_or(1);
+            col2 = lines
+                .get::<Option<String>>(line2)?
+                .map(|s| s.len())
+                .unwrap_or(1);
         }
         out.push((idx, line1, col1, line2, col2));
     }
@@ -124,7 +120,9 @@ fn save_with_filename(lua: &Lua, filename: Option<String>) -> LuaResult<()> {
         Ok(()) => {
             let saved_filename: String = doc.get("filename")?;
             if doc.get::<Option<String>>("abs_filename")?.is_some()
-                && core.get::<Option<LuaFunction>>("update_recent_file")?.is_some()
+                && core
+                    .get::<Option<LuaFunction>>("update_recent_file")?
+                    .is_some()
             {
                 let update_recent: LuaFunction = core.get("update_recent_file")?;
                 update_recent.call::<()>(doc.get::<String>("abs_filename")?)?;
@@ -184,7 +182,10 @@ fn insert_paste(doc: &LuaTable, value: String, whole_line: bool, idx: usize) -> 
     if whole_line {
         let (line1, col1, _, _, _): (usize, usize, usize, usize, Option<bool>) =
             doc.call_method("get_selection_idx", idx)?;
-        doc.call_method::<()>("insert", (line1, 1, format!("{}\n", value.replace('\r', ""))))?;
+        doc.call_method::<()>(
+            "insert",
+            (line1, 1, format!("{}\n", value.replace('\r', ""))),
+        )?;
         if col1 == 1 {
             doc.call_method::<()>("move_to_cursor", (idx, value.len() + 1))?;
         }
@@ -222,7 +223,10 @@ fn cut_or_copy(lua: &Lua, delete: bool) -> LuaResult<()> {
                 } else if lines_len == 1 {
                     doc.call_method::<()>("remove", (line1, 1, line1, f64::INFINITY))?;
                 } else {
-                    doc.call_method::<()>("remove", (line1 - 1, f64::INFINITY, line1, f64::INFINITY))?;
+                    doc.call_method::<()>(
+                        "remove",
+                        (line1 - 1, f64::INFINITY, line1, f64::INFINITY),
+                    )?;
                 }
                 doc.call_method::<()>("set_selections", (idx, line1, col1, line2, col2))?;
             }
@@ -377,7 +381,12 @@ fn line_comment(
             };
         }
     }
-    Ok((line1, out_col1.max(1) as usize, line2, out_col2.max(1) as usize))
+    Ok((
+        line1,
+        out_col1.max(1) as usize,
+        line2,
+        out_col2.max(1) as usize,
+    ))
 }
 
 fn block_comment(
@@ -404,7 +413,8 @@ fn block_comment(
     let col1 = col1 + word_start.saturating_sub(1);
     let col2 = word_end;
 
-    let block_start: String = doc.call_method("get_text", (line1, col1, line1, col1 + open.len()))?;
+    let block_start: String =
+        doc.call_method("get_text", (line1, col1, line1, col1 + open.len()))?;
     let block_end: String = doc.call_method(
         "get_text",
         (line2, col2.saturating_sub(close.len()), line2, col2),
@@ -413,8 +423,10 @@ fn block_comment(
     if block_start == open && block_end == close {
         let mut start_len = open.len();
         let mut stop_len = close.len();
-        let after: String =
-            doc.call_method("get_text", (line1, col1 + open.len(), line1, col1 + open.len() + 1))?;
+        let after: String = doc.call_method(
+            "get_text",
+            (line1, col1 + open.len(), line1, col1 + open.len() + 1),
+        )?;
         if after.chars().last().is_some_and(|ch| ch.is_whitespace()) {
             start_len += 1;
         }
@@ -442,7 +454,12 @@ fn add_command(map: &LuaTable, name: &str, func: LuaFunction) -> LuaResult<()> {
     map.set(name, func)
 }
 
-fn register_text_transform(lua: &Lua, commands: &LuaTable, name: &str, transform: &str) -> LuaResult<()> {
+fn register_text_transform(
+    lua: &Lua,
+    commands: &LuaTable,
+    name: &str,
+    transform: &str,
+) -> LuaResult<()> {
     let command_name = name.to_string();
     let transform_name = transform.to_string();
     add_command(
@@ -579,7 +596,13 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         "doc:select-none",
         lua.create_function(|_, dv: LuaTable| {
             let doc: LuaTable = dv.get("doc")?;
-            type Sel = (Option<usize>, Option<usize>, Option<usize>, Option<usize>, Option<bool>);
+            type Sel = (
+                Option<usize>,
+                Option<usize>,
+                Option<usize>,
+                Option<usize>,
+                Option<bool>,
+            );
             let (mut l1, mut c1, _, _, _): Sel =
                 doc.call_method("get_selection_idx", doc.get::<usize>("last_selection")?)?;
             if l1.is_none() {
@@ -591,17 +614,29 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             Ok(())
         })?,
     )?;
-    add_command(&commands, "doc:cut", lua.create_function(|lua, ()| cut_or_copy(lua, true))?)?;
-    add_command(&commands, "doc:copy", lua.create_function(|lua, ()| cut_or_copy(lua, false))?)?;
+    add_command(
+        &commands,
+        "doc:cut",
+        lua.create_function(|lua, ()| cut_or_copy(lua, true))?,
+    )?;
+    add_command(
+        &commands,
+        "doc:copy",
+        lua.create_function(|lua, ()| cut_or_copy(lua, false))?,
+    )?;
     add_command(
         &commands,
         "doc:undo",
-        lua.create_function(|_, dv: LuaTable| dv.get::<LuaTable>("doc")?.call_method::<()>("undo", ()))?,
+        lua.create_function(|_, dv: LuaTable| {
+            dv.get::<LuaTable>("doc")?.call_method::<()>("undo", ())
+        })?,
     )?;
     add_command(
         &commands,
         "doc:redo",
-        lua.create_function(|_, dv: LuaTable| dv.get::<LuaTable>("doc")?.call_method::<()>("redo", ()))?,
+        lua.create_function(|_, dv: LuaTable| {
+            dv.get::<LuaTable>("doc")?.call_method::<()>("redo", ())
+        })?,
     )?;
     add_command(
         &commands,
@@ -653,12 +688,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 for (idx, _, _, _, _) in selection_ranges(&doc, false, false)? {
                     if only_whole_lines {
                         for cb_idx in 1..=whole_line.raw_len() {
-                            insert_paste(
-                                &doc,
-                                cursor_clipboard.get::<String>(cb_idx)?,
-                                true,
-                                idx,
-                            )?;
+                            insert_paste(&doc, cursor_clipboard.get::<String>(cb_idx)?, true, idx)?;
                         }
                         new_selections.push(
                             doc.call_method::<(usize, usize, usize, usize, Option<bool>)>(
@@ -773,7 +803,9 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             for (idx, line1, col1, line2, col2) in selection_ranges(&doc, true, true)? {
                 if line1 == line2
                     && col1 == col2
-                    && lines.get::<String>(line1)?[col1.saturating_sub(1)..].trim().is_empty()
+                    && lines.get::<String>(line1)?[col1.saturating_sub(1)..]
+                        .trim()
+                        .is_empty()
                 {
                     doc.call_method::<()>("remove", (line1, col1, line1, f64::INFINITY))?;
                 }
@@ -839,7 +871,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let start_of_word: LuaFunction = translate.get("start_of_word")?;
             let end_of_word: LuaFunction = translate.get("end_of_word")?;
             for (idx, line1, col1, _, _) in selection_ranges(&doc, true, false)? {
-                let (line1, col1): (usize, usize) = start_of_word.call((doc.clone(), line1, col1))?;
+                let (line1, col1): (usize, usize) =
+                    start_of_word.call((doc.clone(), line1, col1))?;
                 let (line2, col2): (usize, usize) = end_of_word.call((doc.clone(), line1, col1))?;
                 doc.call_method::<()>("set_selections", (idx, line2, col2, line1, col1))?;
             }
@@ -949,7 +982,10 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     let text = lines.get::<String>(line1 - 1)?;
                     doc.call_method::<()>("insert", (line2 + 1, 1, text))?;
                     doc.call_method::<()>("remove", (line1 - 1, 1, line1, 1))?;
-                    doc.call_method::<()>("set_selections", (idx, line1 - 1, col1, line2 - 1, col2))?;
+                    doc.call_method::<()>(
+                        "set_selections",
+                        (idx, line1 - 1, col1, line2 - 1, col2),
+                    )?;
                 }
             }
             Ok(())
@@ -967,7 +1003,10 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     let text = lines.get::<String>(line2 + 1)?;
                     doc.call_method::<()>("remove", (line2 + 1, 1, line2 + 2, 1))?;
                     doc.call_method::<()>("insert", (line1, 1, text))?;
-                    doc.call_method::<()>("set_selections", (idx, line1 + 1, col1, line2 + 1, col2))?;
+                    doc.call_method::<()>(
+                        "set_selections",
+                        (idx, line1 + 1, col1, line2 + 1, col2),
+                    )?;
                 }
             }
             Ok(())
@@ -986,8 +1025,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     let highlighter: LuaTable = doc.get("highlighter")?;
                     let prev_line: LuaTable = highlighter.call_method("get_line", line1 - 1)?;
                     let state: LuaValue = prev_line.get("state")?;
-                    let syntaxes: LuaTable =
-                        tokenizer.call_function("extract_subsyntaxes", (current_syntax.clone(), state))?;
+                    let syntaxes: LuaTable = tokenizer
+                        .call_function("extract_subsyntaxes", (current_syntax.clone(), state))?;
                     for syntax in syntaxes.sequence_values::<LuaTable>() {
                         let syntax = syntax?;
                         if syntax.get::<Option<LuaValue>>("block_comment")?.is_some() {
@@ -999,7 +1038,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
 
                 let comment = current_syntax.get::<Option<LuaTable>>("block_comment")?;
                 let Some(comment) = comment else {
-                    if doc.get::<LuaTable>("syntax")?
+                    if doc
+                        .get::<LuaTable>("syntax")?
                         .get::<Option<LuaValue>>("comment")?
                         .is_some()
                     {
@@ -1011,7 +1051,10 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 if line1 == line2 && col1 == col2 {
                     let lines: LuaTable = doc.get("lines")?;
                     col1 = 1;
-                    col2 = lines.get::<Option<String>>(line2)?.map(|s| s.len()).unwrap_or(1);
+                    col2 = lines
+                        .get::<Option<String>>(line2)?
+                        .map(|s| s.len())
+                        .unwrap_or(1);
                 }
 
                 let (l1, c1, l2, c2) = block_comment(&doc, comment, line1, col1, line2, col2)?;
@@ -1032,8 +1075,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     let highlighter: LuaTable = doc.get("highlighter")?;
                     let prev_line: LuaTable = highlighter.call_method("get_line", line1 - 1)?;
                     let state: LuaValue = prev_line.get("state")?;
-                    let syntaxes: LuaTable =
-                        tokenizer.call_function("extract_subsyntaxes", (current_syntax.clone(), state))?;
+                    let syntaxes: LuaTable = tokenizer
+                        .call_function("extract_subsyntaxes", (current_syntax.clone(), state))?;
                     for syntax in syntaxes.sequence_values::<LuaTable>() {
                         let syntax = syntax?;
                         if syntax.get::<Option<LuaValue>>("comment")?.is_some()
@@ -1045,11 +1088,12 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                     }
                 }
 
-                let comment = if let Some(comment) = current_syntax.get::<Option<LuaValue>>("comment")? {
-                    Some(comment)
-                } else {
-                    current_syntax.get::<Option<LuaValue>>("block_comment")?
-                };
+                let comment =
+                    if let Some(comment) = current_syntax.get::<Option<LuaValue>>("comment")? {
+                        Some(comment)
+                    } else {
+                        current_syntax.get::<Option<LuaValue>>("block_comment")?
+                    };
                 if let Some(comment) = comment {
                     let (l1, c1, l2, c2) = line_comment(&doc, comment, line1, col1, line2, col2)?;
                     doc.call_method::<()>("set_selections", (idx, l1, c1, l2, c2))?;
@@ -1070,13 +1114,12 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let dv_suggest = dv.clone();
             command_view.call_method::<()>(
                 "enter",
-                (
-                    "Go To Line",
-                    {
-                        let spec = lua.create_table()?;
-                        spec.set(
-                            "submit",
-                            lua.create_function(move |lua, (text, item): (String, Option<LuaTable>)| {
+                ("Go To Line", {
+                    let spec = lua.create_table()?;
+                    spec.set(
+                        "submit",
+                        lua.create_function(
+                            move |lua, (text, item): (String, Option<LuaTable>)| {
                                 let line = if let Some(item) = item {
                                     item.get::<usize>("line")?
                                 } else if text.is_empty() {
@@ -1095,39 +1138,41 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                                 doc.call_method::<()>("set_selection", (line, 1))?;
                                 dv_submit.call_method::<()>("scroll_to_line", (line, true))?;
                                 Ok(())
-                            })?,
-                        )?;
-                        spec.set(
-                            "suggest",
-                            lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
-                                if text.chars().all(|ch| ch.is_ascii_digit()) {
-                                    return Ok(LuaValue::Nil);
-                                }
+                            },
+                        )?,
+                    )?;
+                    spec.set(
+                        "suggest",
+                        lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
+                            if text.chars().all(|ch| ch.is_ascii_digit()) {
+                                return Ok(LuaValue::Nil);
+                            }
 
-                                let doc: LuaTable = dv_suggest.get("doc")?;
-                                let lines: LuaTable = doc.get("lines")?;
-                                let items = lua.create_table()?;
-                                let mt = lua.create_table()?;
-                                mt.set(
-                                    "__tostring",
-                                    lua.create_function(|_, item: LuaTable| item.get::<String>("text"))?,
-                                )?;
-                                for idx in 1..=lines.raw_len() {
-                                    let item = lua.create_table()?;
-                                    item.set("text", lines.get::<String>(idx)?.trim_end_matches('\n'))?;
-                                    item.set("line", idx)?;
-                                    item.set("info", format!("line: {idx}"))?;
-                                    item.set_metatable(Some(mt.clone()))?;
-                                    items.set(idx, item)?;
-                                }
+                            let doc: LuaTable = dv_suggest.get("doc")?;
+                            let lines: LuaTable = doc.get("lines")?;
+                            let items = lua.create_table()?;
+                            let mt = lua.create_table()?;
+                            mt.set(
+                                "__tostring",
+                                lua.create_function(|_, item: LuaTable| {
+                                    item.get::<String>("text")
+                                })?,
+                            )?;
+                            for idx in 1..=lines.raw_len() {
+                                let item = lua.create_table()?;
+                                item.set("text", lines.get::<String>(idx)?.trim_end_matches('\n'))?;
+                                item.set("line", idx)?;
+                                item.set("info", format!("line: {idx}"))?;
+                                item.set_metatable(Some(mt.clone()))?;
+                                items.set(idx, item)?;
+                            }
 
-                                let common = require_table(lua, "core.common")?;
-                                common.call_function("fuzzy_match", (items, text))
-                            })?,
-                        )?;
-                        spec
-                    },
-                ),
+                            let common = require_table(lua, "core.common")?;
+                            common.call_function("fuzzy_match", (items, text))
+                        })?,
+                    )?;
+                    spec
+                }),
             )
         })?,
     )?;
@@ -1163,7 +1208,9 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 if let Some(last_active) = core.get::<Option<LuaTable>>("last_active_view")? {
                     let last_doc: LuaTable = last_active.get("doc")?;
                     if let Some(abs) = last_doc.get::<Option<String>>("abs_filename")? {
-                        if let Some(project) = core.call_function::<Option<LuaTable>>("root_project", ())? {
+                        if let Some(project) =
+                            core.call_function::<Option<LuaTable>>("root_project", ())?
+                        {
                             if let Some((dirname, _)) = abs.rsplit_once(['/', '\\']) {
                                 let normalized: String =
                                     project.call_method("normalize_path", dirname.to_string())?;
@@ -1184,68 +1231,70 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let doc_for_suggest = doc.clone();
             command_view.call_method::<()>(
                 "enter",
-                (
-                    "Save As",
-                    {
-                        let spec = lua.create_table()?;
-                        if let Some(text) = text {
-                            spec.set("text", text)?;
-                        }
-                        spec.set(
-                            "suggest",
-                            lua.create_function(move |lua, input: String| -> LuaResult<LuaValue> {
-                                let common = require_table(lua, "core.common")?;
-                                let core = require_table(lua, "core")?;
-                                let project = core.call_function::<Option<LuaTable>>("root_project", ())?;
-                                let home_expand: String = common.call_function("home_expand", input.clone())?;
-                                let abs = if let Some(project) = project {
+                ("Save As", {
+                    let spec = lua.create_table()?;
+                    if let Some(text) = text {
+                        spec.set("text", text)?;
+                    }
+                    spec.set(
+                        "suggest",
+                        lua.create_function(move |lua, input: String| -> LuaResult<LuaValue> {
+                            let common = require_table(lua, "core.common")?;
+                            let core = require_table(lua, "core")?;
+                            let project =
+                                core.call_function::<Option<LuaTable>>("root_project", ())?;
+                            let home_expand: String =
+                                common.call_function("home_expand", input.clone())?;
+                            let abs = if let Some(project) = project {
+                                project.call_method::<String>(
+                                    "absolute_path",
                                     project.call_method::<String>(
-                                        "absolute_path",
-                                        project.call_method::<String>("normalize_path", home_expand.clone())?,
-                                    )?
-                                } else {
-                                    lua.globals()
-                                        .get::<LuaTable>("system")?
-                                        .call_function::<String>("absolute_path", home_expand.clone())?
-                                };
-                                status_view.call_method::<()>(
-                                    "show_tooltip",
-                                    format!(
-                                        "{} -> {}",
-                                        doc_for_suggest.call_method::<String>("get_name", ())?,
-                                        common.call_function::<String>("home_encode", abs)?
-                                    ),
-                                )?;
-                                let suggestions: LuaValue =
-                                    common.call_function("path_suggest", home_expand)?;
-                                common.call_function("home_encode_list", suggestions)
-                            })?,
-                        )?;
-                        spec.set(
-                            "submit",
-                            lua.create_function(move |lua, filename: String| {
-                                require_table(lua, "core")?
-                                    .get::<LuaTable>("status_view")?
-                                    .call_method::<()>("remove_tooltip", ())?;
-                                let common = require_table(lua, "core.common")?;
-                                save_with_filename(
-                                    lua,
-                                    Some(common.call_function("home_expand", filename)?),
-                                )
-                            })?,
-                        )?;
-                        spec.set(
-                            "cancel",
-                            lua.create_function(move |lua, ()| {
-                                require_table(lua, "core")?
-                                    .get::<LuaTable>("status_view")?
-                                    .call_method::<()>("remove_tooltip", ())?;
-                                Ok(())
-                            })?,
-                        )?;
-                        spec
-                    },
-                ),
+                                        "normalize_path",
+                                        home_expand.clone(),
+                                    )?,
+                                )?
+                            } else {
+                                lua.globals()
+                                    .get::<LuaTable>("system")?
+                                    .call_function::<String>("absolute_path", home_expand.clone())?
+                            };
+                            status_view.call_method::<()>(
+                                "show_tooltip",
+                                format!(
+                                    "{} -> {}",
+                                    doc_for_suggest.call_method::<String>("get_name", ())?,
+                                    common.call_function::<String>("home_encode", abs)?
+                                ),
+                            )?;
+                            let suggestions: LuaValue =
+                                common.call_function("path_suggest", home_expand)?;
+                            common.call_function("home_encode_list", suggestions)
+                        })?,
+                    )?;
+                    spec.set(
+                        "submit",
+                        lua.create_function(move |lua, filename: String| {
+                            require_table(lua, "core")?
+                                .get::<LuaTable>("status_view")?
+                                .call_method::<()>("remove_tooltip", ())?;
+                            let common = require_table(lua, "core.common")?;
+                            save_with_filename(
+                                lua,
+                                Some(common.call_function("home_expand", filename)?),
+                            )
+                        })?,
+                    )?;
+                    spec.set(
+                        "cancel",
+                        lua.create_function(move |lua, ()| {
+                            require_table(lua, "core")?
+                                .get::<LuaTable>("status_view")?
+                                .call_method::<()>("remove_tooltip", ())?;
+                            Ok(())
+                        })?,
+                    )?;
+                    spec
+                }),
             )
         })?,
     )?;
@@ -1257,7 +1306,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             if doc.get::<Option<String>>("filename")?.is_some() {
                 save_with_filename(lua, None)
             } else {
-                require_table(lua, "core.command")?.call_function::<bool>("perform", "doc:save-as")?;
+                require_table(lua, "core.command")?
+                    .call_function::<bool>("perform", "doc:save-as")?;
                 Ok(())
             }
         })?,
@@ -1265,7 +1315,9 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
     add_command(
         &commands,
         "doc:reload",
-        lua.create_function(|_, dv: LuaTable| dv.get::<LuaTable>("doc")?.call_method::<()>("reload", ()))?,
+        lua.create_function(|_, dv: LuaTable| {
+            dv.get::<LuaTable>("doc")?.call_method::<()>("reload", ())
+        })?,
     )?;
     add_command(
         &commands,
@@ -1283,74 +1335,78 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let command_view: LuaTable = core.get("command_view")?;
             command_view.call_method::<()>(
                 "enter",
-                (
-                    "Rename",
-                    {
-                        let spec = lua.create_table()?;
-                        spec.set("text", old_filename.clone())?;
-                        spec.set(
-                            "suggest",
-                            lua.create_function(move |lua, input: String| -> LuaResult<LuaValue> {
-                                let common = require_table(lua, "core.common")?;
-                                let core = require_table(lua, "core")?;
-                                let target: String = common.call_function("home_expand", input.clone())?;
-                                let project = core.call_function::<Option<LuaTable>>("root_project", ())?;
-                                let abs = if let Some(project) = project {
-                                    project.call_method::<String>(
-                                        "absolute_path",
-                                        project.call_method::<String>("normalize_path", target.clone())?,
-                                    )?
-                                } else {
-                                    lua.globals()
-                                        .get::<LuaTable>("system")?
-                                        .call_function::<String>("absolute_path", target.clone())?
-                                };
-                                status_view.call_method::<()>(
-                                    "show_tooltip",
-                                    format!(
-                                        "{} -> {}",
-                                        old_filename_suggest,
-                                        common.call_function::<String>("home_encode", abs)?
-                                    ),
+                ("Rename", {
+                    let spec = lua.create_table()?;
+                    spec.set("text", old_filename.clone())?;
+                    spec.set(
+                        "suggest",
+                        lua.create_function(move |lua, input: String| -> LuaResult<LuaValue> {
+                            let common = require_table(lua, "core.common")?;
+                            let core = require_table(lua, "core")?;
+                            let target: String =
+                                common.call_function("home_expand", input.clone())?;
+                            let project =
+                                core.call_function::<Option<LuaTable>>("root_project", ())?;
+                            let abs = if let Some(project) = project {
+                                project.call_method::<String>(
+                                    "absolute_path",
+                                    project
+                                        .call_method::<String>("normalize_path", target.clone())?,
+                                )?
+                            } else {
+                                lua.globals()
+                                    .get::<LuaTable>("system")?
+                                    .call_function::<String>("absolute_path", target.clone())?
+                            };
+                            status_view.call_method::<()>(
+                                "show_tooltip",
+                                format!(
+                                    "{} -> {}",
+                                    old_filename_suggest,
+                                    common.call_function::<String>("home_encode", abs)?
+                                ),
+                            )?;
+                            common.call_function(
+                                "home_encode_list",
+                                common.call_function::<LuaValue>("path_suggest", target)?,
+                            )
+                        })?,
+                    )?;
+                    spec.set(
+                        "submit",
+                        lua.create_function(move |lua, filename: String| {
+                            require_table(lua, "core")?
+                                .get::<LuaTable>("status_view")?
+                                .call_method::<()>("remove_tooltip", ())?;
+                            let common = require_table(lua, "core.common")?;
+                            let expanded: String =
+                                common.call_function("home_expand", filename.clone())?;
+                            save_with_filename(lua, Some(expanded.clone()))?;
+                            require_table(lua, "core")?.call_function::<()>(
+                                "log",
+                                format!("Renamed \"{old_filename_submit}\" to \"{expanded}\""),
+                            )?;
+                            if expanded != old_filename_submit {
+                                let os: LuaTable = lua.globals().get("os")?;
+                                let _ = os.call_function::<LuaMultiValue>(
+                                    "remove",
+                                    old_filename_submit.clone(),
                                 )?;
-                                common.call_function(
-                                    "home_encode_list",
-                                    common.call_function::<LuaValue>("path_suggest", target)?,
-                                )
-                            })?,
-                        )?;
-                        spec.set(
-                            "submit",
-                            lua.create_function(move |lua, filename: String| {
-                                require_table(lua, "core")?
-                                    .get::<LuaTable>("status_view")?
-                                    .call_method::<()>("remove_tooltip", ())?;
-                                let common = require_table(lua, "core.common")?;
-                                let expanded: String = common.call_function("home_expand", filename.clone())?;
-                                save_with_filename(lua, Some(expanded.clone()))?;
-                                require_table(lua, "core")?.call_function::<()>(
-                                    "log",
-                                    format!("Renamed \"{old_filename_submit}\" to \"{expanded}\""),
-                                )?;
-                                if expanded != old_filename_submit {
-                                    let os: LuaTable = lua.globals().get("os")?;
-                                    let _ = os.call_function::<LuaMultiValue>("remove", old_filename_submit.clone())?;
-                                }
-                                Ok(())
-                            })?,
-                        )?;
-                        spec.set(
-                            "cancel",
-                            lua.create_function(move |lua, ()| {
-                                require_table(lua, "core")?
-                                    .get::<LuaTable>("status_view")?
-                                    .call_method::<()>("remove_tooltip", ())?;
-                                Ok(())
-                            })?,
-                        )?;
-                        spec
-                    },
-                ),
+                            }
+                            Ok(())
+                        })?,
+                    )?;
+                    spec.set(
+                        "cancel",
+                        lua.create_function(move |lua, ()| {
+                            require_table(lua, "core")?
+                                .get::<LuaTable>("status_view")?
+                                .call_method::<()>("remove_tooltip", ())?;
+                            Ok(())
+                        })?,
+                    )?;
+                    spec
+                }),
             )
         })?,
     )?;
@@ -1381,20 +1437,23 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
     add_command(
         &commands,
         "doc:select-to-cursor",
-        lua.create_function(|lua, (dv, x, y, _clicks): (LuaTable, f64, f64, Option<i64>)| {
-            let doc: LuaTable = dv.get("doc")?;
-            let (_, _, line1, col1): (usize, usize, usize, usize) =
-                doc.call_method("get_selection", ())?;
-            let (line2, col2): (usize, usize) = dv.call_method("resolve_screen_position", (x, y))?;
-            let mouse_selecting = lua.create_table()?;
-            mouse_selecting.set(1, line1)?;
-            mouse_selecting.set(2, col1)?;
-            mouse_selecting.set(3, LuaValue::Nil)?;
-            dv.set("mouse_selecting", mouse_selecting)?;
-            doc.call_method::<()>("set_selection", (line2, col2, line1, col1))?;
-            set_primary_selection(lua, &doc)?;
-            Ok(())
-        })?,
+        lua.create_function(
+            |lua, (dv, x, y, _clicks): (LuaTable, f64, f64, Option<i64>)| {
+                let doc: LuaTable = dv.get("doc")?;
+                let (_, _, line1, col1): (usize, usize, usize, usize) =
+                    doc.call_method("get_selection", ())?;
+                let (line2, col2): (usize, usize) =
+                    dv.call_method("resolve_screen_position", (x, y))?;
+                let mouse_selecting = lua.create_table()?;
+                mouse_selecting.set(1, line1)?;
+                mouse_selecting.set(2, col1)?;
+                mouse_selecting.set(3, LuaValue::Nil)?;
+                dv.set("mouse_selecting", mouse_selecting)?;
+                doc.call_method::<()>("set_selection", (line2, col2, line1, col1))?;
+                set_primary_selection(lua, &doc)?;
+                Ok(())
+            },
+        )?,
     )?;
     add_command(
         &commands,
@@ -1507,17 +1566,23 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
     add_command(
         &mouse_commands,
         "doc:set-cursor",
-        lua.create_function(|lua, (dv, x, y): (LuaTable, f64, f64)| set_cursor(lua, &dv, x, y, "set"))?,
+        lua.create_function(|lua, (dv, x, y): (LuaTable, f64, f64)| {
+            set_cursor(lua, &dv, x, y, "set")
+        })?,
     )?;
     add_command(
         &mouse_commands,
         "doc:set-cursor-word",
-        lua.create_function(|lua, (dv, x, y): (LuaTable, f64, f64)| set_cursor(lua, &dv, x, y, "word"))?,
+        lua.create_function(|lua, (dv, x, y): (LuaTable, f64, f64)| {
+            set_cursor(lua, &dv, x, y, "word")
+        })?,
     )?;
     add_command(
         &mouse_commands,
         "doc:set-cursor-line",
-        lua.create_function(|lua, (dv, x, y): (LuaTable, f64, f64)| set_cursor(lua, &dv, x, y, "lines"))?,
+        lua.create_function(|lua, (dv, x, y): (LuaTable, f64, f64)| {
+            set_cursor(lua, &dv, x, y, "lines")
+        })?,
     )?;
     add_command(
         &mouse_commands,

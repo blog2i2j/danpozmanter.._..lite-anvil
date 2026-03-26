@@ -25,27 +25,36 @@ fn build_results_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> {
         let ck = Arc::clone(&class_key);
         results_view.set(
             "new",
-            lua.create_function(move |lua, (this, path, text, fn_find, path_glob, search_opts):
-                (LuaTable, LuaValue, String, LuaFunction, LuaValue, LuaTable)| {
-                let class: LuaTable = lua.registry_value(&ck)?;
-                let super_tbl: LuaTable = class.get("super")?;
-                let super_new: LuaFunction = super_tbl.get("new")?;
-                super_new.call::<()>(this.clone())?;
-                this.set("scrollable", true)?;
-                this.set("brightness", 0.0)?;
-                this.set("max_h_scroll", 0.0)?;
-                this.set("display_results", lua.create_table()?)?;
-                let begin_search: LuaFunction = this.get("begin_search")?;
-                begin_search.call::<()>((
-                    this.clone(),
-                    path,
-                    text,
-                    fn_find,
-                    path_glob,
-                    search_opts,
-                ))?;
-                Ok(())
-            })?,
+            lua.create_function(
+                move |lua,
+                      (this, path, text, fn_find, path_glob, search_opts): (
+                    LuaTable,
+                    LuaValue,
+                    String,
+                    LuaFunction,
+                    LuaValue,
+                    LuaTable,
+                )| {
+                    let class: LuaTable = lua.registry_value(&ck)?;
+                    let super_tbl: LuaTable = class.get("super")?;
+                    let super_new: LuaFunction = super_tbl.get("new")?;
+                    super_new.call::<()>(this.clone())?;
+                    this.set("scrollable", true)?;
+                    this.set("brightness", 0.0)?;
+                    this.set("max_h_scroll", 0.0)?;
+                    this.set("display_results", lua.create_table()?)?;
+                    let begin_search: LuaFunction = this.get("begin_search")?;
+                    begin_search.call::<()>((
+                        this.clone(),
+                        path,
+                        text,
+                        fn_find,
+                        path_glob,
+                        search_opts,
+                    ))?;
+                    Ok(())
+                },
+            )?,
         )?;
     }
 
@@ -211,7 +220,8 @@ fn build_results_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> {
         lua.create_function(|lua, this: LuaTable| {
             let search_args: LuaTable = this.get("search_args")?;
             let begin_search: LuaFunction = this.get("begin_search")?;
-            let table_unpack: LuaFunction = lua.globals().get::<LuaTable>("table")?.get("unpack")?;
+            let table_unpack: LuaFunction =
+                lua.globals().get::<LuaTable>("table")?.get("unpack")?;
             let args: LuaMultiValue = table_unpack.call(search_args)?;
             let mut call_args = LuaMultiValue::new();
             call_args.push_back(LuaValue::Table(this));
@@ -223,42 +233,44 @@ fn build_results_view(lua: &Lua) -> LuaResult<(LuaTable, Arc<LuaRegistryKey>)> {
     // on_mouse_moved
     results_view.set(
         "on_mouse_moved",
-        lua.create_function(|_lua, (this, mx, my, rest): (LuaTable, f64, f64, LuaMultiValue)| {
-            let class: LuaTable = this.get("super")?;
-            let super_omm: LuaFunction = class.get("on_mouse_moved")?;
-            let mut args = LuaMultiValue::new();
-            args.push_back(LuaValue::Table(this.clone()));
-            args.push_back(LuaValue::Number(mx));
-            args.push_back(LuaValue::Number(my));
-            args.extend(rest);
-            super_omm.call::<()>(args)?;
-            this.set("selected_idx", 0)?;
-            let iter: LuaFunction = this.call_method("each_visible_result", ())?;
-            loop {
-                let r: LuaMultiValue = iter.call(())?;
-                let vals: Vec<LuaValue> = r.into_vec();
-                if vals.is_empty() || matches!(vals[0], LuaValue::Nil) {
-                    break;
-                }
-                // i, item, x, y, w, h
-                let item = vals.get(1);
-                let rx = lua_f64(vals.get(2));
-                let ry = lua_f64(vals.get(3));
-                let rw = lua_f64(vals.get(4));
-                let rh = lua_f64(vals.get(5));
-                if mx >= rx && my >= ry && mx < rx + rw && my < ry + rh {
-                    if let Some(LuaValue::Table(item)) = item {
-                        let kind: String = item.get("kind")?;
-                        if kind == "match" {
-                            let result_idx: i64 = item.get("result_idx")?;
-                            this.set("selected_idx", result_idx)?;
-                        }
+        lua.create_function(
+            |_lua, (this, mx, my, rest): (LuaTable, f64, f64, LuaMultiValue)| {
+                let class: LuaTable = this.get("super")?;
+                let super_omm: LuaFunction = class.get("on_mouse_moved")?;
+                let mut args = LuaMultiValue::new();
+                args.push_back(LuaValue::Table(this.clone()));
+                args.push_back(LuaValue::Number(mx));
+                args.push_back(LuaValue::Number(my));
+                args.extend(rest);
+                super_omm.call::<()>(args)?;
+                this.set("selected_idx", 0)?;
+                let iter: LuaFunction = this.call_method("each_visible_result", ())?;
+                loop {
+                    let r: LuaMultiValue = iter.call(())?;
+                    let vals: Vec<LuaValue> = r.into_vec();
+                    if vals.is_empty() || matches!(vals[0], LuaValue::Nil) {
+                        break;
                     }
-                    break;
+                    // i, item, x, y, w, h
+                    let item = vals.get(1);
+                    let rx = lua_f64(vals.get(2));
+                    let ry = lua_f64(vals.get(3));
+                    let rw = lua_f64(vals.get(4));
+                    let rh = lua_f64(vals.get(5));
+                    if mx >= rx && my >= ry && mx < rx + rw && my < ry + rh {
+                        if let Some(LuaValue::Table(item)) = item {
+                            let kind: String = item.get("kind")?;
+                            if kind == "match" {
+                                let result_idx: i64 = item.get("result_idx")?;
+                                this.set("selected_idx", result_idx)?;
+                            }
+                        }
+                        break;
+                    }
                 }
-            }
-            Ok(())
-        })?,
+                Ok(())
+            },
+        )?,
     )?;
 
     // on_mouse_pressed
@@ -763,7 +775,9 @@ fn filter_by_path_glob(lua: &Lua, files: LuaTable, this: &LuaTable) -> LuaResult
     let glob_str = match &path_glob {
         LuaValue::String(s) => {
             let s = s.to_str()?;
-            if s.is_empty() { return Ok(files); }
+            if s.is_empty() {
+                return Ok(files);
+            }
             s.to_string()
         }
         _ => return Ok(files),
@@ -825,7 +839,8 @@ fn path_matches_glob_rs(
     for pair in projects.sequence_values::<LuaTable>() {
         let project = pair?;
         let project_path: String = project.get("path")?;
-        let belongs: bool = common.call_function("path_belongs_to", (filename, project_path.as_str()))?;
+        let belongs: bool =
+            common.call_function("path_belongs_to", (filename, project_path.as_str()))?;
         if belongs {
             let rel: String = common.call_function("relative_path", (project_path, filename))?;
             let rel_normalized = rel.replace('\\', "/");
@@ -891,110 +906,112 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
             // search_plain
             let ck = Arc::clone(&class_key);
             let mk = lua.create_registry_value(module.clone())?;
-            let search_plain = lua.create_function(move |lua, (text, path, insensitive):
-                (String, LuaValue, Option<bool>)| {
-                if text.is_empty() {
+            let search_plain = lua.create_function(
+                move |lua, (text, path, insensitive): (String, LuaValue, Option<bool>)| {
+                    if text.is_empty() {
+                        let core = require_table(lua, "core")?;
+                        core.call_function::<()>("error", "Expected non-empty string")?;
+                        return Ok(LuaValue::Nil);
+                    }
+                    let insensitive = insensitive.unwrap_or(false);
+                    let m: LuaTable = lua.registry_value(&mk)?;
+                    let path_glob: LuaValue = m.get("pending_path_glob")?;
+                    let rv_class: LuaTable = lua.registry_value(&ck)?;
+                    let search_opts = lua.create_table()?;
+                    search_opts.set("query", text.as_str())?;
+                    search_opts.set("mode", "plain")?;
+                    search_opts.set("no_case", insensitive)?;
+
+                    let fn_find = lua.create_function(move |_, _line: String| {
+                        Ok(LuaValue::Nil) // unused, native search handles it
+                    })?;
+
+                    let rv: LuaTable =
+                        rv_class.call((path.clone(), text, fn_find, path_glob, search_opts))?;
                     let core = require_table(lua, "core")?;
-                    core.call_function::<()>("error", "Expected non-empty string")?;
-                    return Ok(LuaValue::Nil);
-                }
-                let insensitive = insensitive.unwrap_or(false);
-                let m: LuaTable = lua.registry_value(&mk)?;
-                let path_glob: LuaValue = m.get("pending_path_glob")?;
-                let rv_class: LuaTable = lua.registry_value(&ck)?;
-                let search_opts = lua.create_table()?;
-                search_opts.set("query", text.as_str())?;
-                search_opts.set("mode", "plain")?;
-                search_opts.set("no_case", insensitive)?;
-
-                let fn_find = lua.create_function(move |_, _line: String| {
-                    Ok(LuaValue::Nil) // unused, native search handles it
-                })?;
-
-                let rv: LuaTable = rv_class.call((path.clone(), text, fn_find, path_glob, search_opts))?;
-                let core = require_table(lua, "core")?;
-                let root_view: LuaTable = core.get("root_view")?;
-                let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
-                node.call_method::<()>("add_view", rv.clone())?;
-                Ok(LuaValue::Table(rv))
-            })?;
+                    let root_view: LuaTable = core.get("root_view")?;
+                    let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
+                    node.call_method::<()>("add_view", rv.clone())?;
+                    Ok(LuaValue::Table(rv))
+                },
+            )?;
             module.set("search_plain", search_plain)?;
 
             // search_regex
             let ck = Arc::clone(&class_key);
             let mk = lua.create_registry_value(module.clone())?;
-            let search_regex = lua.create_function(move |lua, (text, path, insensitive):
-                (String, LuaValue, Option<bool>)| {
-                if text.is_empty() {
+            let search_regex = lua.create_function(
+                move |lua, (text, path, insensitive): (String, LuaValue, Option<bool>)| {
+                    if text.is_empty() {
+                        let core = require_table(lua, "core")?;
+                        core.call_function::<()>("error", "Expected non-empty string")?;
+                        return Ok(LuaValue::Nil);
+                    }
+                    let insensitive = insensitive.unwrap_or(false);
+                    let m: LuaTable = lua.registry_value(&mk)?;
+                    let path_glob: LuaValue = m.get("pending_path_glob")?;
+                    let rv_class: LuaTable = lua.registry_value(&ck)?;
+
+                    // Validate regex
+                    let regex_mod: LuaTable = lua.globals().get("regex")?;
+                    let flags = if insensitive { "i" } else { "" };
+                    let (re, errmsg): (LuaValue, LuaValue) =
+                        regex_mod.call_function("compile", (text.as_str(), flags))?;
+                    if matches!(re, LuaValue::Nil) {
+                        let core = require_table(lua, "core")?;
+                        core.call_function::<()>("log", errmsg)?;
+                        return Ok(LuaValue::Nil);
+                    }
+
+                    let search_opts = lua.create_table()?;
+                    search_opts.set("query", text.as_str())?;
+                    search_opts.set("mode", "regex")?;
+                    search_opts.set("no_case", insensitive)?;
+
+                    let fn_find = lua.create_function(move |_, _line: String| Ok(LuaValue::Nil))?;
+
+                    let rv: LuaTable =
+                        rv_class.call((path.clone(), text, fn_find, path_glob, search_opts))?;
                     let core = require_table(lua, "core")?;
-                    core.call_function::<()>("error", "Expected non-empty string")?;
-                    return Ok(LuaValue::Nil);
-                }
-                let insensitive = insensitive.unwrap_or(false);
-                let m: LuaTable = lua.registry_value(&mk)?;
-                let path_glob: LuaValue = m.get("pending_path_glob")?;
-                let rv_class: LuaTable = lua.registry_value(&ck)?;
-
-                // Validate regex
-                let regex_mod: LuaTable = lua.globals().get("regex")?;
-                let flags = if insensitive { "i" } else { "" };
-                let (re, errmsg): (LuaValue, LuaValue) =
-                    regex_mod.call_function("compile", (text.as_str(), flags))?;
-                if matches!(re, LuaValue::Nil) {
-                    let core = require_table(lua, "core")?;
-                    core.call_function::<()>("log", errmsg)?;
-                    return Ok(LuaValue::Nil);
-                }
-
-                let search_opts = lua.create_table()?;
-                search_opts.set("query", text.as_str())?;
-                search_opts.set("mode", "regex")?;
-                search_opts.set("no_case", insensitive)?;
-
-                let fn_find = lua.create_function(move |_, _line: String| {
-                    Ok(LuaValue::Nil)
-                })?;
-
-                let rv: LuaTable = rv_class.call((path.clone(), text, fn_find, path_glob, search_opts))?;
-                let core = require_table(lua, "core")?;
-                let root_view: LuaTable = core.get("root_view")?;
-                let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
-                node.call_method::<()>("add_view", rv.clone())?;
-                Ok(LuaValue::Table(rv))
-            })?;
+                    let root_view: LuaTable = core.get("root_view")?;
+                    let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
+                    node.call_method::<()>("add_view", rv.clone())?;
+                    Ok(LuaValue::Table(rv))
+                },
+            )?;
             module.set("search_regex", search_regex)?;
 
             // search_fuzzy
             let ck = Arc::clone(&class_key);
             let mk = lua.create_registry_value(module.clone())?;
-            let search_fuzzy = lua.create_function(move |lua, (text, path, insensitive):
-                (String, LuaValue, Option<bool>)| {
-                if text.is_empty() {
+            let search_fuzzy = lua.create_function(
+                move |lua, (text, path, insensitive): (String, LuaValue, Option<bool>)| {
+                    if text.is_empty() {
+                        let core = require_table(lua, "core")?;
+                        core.call_function::<()>("error", "Expected non-empty string")?;
+                        return Ok(LuaValue::Nil);
+                    }
+                    let insensitive = insensitive.unwrap_or(false);
+                    let m: LuaTable = lua.registry_value(&mk)?;
+                    let path_glob: LuaValue = m.get("pending_path_glob")?;
+                    let rv_class: LuaTable = lua.registry_value(&ck)?;
+
+                    let search_opts = lua.create_table()?;
+                    search_opts.set("query", text.as_str())?;
+                    search_opts.set("mode", "fuzzy")?;
+                    search_opts.set("no_case", insensitive)?;
+
+                    let fn_find = lua.create_function(move |_, _line: String| Ok(LuaValue::Nil))?;
+
+                    let rv: LuaTable =
+                        rv_class.call((path.clone(), text, fn_find, path_glob, search_opts))?;
                     let core = require_table(lua, "core")?;
-                    core.call_function::<()>("error", "Expected non-empty string")?;
-                    return Ok(LuaValue::Nil);
-                }
-                let insensitive = insensitive.unwrap_or(false);
-                let m: LuaTable = lua.registry_value(&mk)?;
-                let path_glob: LuaValue = m.get("pending_path_glob")?;
-                let rv_class: LuaTable = lua.registry_value(&ck)?;
-
-                let search_opts = lua.create_table()?;
-                search_opts.set("query", text.as_str())?;
-                search_opts.set("mode", "fuzzy")?;
-                search_opts.set("no_case", insensitive)?;
-
-                let fn_find = lua.create_function(move |_, _line: String| {
-                    Ok(LuaValue::Nil)
-                })?;
-
-                let rv: LuaTable = rv_class.call((path.clone(), text, fn_find, path_glob, search_opts))?;
-                let core = require_table(lua, "core")?;
-                let root_view: LuaTable = core.get("root_view")?;
-                let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
-                node.call_method::<()>("add_view", rv.clone())?;
-                Ok(LuaValue::Table(rv))
-            })?;
+                    let root_view: LuaTable = core.get("root_view")?;
+                    let node: LuaTable = root_view.call_method("get_active_node_default", ())?;
+                    node.call_method::<()>("add_view", rv.clone())?;
+                    Ok(LuaValue::Table(rv))
+                },
+            )?;
             module.set("search_fuzzy", search_fuzzy)?;
 
             // Commands
@@ -1031,8 +1048,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         lua.create_function(move |lua, text: String| {
                             let core2 = require_table(lua, "core")?;
                             let cv: LuaTable = core2.get("command_view")?;
-                            let mk3 = lua.create_registry_value(lua.registry_value::<LuaTable>(&m_key)?)?;
-                            let pk = lua.create_registry_value(lua.registry_value::<LuaValue>(&path_key)?)?;
+                            let mk3 =
+                                lua.create_registry_value(lua.registry_value::<LuaTable>(&m_key)?)?;
+                            let pk = lua.create_registry_value(
+                                lua.registry_value::<LuaValue>(&path_key)?,
+                            )?;
                             let glob_opts = lua.create_table()?;
                             glob_opts.set(
                                 "submit",
@@ -1057,10 +1077,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             )
                         })?,
                     )?;
-                    command_view.call_method::<()>(
-                        "enter",
-                        (format!("Find Text In {path_str}"), opts),
-                    )
+                    command_view
+                        .call_method::<()>("enter", (format!("Find Text In {path_str}"), opts))
                 })?,
             )?;
 
@@ -1084,8 +1102,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         lua.create_function(move |lua, text: String| {
                             let core2 = require_table(lua, "core")?;
                             let cv: LuaTable = core2.get("command_view")?;
-                            let mk3 = lua.create_registry_value(lua.registry_value::<LuaTable>(&m_key)?)?;
-                            let pk = lua.create_registry_value(lua.registry_value::<LuaValue>(&path_key)?)?;
+                            let mk3 =
+                                lua.create_registry_value(lua.registry_value::<LuaTable>(&m_key)?)?;
+                            let pk = lua.create_registry_value(
+                                lua.registry_value::<LuaValue>(&path_key)?,
+                            )?;
                             let glob_opts = lua.create_table()?;
                             glob_opts.set(
                                 "submit",
@@ -1110,10 +1131,8 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             )
                         })?,
                     )?;
-                    command_view.call_method::<()>(
-                        "enter",
-                        (format!("Find Regex In {path_str}"), opts),
-                    )
+                    command_view
+                        .call_method::<()>("enter", (format!("Find Regex In {path_str}"), opts))
                 })?,
             )?;
 
@@ -1144,8 +1163,11 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         lua.create_function(move |lua, text: String| {
                             let core2 = require_table(lua, "core")?;
                             let cv: LuaTable = core2.get("command_view")?;
-                            let mk3 = lua.create_registry_value(lua.registry_value::<LuaTable>(&m_key)?)?;
-                            let pk = lua.create_registry_value(lua.registry_value::<LuaValue>(&path_key)?)?;
+                            let mk3 =
+                                lua.create_registry_value(lua.registry_value::<LuaTable>(&m_key)?)?;
+                            let pk = lua.create_registry_value(
+                                lua.registry_value::<LuaValue>(&path_key)?,
+                            )?;
                             let glob_opts = lua.create_table()?;
                             glob_opts.set(
                                 "submit",

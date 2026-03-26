@@ -43,8 +43,9 @@ fn install(lua: &Lua) -> LuaResult<()> {
 
             // Get prefix1: text:match("^\n*" .. prefix_set)
             let ptn1 = format!("^\n*{prefix_set}");
-            let prefix1: String =
-                match_fn.call::<Option<String>>((text.as_str(), ptn1))?.unwrap_or_default();
+            let prefix1: String = match_fn
+                .call::<Option<String>>((text.as_str(), ptn1))?
+                .unwrap_or_default();
 
             // Get prefix2: text:match("\n(" .. prefix_set .. ")", #prefix1+1)
             let ptn2 = format!("\n({prefix_set})");
@@ -56,8 +57,9 @@ fn install(lua: &Lua) -> LuaResult<()> {
             };
 
             // Get trailing whitespace.
-            let trailing: String =
-                match_fn.call::<Option<String>>((text.as_str(), "%s*$"))?.unwrap_or_default();
+            let trailing: String = match_fn
+                .call::<Option<String>>((text.as_str(), "%s*$"))?
+                .unwrap_or_default();
 
             // Strip all line prefixes and trailing whitespace.
             let body_start = prefix1.len();

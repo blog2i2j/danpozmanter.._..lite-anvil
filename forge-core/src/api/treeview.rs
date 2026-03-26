@@ -529,24 +529,23 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             state.set("len", visible_count)?;
             let results_key = lua.create_registry_value(results)?;
 
-            let iterator =
-                lua.create_function(move |lua, ()| -> LuaResult<LuaMultiValue> {
-                    let idx: i64 = state.get("idx")?;
-                    let len: i64 = state.get("len")?;
-                    let next_idx = idx + 1;
-                    if next_idx > len {
-                        return Ok(LuaMultiValue::new());
-                    }
-                    state.set("idx", next_idx)?;
-                    let results: LuaTable = lua.registry_value(&results_key)?;
-                    let entry: LuaTable = results.raw_get(next_idx)?;
-                    let item: LuaValue = entry.raw_get(1)?;
-                    let ex: LuaValue = entry.raw_get(2)?;
-                    let ey: LuaValue = entry.raw_get(3)?;
-                    let ew: LuaValue = entry.raw_get(4)?;
-                    let eh: LuaValue = entry.raw_get(5)?;
-                    Ok(LuaMultiValue::from_vec(vec![item, ex, ey, ew, eh]))
-                })?;
+            let iterator = lua.create_function(move |lua, ()| -> LuaResult<LuaMultiValue> {
+                let idx: i64 = state.get("idx")?;
+                let len: i64 = state.get("len")?;
+                let next_idx = idx + 1;
+                if next_idx > len {
+                    return Ok(LuaMultiValue::new());
+                }
+                state.set("idx", next_idx)?;
+                let results: LuaTable = lua.registry_value(&results_key)?;
+                let entry: LuaTable = results.raw_get(next_idx)?;
+                let item: LuaValue = entry.raw_get(1)?;
+                let ex: LuaValue = entry.raw_get(2)?;
+                let ey: LuaValue = entry.raw_get(3)?;
+                let ew: LuaValue = entry.raw_get(4)?;
+                let eh: LuaValue = entry.raw_get(5)?;
+                Ok(LuaMultiValue::from_vec(vec![item, ex, ey, ew, eh]))
+            })?;
             Ok(iterator)
         })?,
     )?;
@@ -592,42 +591,44 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     // TreeView:resolve_path(path)
     tree_view.set(
         "resolve_path",
-        lua.create_function(|lua, (this, path): (LuaTable, Option<String>)| -> LuaResult<LuaMultiValue> {
-            let path = match path {
-                Some(p) => p,
-                None => return Ok(LuaMultiValue::new()),
-            };
-            this.call_method::<()>("sync_model", ())?;
-            let model_roots: LuaTable = this.get("model_roots")?;
-            let tree_model: LuaTable = require_table(lua, "tree_model")?;
-            let get_row: LuaFunction = tree_model.get("get_row")?;
-            let idx: LuaValue = get_row.call((model_roots, path))?;
-            let idx_opt: Option<i64> = match idx {
-                LuaValue::Integer(n) => Some(n),
-                LuaValue::Number(n) => Some(n as i64),
-                _ => None,
-            };
-            if let Some(idx) = idx_opt {
-                let (ox, oy): (f64, f64) = this.call_method("get_content_offset", ())?;
-                let h: f64 = this.call_method("get_item_height", ())?;
-                let style: LuaTable = require_table(lua, "core.style")?;
-                let padding: LuaTable = style.get("padding")?;
-                let pad_y: f64 = padding.get("y")?;
-                let y = oy + pad_y + h * (idx - 1) as f64;
-                let size: LuaTable = this.get("size")?;
-                let size_x: f64 = size.get("x")?;
-                let item: LuaValue = this.call_method("get_item_by_row", idx)?;
-                Ok(LuaMultiValue::from_vec(vec![
-                    item,
-                    LuaValue::Number(ox),
-                    LuaValue::Number(y),
-                    LuaValue::Number(size_x),
-                    LuaValue::Number(h),
-                ]))
-            } else {
-                Ok(LuaMultiValue::new())
-            }
-        })?,
+        lua.create_function(
+            |lua, (this, path): (LuaTable, Option<String>)| -> LuaResult<LuaMultiValue> {
+                let path = match path {
+                    Some(p) => p,
+                    None => return Ok(LuaMultiValue::new()),
+                };
+                this.call_method::<()>("sync_model", ())?;
+                let model_roots: LuaTable = this.get("model_roots")?;
+                let tree_model: LuaTable = require_table(lua, "tree_model")?;
+                let get_row: LuaFunction = tree_model.get("get_row")?;
+                let idx: LuaValue = get_row.call((model_roots, path))?;
+                let idx_opt: Option<i64> = match idx {
+                    LuaValue::Integer(n) => Some(n),
+                    LuaValue::Number(n) => Some(n as i64),
+                    _ => None,
+                };
+                if let Some(idx) = idx_opt {
+                    let (ox, oy): (f64, f64) = this.call_method("get_content_offset", ())?;
+                    let h: f64 = this.call_method("get_item_height", ())?;
+                    let style: LuaTable = require_table(lua, "core.style")?;
+                    let padding: LuaTable = style.get("padding")?;
+                    let pad_y: f64 = padding.get("y")?;
+                    let y = oy + pad_y + h * (idx - 1) as f64;
+                    let size: LuaTable = this.get("size")?;
+                    let size_x: f64 = size.get("x")?;
+                    let item: LuaValue = this.call_method("get_item_by_row", idx)?;
+                    Ok(LuaMultiValue::from_vec(vec![
+                        item,
+                        LuaValue::Number(ox),
+                        LuaValue::Number(y),
+                        LuaValue::Number(size_x),
+                        LuaValue::Number(h),
+                    ]))
+                } else {
+                    Ok(LuaMultiValue::new())
+                }
+            },
+        )?,
     )?;
 
     // TreeView:get_selected_item()
@@ -673,44 +674,68 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     // TreeView:set_selection(selection, selection_y, center, instant)
     tree_view.set(
         "set_selection",
-        lua.create_function(|lua, (this, selection, selection_y, center, instant): (LuaTable, LuaValue, LuaValue, Option<bool>, Option<bool>)| {
-            let h: f64 = if matches!(selection, LuaValue::Table(_)) && !matches!(selection_y, LuaValue::Nil | LuaValue::Boolean(false)) {
-                this.call_method("get_item_height", ())?
-            } else {
-                0.0
-            };
-            let native: LuaTable = require_table(lua, "treeview_native")?;
-            let set_sel: LuaFunction = native.get("set_selection")?;
-            set_sel.call::<()>((this, selection, selection_y, center, instant, h))
-        })?,
+        lua.create_function(
+            |lua,
+             (this, selection, selection_y, center, instant): (
+                LuaTable,
+                LuaValue,
+                LuaValue,
+                Option<bool>,
+                Option<bool>,
+            )| {
+                let h: f64 = if matches!(selection, LuaValue::Table(_))
+                    && !matches!(selection_y, LuaValue::Nil | LuaValue::Boolean(false))
+                {
+                    this.call_method("get_item_height", ())?
+                } else {
+                    0.0
+                };
+                let native: LuaTable = require_table(lua, "treeview_native")?;
+                let set_sel: LuaFunction = native.get("set_selection")?;
+                set_sel.call::<()>((this, selection, selection_y, center, instant, h))
+            },
+        )?,
     )?;
 
     // TreeView:set_selection_to_path(path, expand, scroll_to, instant)
     tree_view.set(
         "set_selection_to_path",
-        lua.create_function(|lua, (this, path, expand, scroll_to, instant): (LuaTable, String, Option<bool>, Option<bool>, Option<bool>)| -> LuaResult<LuaValue> {
-            if expand.unwrap_or(false) {
-                let tree_model: LuaTable = require_table(lua, "tree_model")?;
-                let expand_to: LuaFunction = tree_model.get("expand_to")?;
-                expand_to.call::<()>(path.clone())?;
-                this.set("items_dirty", true)?;
-            }
-            this.call_method::<()>("sync_model", ())?;
-            let result: LuaMultiValue = this.call_method("resolve_path", path)?;
-            let mut vals = result.into_iter();
-            let to_select = vals.next().unwrap_or(LuaValue::Nil);
-            let _ = vals.next(); // ox
-            let to_select_y = vals.next().unwrap_or(LuaValue::Nil);
-            if matches!(to_select, LuaValue::Table(_)) {
-                let sel_y = if scroll_to.unwrap_or(false) {
-                    to_select_y
-                } else {
-                    LuaValue::Boolean(false)
-                };
-                this.call_method::<()>("set_selection", (to_select.clone(), sel_y, true, instant))?;
-            }
-            Ok(to_select)
-        })?,
+        lua.create_function(
+            |lua,
+             (this, path, expand, scroll_to, instant): (
+                LuaTable,
+                String,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+            )|
+             -> LuaResult<LuaValue> {
+                if expand.unwrap_or(false) {
+                    let tree_model: LuaTable = require_table(lua, "tree_model")?;
+                    let expand_to: LuaFunction = tree_model.get("expand_to")?;
+                    expand_to.call::<()>(path.clone())?;
+                    this.set("items_dirty", true)?;
+                }
+                this.call_method::<()>("sync_model", ())?;
+                let result: LuaMultiValue = this.call_method("resolve_path", path)?;
+                let mut vals = result.into_iter();
+                let to_select = vals.next().unwrap_or(LuaValue::Nil);
+                let _ = vals.next(); // ox
+                let to_select_y = vals.next().unwrap_or(LuaValue::Nil);
+                if matches!(to_select, LuaValue::Table(_)) {
+                    let sel_y = if scroll_to.unwrap_or(false) {
+                        to_select_y
+                    } else {
+                        LuaValue::Boolean(false)
+                    };
+                    this.call_method::<()>(
+                        "set_selection",
+                        (to_select.clone(), sel_y, true, instant),
+                    )?;
+                }
+                Ok(to_select)
+            },
+        )?,
     )?;
 
     // TreeView:get_text_bounding_box(item, x, y, w, h)
@@ -752,8 +777,7 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 if let LuaValue::Table(ref c) = cached {
                     let cached_text: Option<String> = c.get("text")?;
                     let cached_wk: Option<i64> = c.get("width_key")?;
-                    if cached_text.as_deref() == Some(text.as_str())
-                        && cached_wk == Some(width_key)
+                    if cached_text.as_deref() == Some(text.as_str()) && cached_wk == Some(width_key)
                     {
                         return Ok(c.clone());
                     }
@@ -826,61 +850,71 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     // TreeView:on_mouse_moved(px, py, ...)
     tree_view.set("on_mouse_moved", {
         let k = Arc::clone(&class_key);
-        lua.create_function(move |lua, (this, px, py, args): (LuaTable, f64, f64, LuaMultiValue)| {
-            let visible: bool = this.get("visible").unwrap_or(false);
-            if !visible { return Ok(()); }
-            let class: LuaTable = lua.registry_value(&k)?;
-            let super_tbl: LuaTable = class.get("super")?;
-            let super_fn: LuaFunction = super_tbl.get("on_mouse_moved")?;
-            let mut call_args = vec![LuaValue::Table(this.clone()), LuaValue::Number(px), LuaValue::Number(py)];
-            call_args.extend(args);
-            let result: LuaValue = super_fn.call(LuaMultiValue::from_vec(call_args))?;
-            if !matches!(result, LuaValue::Nil | LuaValue::Boolean(false)) {
-                this.set("hovered_item", LuaValue::Nil)?;
-                this.set("hovered_path", LuaValue::Nil)?;
-                return Ok(());
-            }
-            this.call_method::<()>("sync_model", ())?;
-            let (ox, oy): (f64, f64) = this.call_method("get_content_offset", ())?;
-            let h: f64 = this.call_method("get_item_height", ())?;
-            let style: LuaTable = require_table(lua, "core.style")?;
-            let padding: LuaTable = style.get("padding")?;
-            let pad: f64 = padding.get("y")?;
-            let row = ((py - oy - pad) / h).floor() as i64;
-            let item: LuaValue = if row >= 0 {
-                this.call_method("get_item_by_row", row + 1)?
-            } else {
-                LuaValue::Nil
-            };
-            let (item, in_text_box, same_hover) = if let LuaValue::Table(ref t) = item {
-                let size: LuaTable = this.get("size")?;
-                let size_x: f64 = size.get("x")?;
-                if px > ox && px <= ox + size_x {
-                    let abs_filename: String = t.get("abs_filename")?;
-                    let hovered_path: LuaValue = this.get("hovered_path")?;
-                    let same = match hovered_path {
-                        LuaValue::String(ref s) => s.to_str().map(|s| s == abs_filename).unwrap_or(false),
-                        _ => false,
-                    };
-                    let (ix, iy, iw, ih): (f64, f64, f64, f64) = this.call_method(
-                        "get_text_bounding_box",
-                        (t.clone(), ox, oy + pad + row as f64 * h, size_x, h),
-                    )?;
-                    let in_box = px > ix && py > iy && px <= ix + iw && py <= iy + ih;
-                    (item, in_box, same)
+        lua.create_function(
+            move |lua, (this, px, py, args): (LuaTable, f64, f64, LuaMultiValue)| {
+                let visible: bool = this.get("visible").unwrap_or(false);
+                if !visible {
+                    return Ok(());
+                }
+                let class: LuaTable = lua.registry_value(&k)?;
+                let super_tbl: LuaTable = class.get("super")?;
+                let super_fn: LuaFunction = super_tbl.get("on_mouse_moved")?;
+                let mut call_args = vec![
+                    LuaValue::Table(this.clone()),
+                    LuaValue::Number(px),
+                    LuaValue::Number(py),
+                ];
+                call_args.extend(args);
+                let result: LuaValue = super_fn.call(LuaMultiValue::from_vec(call_args))?;
+                if !matches!(result, LuaValue::Nil | LuaValue::Boolean(false)) {
+                    this.set("hovered_item", LuaValue::Nil)?;
+                    this.set("hovered_path", LuaValue::Nil)?;
+                    return Ok(());
+                }
+                this.call_method::<()>("sync_model", ())?;
+                let (ox, oy): (f64, f64) = this.call_method("get_content_offset", ())?;
+                let h: f64 = this.call_method("get_item_height", ())?;
+                let style: LuaTable = require_table(lua, "core.style")?;
+                let padding: LuaTable = style.get("padding")?;
+                let pad: f64 = padding.get("y")?;
+                let row = ((py - oy - pad) / h).floor() as i64;
+                let item: LuaValue = if row >= 0 {
+                    this.call_method("get_item_by_row", row + 1)?
+                } else {
+                    LuaValue::Nil
+                };
+                let (item, in_text_box, same_hover) = if let LuaValue::Table(ref t) = item {
+                    let size: LuaTable = this.get("size")?;
+                    let size_x: f64 = size.get("x")?;
+                    if px > ox && px <= ox + size_x {
+                        let abs_filename: String = t.get("abs_filename")?;
+                        let hovered_path: LuaValue = this.get("hovered_path")?;
+                        let same = match hovered_path {
+                            LuaValue::String(ref s) => {
+                                s.to_str().map(|s| s == abs_filename).unwrap_or(false)
+                            }
+                            _ => false,
+                        };
+                        let (ix, iy, iw, ih): (f64, f64, f64, f64) = this.call_method(
+                            "get_text_bounding_box",
+                            (t.clone(), ox, oy + pad + row as f64 * h, size_x, h),
+                        )?;
+                        let in_box = px > ix && py > iy && px <= ix + iw && py <= iy + ih;
+                        (item, in_box, same)
+                    } else {
+                        (LuaValue::Nil, false, false)
+                    }
                 } else {
                     (LuaValue::Nil, false, false)
-                }
-            } else {
-                (LuaValue::Nil, false, false)
-            };
-            let native: LuaTable = require_table(lua, "treeview_native")?;
-            let update_hover: LuaFunction = native.get("update_hover")?;
-            let system: LuaTable = lua.globals().get("system")?;
-            let get_time: LuaFunction = system.get("get_time")?;
-            let cur_time: f64 = get_time.call(())?;
-            update_hover.call((this, item, in_text_box, px, py, same_hover, cur_time))
-        })?
+                };
+                let native: LuaTable = require_table(lua, "treeview_native")?;
+                let update_hover: LuaFunction = native.get("update_hover")?;
+                let system: LuaTable = lua.globals().get("system")?;
+                let get_time: LuaFunction = system.get("get_time")?;
+                let cur_time: f64 = get_time.call(())?;
+                update_hover.call((this, item, in_text_box, px, py, same_hover, cur_time))
+            },
+        )?
     })?;
 
     // TreeView:on_mouse_left()
@@ -929,8 +963,20 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             let duration = cur_time - tooltip_begin;
             let hovered_path: LuaValue = this.get("hovered_path")?;
             let tooltip_x: LuaValue = tooltip.get("x")?;
-            if !matches!(hovered_path, LuaValue::Nil) && !matches!(tooltip_x, LuaValue::Nil) && duration > TOOLTIP_DELAY {
-                this.call_method::<()>("move_towards", (tooltip.clone(), "alpha", TOOLTIP_ALPHA, TOOLTIP_ALPHA_RATE, "treeview"))?;
+            if !matches!(hovered_path, LuaValue::Nil)
+                && !matches!(tooltip_x, LuaValue::Nil)
+                && duration > TOOLTIP_DELAY
+            {
+                this.call_method::<()>(
+                    "move_towards",
+                    (
+                        tooltip.clone(),
+                        "alpha",
+                        TOOLTIP_ALPHA,
+                        TOOLTIP_ALPHA_RATE,
+                        "treeview",
+                    ),
+                )?;
             } else {
                 tooltip.set("alpha", 0.0)?;
             }
@@ -971,14 +1017,16 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     if !locked {
                         let is_self: bool = active_view == this;
                         let last_active: LuaValue = this.get("last_active_view")?;
-                        let same_as_last = match (&last_active, &LuaValue::Table(active_view.clone())) {
-                            (LuaValue::Table(a), LuaValue::Table(b)) => a == b,
-                            _ => false,
-                        };
+                        let same_as_last =
+                            match (&last_active, &LuaValue::Table(active_view.clone())) {
+                                (LuaValue::Table(a), LuaValue::Table(b)) => a == b,
+                                _ => false,
+                            };
                         if !is_self && !same_as_last {
                             this.set("last_active_view", active_view.clone())?;
                             let doc_view: LuaTable = require_table(lua, "core.docview")?;
-                            let is_docview: bool = doc_view.call_method("is_extended_by", active_view.clone())?;
+                            let is_docview: bool =
+                                doc_view.call_method("is_extended_by", active_view.clone())?;
                             if is_docview {
                                 let doc: LuaValue = active_view.get("doc")?;
                                 let abs_filename: String = if let LuaValue::Table(ref d) = doc {
@@ -986,10 +1034,16 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                                 } else {
                                     String::new()
                                 };
-                                let expand: bool = cfg.get("expand_dirs_to_focused_file").unwrap_or(false);
-                                let scroll_to: bool = cfg.get("scroll_to_focused_file").unwrap_or(false);
-                                let animate: bool = cfg.get("animate_scroll_to_focused_file").unwrap_or(true);
-                                this.call_method::<LuaValue>("set_selection_to_path", (abs_filename, expand, scroll_to, !animate))?;
+                                let expand: bool =
+                                    cfg.get("expand_dirs_to_focused_file").unwrap_or(false);
+                                let scroll_to: bool =
+                                    cfg.get("scroll_to_focused_file").unwrap_or(false);
+                                let animate: bool =
+                                    cfg.get("animate_scroll_to_focused_file").unwrap_or(true);
+                                this.call_method::<LuaValue>(
+                                    "set_selection_to_path",
+                                    (abs_filename, expand, scroll_to, !animate),
+                                )?;
                             } else {
                                 this.call_method::<()>("set_selection", (LuaValue::Nil,))?;
                             }
@@ -1173,7 +1227,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             let draw_rect: LuaFunction = renderer.get("draw_rect")?;
             draw_rect.call::<()>((bx, by, bw, bh, border_color))?;
             draw_rect.call::<()>((x, y, w, h, bg_color))?;
-            common.call_function::<LuaValue>("draw_text", (font, text_color, text, "center", x, y, w, h))?;
+            common.call_function::<LuaValue>(
+                "draw_text",
+                (font, text_color, text, "center", x, y, w, h),
+            )?;
             Ok(())
         })?,
     )?;
@@ -1300,7 +1357,8 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 let round: LuaFunction = common.get("round")?;
                 let text_top: f64 = y + round.call::<f64>((h - font_h) / 2.0)?;
                 let icon_font_h: f64 = this.get("icon_font_height")?;
-                let iy: f64 = text_top + round.call::<f64>((font_h - icon_font_h) / 2.0)? - icon_nudge;
+                let iy: f64 =
+                    text_top + round.call::<f64>((font_h - icon_font_h) / 2.0)? - icon_nudge;
                 let renderer: LuaTable = lua.globals().get("renderer")?;
                 let draw_text: LuaFunction = renderer.get("draw_text")?;
                 draw_text.call::<LuaValue>((icon_font, icon_char, x, iy, icon_color))?;
@@ -1326,13 +1384,12 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 f64,
                 f64,
             )| {
-                let offset: f64 =
-                    this.call_method("draw_item_icon", (item.clone(), active, hovered, x, y, w, h))?;
-                let new_x = x + offset;
-                this.call_method::<()>(
-                    "draw_item_text",
-                    (item, active, hovered, new_x, y, w, h),
+                let offset: f64 = this.call_method(
+                    "draw_item_icon",
+                    (item.clone(), active, hovered, x, y, w, h),
                 )?;
+                let new_x = x + offset;
+                this.call_method::<()>("draw_item_text", (item, active, hovered, new_x, y, w, h))?;
                 Ok(())
             },
         )?,
@@ -1374,13 +1431,12 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let round: LuaFunction = common.get("round")?;
                     let text_top: f64 = y + round.call::<f64>((h - font_h) / 2.0)?;
                     let icon_font_h: f64 = this.get("icon_font_height")?;
-                    let iy: f64 = text_top + round.call::<f64>((font_h - icon_font_h) / 2.0)?
-                        - chev_nudge;
+                    let iy: f64 =
+                        text_top + round.call::<f64>((font_h - icon_font_h) / 2.0)? - chev_nudge;
                     let icon_font: LuaValue = style.get("icon_font")?;
                     let renderer: LuaTable = lua.globals().get("renderer")?;
                     let draw_text: LuaFunction = renderer.get("draw_text")?;
-                    draw_text
-                        .call::<LuaValue>((icon_font, chevron_icon, x, iy, chevron_color))?;
+                    draw_text.call::<LuaValue>((icon_font, chevron_icon, x, iy, chevron_color))?;
                 }
                 let chevron_w: f64 = this.get("item_chevron_width")?;
                 Ok(chevron_w)
@@ -1459,10 +1515,7 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     (item.clone(), active, hovered, draw_x, y, w, h),
                 )?;
                 draw_x += chevron_w;
-                this.call_method::<()>(
-                    "draw_item_body",
-                    (item, active, hovered, draw_x, y, w, h),
-                )?;
+                this.call_method::<()>("draw_item_body", (item, active, hovered, draw_x, y, w, h))?;
                 Ok(())
             },
         )?,
@@ -1473,7 +1526,9 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
         let k = Arc::clone(&class_key);
         lua.create_function(move |lua, this: LuaTable| {
             let visible: bool = this.get("visible").unwrap_or(false);
-            if !visible { return Ok(()); }
+            if !visible {
+                return Ok(());
+            }
             let style: LuaTable = require_table(lua, "core.style")?;
             let bg2: LuaValue = style.get("background2")?;
             this.call_method::<()>("draw_background", bg2)?;
@@ -1545,7 +1600,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             let tooltip: LuaTable = this.get("tooltip")?;
             let tooltip_x: LuaValue = tooltip.get("x")?;
             let tooltip_alpha: f64 = tooltip.get("alpha").unwrap_or(0.0);
-            if !matches!(hp, LuaValue::Nil) && !matches!(tooltip_x, LuaValue::Nil) && tooltip_alpha > 0.0 {
+            if !matches!(hp, LuaValue::Nil)
+                && !matches!(tooltip_x, LuaValue::Nil)
+                && tooltip_alpha > 0.0
+            {
                 let root_view: LuaTable = core.get("root_view")?;
                 let draw_tooltip_fn: LuaFunction = this.get("draw_tooltip")?;
                 root_view.call_method::<()>("defer_draw", (draw_tooltip_fn, this))?;
@@ -1557,109 +1615,129 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     // TreeView:get_parent(item)
     tree_view.set(
         "get_parent",
-        lua.create_function(|lua, (this, item): (LuaTable, Option<LuaTable>)| -> LuaResult<LuaMultiValue> {
-            let item = match item {
-                Some(i) => LuaValue::Table(i),
-                None => this.call_method("get_selected_item", ())?,
-            };
-            let item = match item {
-                LuaValue::Table(t) => t,
-                _ => return Ok(LuaMultiValue::new()),
-            };
-            let abs_filename: String = item.get("abs_filename")?;
-            let common: LuaTable = require_table(lua, "core.common")?;
-            let parent_path: LuaValue = common.call_function("dirname", abs_filename)?;
-            if matches!(parent_path, LuaValue::Nil) {
-                return Ok(LuaMultiValue::new());
-            }
-            let result: LuaMultiValue = this.call_method("resolve_path", parent_path)?;
-            let mut vals: Vec<LuaValue> = result.into_iter().collect();
-            if vals.is_empty() || matches!(vals[0], LuaValue::Nil) {
-                return Ok(LuaMultiValue::new());
-            }
-            // Return (item, y) — skip ox, keep y
-            let item_val = vals.remove(0);
-            let y_val = if vals.len() >= 2 { vals.remove(1) } else { LuaValue::Nil };
-            Ok(LuaMultiValue::from_vec(vec![item_val, y_val]))
-        })?,
+        lua.create_function(
+            |lua, (this, item): (LuaTable, Option<LuaTable>)| -> LuaResult<LuaMultiValue> {
+                let item = match item {
+                    Some(i) => LuaValue::Table(i),
+                    None => this.call_method("get_selected_item", ())?,
+                };
+                let item = match item {
+                    LuaValue::Table(t) => t,
+                    _ => return Ok(LuaMultiValue::new()),
+                };
+                let abs_filename: String = item.get("abs_filename")?;
+                let common: LuaTable = require_table(lua, "core.common")?;
+                let parent_path: LuaValue = common.call_function("dirname", abs_filename)?;
+                if matches!(parent_path, LuaValue::Nil) {
+                    return Ok(LuaMultiValue::new());
+                }
+                let result: LuaMultiValue = this.call_method("resolve_path", parent_path)?;
+                let mut vals: Vec<LuaValue> = result.into_iter().collect();
+                if vals.is_empty() || matches!(vals[0], LuaValue::Nil) {
+                    return Ok(LuaMultiValue::new());
+                }
+                // Return (item, y) — skip ox, keep y
+                let item_val = vals.remove(0);
+                let y_val = if vals.len() >= 2 {
+                    vals.remove(1)
+                } else {
+                    LuaValue::Nil
+                };
+                Ok(LuaMultiValue::from_vec(vec![item_val, y_val]))
+            },
+        )?,
     )?;
 
     // TreeView:get_item(item, direction)
     tree_view.set(
         "get_item",
-        lua.create_function(|lua, (this, item, direction): (LuaTable, LuaValue, i64)| -> LuaResult<LuaMultiValue> {
-            this.call_method::<()>("sync_model", ())?;
-            let idx: i64 = if let LuaValue::Table(ref t) = item {
-                let abs_filename: String = t.get("abs_filename")?;
-                let model_roots: LuaTable = this.get("model_roots")?;
-                let tree_model: LuaTable = require_table(lua, "tree_model")?;
-                let get_row: LuaFunction = tree_model.get("get_row")?;
-                let row: LuaValue = get_row.call((model_roots, abs_filename))?;
-                match row {
-                    LuaValue::Integer(n) => n + direction,
-                    LuaValue::Number(n) => n as i64 + direction,
-                    _ => if direction >= 0 { 1 } else { this.get::<i64>("visible_count")? },
+        lua.create_function(
+            |lua, (this, item, direction): (LuaTable, LuaValue, i64)| -> LuaResult<LuaMultiValue> {
+                this.call_method::<()>("sync_model", ())?;
+                let idx: i64 = if let LuaValue::Table(ref t) = item {
+                    let abs_filename: String = t.get("abs_filename")?;
+                    let model_roots: LuaTable = this.get("model_roots")?;
+                    let tree_model: LuaTable = require_table(lua, "tree_model")?;
+                    let get_row: LuaFunction = tree_model.get("get_row")?;
+                    let row: LuaValue = get_row.call((model_roots, abs_filename))?;
+                    match row {
+                        LuaValue::Integer(n) => n + direction,
+                        LuaValue::Number(n) => n as i64 + direction,
+                        _ => {
+                            if direction >= 0 {
+                                1
+                            } else {
+                                this.get::<i64>("visible_count")?
+                            }
+                        }
+                    }
+                } else if direction >= 0 {
+                    1
+                } else {
+                    this.get::<i64>("visible_count")?
+                };
+                let visible_count: i64 = this.get("visible_count")?;
+                let idx = idx.max(1).min(visible_count);
+                let target: LuaValue = this.call_method("get_item_by_row", idx)?;
+                if let LuaValue::Table(ref t) = target {
+                    let abs: String = t.get("abs_filename")?;
+                    let result: LuaMultiValue = this.call_method("resolve_path", abs)?;
+                    Ok(result)
+                } else {
+                    Ok(LuaMultiValue::new())
                 }
-            } else if direction >= 0 {
-                1
-            } else {
-                this.get::<i64>("visible_count")?
-            };
-            let visible_count: i64 = this.get("visible_count")?;
-            let idx = idx.max(1).min(visible_count);
-            let target: LuaValue = this.call_method("get_item_by_row", idx)?;
-            if let LuaValue::Table(ref t) = target {
-                let abs: String = t.get("abs_filename")?;
-                let result: LuaMultiValue = this.call_method("resolve_path", abs)?;
-                Ok(result)
-            } else {
-                Ok(LuaMultiValue::new())
-            }
-        })?,
+            },
+        )?,
     )?;
 
     // TreeView:get_next(item)
     tree_view.set(
         "get_next",
-        lua.create_function(|_lua, (this, item): (LuaTable, LuaValue)| -> LuaResult<LuaMultiValue> {
-            this.call_method("get_item", (item, 1))
-        })?,
+        lua.create_function(
+            |_lua, (this, item): (LuaTable, LuaValue)| -> LuaResult<LuaMultiValue> {
+                this.call_method("get_item", (item, 1))
+            },
+        )?,
     )?;
 
     // TreeView:get_previous(item)
     tree_view.set(
         "get_previous",
-        lua.create_function(|_lua, (this, item): (LuaTable, LuaValue)| -> LuaResult<LuaMultiValue> {
-            this.call_method("get_item", (item, -1))
-        })?,
+        lua.create_function(
+            |_lua, (this, item): (LuaTable, LuaValue)| -> LuaResult<LuaMultiValue> {
+                this.call_method("get_item", (item, -1))
+            },
+        )?,
     )?;
 
     // TreeView:toggle_expand(toggle, item)
     tree_view.set(
         "toggle_expand",
-        lua.create_function(|lua, (this, toggle, item): (LuaTable, LuaValue, Option<LuaTable>)| {
-            let item = match item {
-                Some(i) => LuaValue::Table(i),
-                None => this.call_method("get_selected_item", ())?,
-            };
-            let item = match item {
-                LuaValue::Table(t) => t,
-                _ => return Ok(()),
-            };
-            let item_type: String = item.get("type")?;
-            if item_type == "dir" {
-                let abs_filename: String = item.get("abs_filename")?;
-                let tree_model: LuaTable = require_table(lua, "tree_model")?;
-                let toggle_fn: LuaFunction = tree_model.get("toggle_expand")?;
-                let toggle_arg: LuaValue = match toggle {
-                    LuaValue::Boolean(b) => LuaValue::Boolean(b),
-                    _ => LuaValue::Nil,
+        lua.create_function(
+            |lua, (this, toggle, item): (LuaTable, LuaValue, Option<LuaTable>)| {
+                let item = match item {
+                    Some(i) => LuaValue::Table(i),
+                    None => this.call_method("get_selected_item", ())?,
                 };
-                toggle_fn.call::<()>((abs_filename, toggle_arg))?;
-                this.set("items_dirty", true)?;
-            }
-            Ok(())
-        })?,
+                let item = match item {
+                    LuaValue::Table(t) => t,
+                    _ => return Ok(()),
+                };
+                let item_type: String = item.get("type")?;
+                if item_type == "dir" {
+                    let abs_filename: String = item.get("abs_filename")?;
+                    let tree_model: LuaTable = require_table(lua, "tree_model")?;
+                    let toggle_fn: LuaFunction = tree_model.get("toggle_expand")?;
+                    let toggle_arg: LuaValue = match toggle {
+                        LuaValue::Boolean(b) => LuaValue::Boolean(b),
+                        _ => LuaValue::Nil,
+                    };
+                    toggle_fn.call::<()>((abs_filename, toggle_arg))?;
+                    this.set("items_dirty", true)?;
+                }
+                Ok(())
+            },
+        )?,
     )?;
 
     // TreeView:open_doc(filename)
@@ -1682,9 +1760,7 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             let divider: LuaValue = context_menu.get("DIVIDER")?;
             let items = lua.create_table()?;
 
-            let entries = [
-                ("Open in System", "treeview:open-in-system"),
-            ];
+            let entries = [("Open in System", "treeview:open-in-system")];
             let mut idx = 1;
             for (text, cmd) in &entries {
                 let entry = lua.create_table()?;
@@ -1734,8 +1810,7 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     if !matches!(toolbar_plugin_config, LuaValue::Boolean(false)) {
         let pcall: LuaFunction = lua.globals().get("pcall")?;
         let require_fn: LuaFunction = lua.globals().get("require")?;
-        let result: LuaMultiValue =
-            pcall.call((require_fn, "plugins.toolbarview"))?;
+        let result: LuaMultiValue = pcall.call((require_fn, "plugins.toolbarview"))?;
         let mut vals = result.into_iter();
         let ok: bool = match vals.next() {
             Some(LuaValue::Boolean(b)) => b,
@@ -1774,16 +1849,20 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     {
         let old_remove: LuaFunction = core.get("remove_project")?;
         let vk = Arc::clone(&view_key);
-        let new_remove = lua.create_function(move |lua, (project, force): (LuaValue, LuaValue)| {
-            let old: LuaFunction = lua.globals().get::<LuaTable>("core")?.get("_old_remove_project")?;
-            let result: LuaValue = old.call((project, force))?;
-            let v: LuaTable = lua.registry_value(&vk)?;
-            v.set("items_dirty", true)?;
-            let native: LuaTable = require_table(lua, "treeview_native")?;
-            let sync_fn: LuaFunction = native.get("sync_model")?;
-            sync_fn.call::<()>(v)?;
-            Ok(result)
-        })?;
+        let new_remove =
+            lua.create_function(move |lua, (project, force): (LuaValue, LuaValue)| {
+                let old: LuaFunction = lua
+                    .globals()
+                    .get::<LuaTable>("core")?
+                    .get("_old_remove_project")?;
+                let result: LuaValue = old.call((project, force))?;
+                let v: LuaTable = lua.registry_value(&vk)?;
+                v.set("items_dirty", true)?;
+                let native: LuaTable = require_table(lua, "treeview_native")?;
+                let sync_fn: LuaFunction = native.get("sync_model")?;
+                sync_fn.call::<()>(v)?;
+                Ok(result)
+            })?;
         core.set("_old_remove_project", old_remove)?;
         core.set("remove_project", new_remove)?;
     }
@@ -1799,8 +1878,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 let tree_model: LuaTable = require_table(lua, "tree_model")?;
                 let clear_all: LuaFunction = tree_model.get("clear_all")?;
                 clear_all.call::<()>(())?;
-                let old: LuaValue =
-                    lua.globals().get::<LuaTable>("core")?.get("_old_on_quit_project")?;
+                let old: LuaValue = lua
+                    .globals()
+                    .get::<LuaTable>("core")?
+                    .get("_old_on_quit_project")?;
                 if let LuaValue::Function(f) = old {
                     f.call::<()>(())?;
                 }
@@ -1962,7 +2043,8 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let rpp: String = rp.get("path")?;
                     if pp != rpp {
                         let pathsep: String = lua.globals().get("PATHSEP")?;
-                        let basename: String = common.call_function("basename", filename.clone())?;
+                        let basename: String =
+                            common.call_function("basename", filename.clone())?;
                         format!("{}{}{}", basename, pathsep, relfilename)
                     } else {
                         relfilename
@@ -1972,9 +2054,14 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 };
 
                 let system: LuaTable = lua.globals().get("system")?;
-                let file_info: LuaTable = system.call_function("get_file_info", filename.clone())?;
+                let file_info: LuaTable =
+                    system.call_function("get_file_info", filename.clone())?;
                 let file_type: String = file_info.get("type")?;
-                let type_label = if file_type == "dir" { "Directory" } else { "File" };
+                let type_label = if file_type == "dir" {
+                    "Directory"
+                } else {
+                    "File"
+                };
 
                 let nag_view: LuaTable = core.get("nag_view")?;
                 let opt = lua.create_table()?;
@@ -2000,14 +2087,19 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let text: String = choice.get("text")?;
                     if text == "Yes" {
                         let system: LuaTable = lua.globals().get("system")?;
-                        let fi: LuaTable = system.call_function("get_file_info", filename.clone())?;
+                        let fi: LuaTable =
+                            system.call_function("get_file_info", filename.clone())?;
                         let ft: String = fi.get("type")?;
                         let core: LuaTable = require_table(lua, "core")?;
                         if ft == "dir" {
                             let common: LuaTable = require_table(lua, "core.common")?;
-                            let result: LuaMultiValue = common.call_function("rm", (filename.clone(), true))?;
+                            let result: LuaMultiValue =
+                                common.call_function("rm", (filename.clone(), true))?;
                             let mut vals = result.into_iter();
-                            let deleted = !matches!(vals.next(), Some(LuaValue::Boolean(false)) | Some(LuaValue::Nil));
+                            let deleted = !matches!(
+                                vals.next(),
+                                Some(LuaValue::Boolean(false)) | Some(LuaValue::Nil)
+                            );
                             if !deleted {
                                 let err = match vals.next() {
                                     Some(LuaValue::String(s)) => s.to_string_lossy().to_string(),
@@ -2023,9 +2115,13 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                             }
                         } else {
                             let os: LuaTable = lua.globals().get("os")?;
-                            let result: LuaMultiValue = os.call_function("remove", filename.clone())?;
+                            let result: LuaMultiValue =
+                                os.call_function("remove", filename.clone())?;
                             let mut vals = result.into_iter();
-                            let removed = !matches!(vals.next(), Some(LuaValue::Boolean(false)) | Some(LuaValue::Nil));
+                            let removed = !matches!(
+                                vals.next(),
+                                Some(LuaValue::Boolean(false)) | Some(LuaValue::Nil)
+                            );
                             if !removed {
                                 let err = match vals.next() {
                                     Some(LuaValue::String(s)) => s.to_string_lossy().to_string(),
@@ -2039,7 +2135,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                         let log_fn: LuaFunction = core.get("log")?;
                         log_fn.call::<()>(format!("Deleted \"{}\"", filename))?;
                         let inv_fn: LuaFunction = lua.registry_value(&inv_fn_k)?;
-                        let item_project: LuaValue = lua.globals().get::<LuaTable>("core")?.get("_treeview_last_delete_project")?;
+                        let item_project: LuaValue = lua
+                            .globals()
+                            .get::<LuaTable>("core")?
+                            .get("_treeview_last_delete_project")?;
                         inv_fn.call::<()>(item_project)?;
                     }
                     Ok(())
@@ -2079,9 +2178,13 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                         filename.clone()
                     };
                     let os: LuaTable = lua.globals().get("os")?;
-                    let result: LuaMultiValue = os.call_function("rename", (old_abs.clone(), abs_filename.clone()))?;
+                    let result: LuaMultiValue =
+                        os.call_function("rename", (old_abs.clone(), abs_filename.clone()))?;
                     let mut vals = result.into_iter();
-                    let ok = !matches!(vals.next(), Some(LuaValue::Nil) | Some(LuaValue::Boolean(false)));
+                    let ok = !matches!(
+                        vals.next(),
+                        Some(LuaValue::Nil) | Some(LuaValue::Boolean(false))
+                    );
                     if ok {
                         let docs: LuaTable = core.get("docs")?;
                         for entry in docs.sequence_values::<LuaTable>() {
@@ -2090,14 +2193,20 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                             if let LuaValue::String(ref s) = doc_abs {
                                 let s = s.to_str()?.to_string();
                                 if s == old_abs {
-                                    doc.call_method::<()>("set_filename", (filename.clone(), abs_filename.clone()))?;
+                                    doc.call_method::<()>(
+                                        "set_filename",
+                                        (filename.clone(), abs_filename.clone()),
+                                    )?;
                                     doc.call_method::<()>("reset_syntax", ())?;
                                     break;
                                 }
                             }
                         }
                         let log_fn: LuaFunction = core.get("log")?;
-                        log_fn.call::<()>(format!("Renamed \"{}\" to \"{}\"", old_filename, filename))?;
+                        log_fn.call::<()>(format!(
+                            "Renamed \"{}\" to \"{}\"",
+                            old_filename, filename
+                        ))?;
                     } else {
                         let err = match vals.next() {
                             Some(LuaValue::String(s)) => s.to_string_lossy().to_string(),
@@ -2121,10 +2230,11 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     None
                 };
                 let pp_for_suggest = project_path.clone();
-                let suggest = lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
-                    let common: LuaTable = require_table(lua, "core.common")?;
-                    common.call_function("path_suggest", (text, pp_for_suggest.clone()))
-                })?;
+                let suggest =
+                    lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
+                        let common: LuaTable = require_table(lua, "core.common")?;
+                        common.call_function("path_suggest", (text, pp_for_suggest.clone()))
+                    })?;
                 opts.set("suggest", suggest)?;
 
                 core.set("_treeview_rename_project", project)?;
@@ -2186,7 +2296,8 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let prev = match prev {
                         LuaValue::Nil => {
                             let root_view: LuaTable = core.get("root_view")?;
-                            let primary: LuaTable = root_view.call_method("get_primary_node", ())?;
+                            let primary: LuaTable =
+                                root_view.call_method("get_primary_node", ())?;
                             LuaValue::Table(primary.get::<LuaTable>("active_view")?)
                         }
                         other => other,
@@ -2212,7 +2323,8 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                         LuaValue::Table(t) => t,
                         _ => {
                             let root_view: LuaTable = core.get("root_view")?;
-                            let primary: LuaTable = root_view.call_method("get_primary_node", ())?;
+                            let primary: LuaTable =
+                                root_view.call_method("get_primary_node", ())?;
                             primary.get::<LuaTable>("active_view")?
                         }
                     };
@@ -2286,8 +2398,14 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                         item.get("abs_filename")?
                     };
                     let open_fn = lua.create_function(move |lua, ()| {
-                        let v: LuaTable = lua.globals().get::<LuaTable>("core")?.get("_treeview_view_ref")?;
-                        let normalized: String = lua.globals().get::<LuaTable>("core")?.get("_treeview_open_path")?;
+                        let v: LuaTable = lua
+                            .globals()
+                            .get::<LuaTable>("core")?
+                            .get("_treeview_view_ref")?;
+                        let normalized: String = lua
+                            .globals()
+                            .get::<LuaTable>("core")?
+                            .get("_treeview_open_path")?;
                         v.call_method::<()>("open_doc", normalized)?;
                         Ok(())
                     })?;
@@ -2430,17 +2548,25 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let pathsep: String = lua.globals().get("PATHSEP")?;
                     if item_type == "dir" {
                         if let LuaValue::Table(ref p) = project {
-                            let normalized: String = p.call_method("normalize_path", item.get::<String>("abs_filename")?)?;
-                            LuaValue::String(lua.create_string(format!("{}{}", normalized, pathsep))?)
+                            let normalized: String = p.call_method(
+                                "normalize_path",
+                                item.get::<String>("abs_filename")?,
+                            )?;
+                            LuaValue::String(
+                                lua.create_string(format!("{}{}", normalized, pathsep))?,
+                            )
                         } else {
                             LuaValue::Nil
                         }
                     } else {
                         let common: LuaTable = require_table(lua, "core.common")?;
-                        let dirname: String = common.call_function("dirname", item.get::<String>("abs_filename")?)?;
+                        let dirname: String =
+                            common.call_function("dirname", item.get::<String>("abs_filename")?)?;
                         if let LuaValue::Table(ref p) = project {
                             let normalized: String = p.call_method("normalize_path", dirname)?;
-                            LuaValue::String(lua.create_string(format!("{}{}", normalized, pathsep))?)
+                            LuaValue::String(
+                                lua.create_string(format!("{}{}", normalized, pathsep))?,
+                            )
                         } else {
                             LuaValue::Nil
                         }
@@ -2464,7 +2590,8 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                         filename.clone()
                     };
                     let io: LuaTable = lua.globals().get("io")?;
-                    let result: LuaMultiValue = io.call_function("open", (doc_filename.clone(), "a+"))?;
+                    let result: LuaMultiValue =
+                        io.call_function("open", (doc_filename.clone(), "a+"))?;
                     let mut vals = result.into_iter();
                     let file = vals.next().unwrap_or(LuaValue::Nil);
                     if matches!(file, LuaValue::Nil) {
@@ -2473,7 +2600,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                             _ => "unknown error".to_string(),
                         };
                         let err_fn: LuaFunction = core.get("error")?;
-                        err_fn.call::<()>(format!("Error: unable to create a new file in \"{}\": {}", doc_filename, err))?;
+                        err_fn.call::<()>(format!(
+                            "Error: unable to create a new file in \"{}\": {}",
+                            doc_filename, err
+                        ))?;
                         return Ok(());
                     }
                     if let LuaValue::UserData(ref ud) = file {
@@ -2488,20 +2618,31 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 })?;
                 opts.set("submit", submit)?;
 
-                let project_path: Option<String> = if let LuaValue::Table(ref p) = item.get::<LuaValue>("project")? {
-                    p.get("path")?
-                } else {
-                    None
-                };
+                let project_path: Option<String> =
+                    if let LuaValue::Table(ref p) = item.get::<LuaValue>("project")? {
+                        p.get("path")?
+                    } else {
+                        None
+                    };
                 let pp = project_path.clone();
-                let suggest = lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
-                    let common: LuaTable = require_table(lua, "core.common")?;
-                    common.call_function("path_suggest", (text, pp.clone()))
-                })?;
+                let suggest =
+                    lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
+                        let common: LuaTable = require_table(lua, "core.common")?;
+                        common.call_function("path_suggest", (text, pp.clone()))
+                    })?;
                 opts.set("suggest", suggest)?;
 
-                core.set("_treeview_newfile_project", item.get::<LuaValue>("project")?)?;
-                let v: LuaTable = lua.registry_value(&lua.globals().get::<LuaTable>("core")?.get::<mlua::RegistryKey>("_treeview_view_key").unwrap_or(lua.create_registry_value(lua.create_table()?)?))
+                core.set(
+                    "_treeview_newfile_project",
+                    item.get::<LuaValue>("project")?,
+                )?;
+                let v: LuaTable = lua
+                    .registry_value(
+                        &lua.globals()
+                            .get::<LuaTable>("core")?
+                            .get::<mlua::RegistryKey>("_treeview_view_key")
+                            .unwrap_or(lua.create_registry_value(lua.create_table()?)?),
+                    )
                     .unwrap_or(lua.create_table()?);
                 // We need the view ref - get it from core
                 // Actually let's use a different approach - store view ref in core
@@ -2523,17 +2664,25 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let pathsep: String = lua.globals().get("PATHSEP")?;
                     if item_type == "dir" {
                         if let LuaValue::Table(ref p) = project {
-                            let normalized: String = p.call_method("normalize_path", item.get::<String>("abs_filename")?)?;
-                            LuaValue::String(lua.create_string(format!("{}{}", normalized, pathsep))?)
+                            let normalized: String = p.call_method(
+                                "normalize_path",
+                                item.get::<String>("abs_filename")?,
+                            )?;
+                            LuaValue::String(
+                                lua.create_string(format!("{}{}", normalized, pathsep))?,
+                            )
                         } else {
                             LuaValue::Nil
                         }
                     } else {
                         let common: LuaTable = require_table(lua, "core.common")?;
-                        let dirname: String = common.call_function("dirname", item.get::<String>("abs_filename")?)?;
+                        let dirname: String =
+                            common.call_function("dirname", item.get::<String>("abs_filename")?)?;
                         if let LuaValue::Table(ref p) = project {
                             let normalized: String = p.call_method("normalize_path", dirname)?;
-                            LuaValue::String(lua.create_string(format!("{}{}", normalized, pathsep))?)
+                            LuaValue::String(
+                                lua.create_string(format!("{}{}", normalized, pathsep))?,
+                            )
                         } else {
                             LuaValue::Nil
                         }
@@ -2559,7 +2708,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     };
                     let result: LuaMultiValue = common.call_function("mkdirp", dir_path.clone())?;
                     let mut vals = result.into_iter();
-                    let created = !matches!(vals.next(), Some(LuaValue::Boolean(false)) | Some(LuaValue::Nil));
+                    let created = !matches!(
+                        vals.next(),
+                        Some(LuaValue::Boolean(false)) | Some(LuaValue::Nil)
+                    );
                     if !created {
                         let err = match vals.next() {
                             Some(LuaValue::String(s)) => s.to_string_lossy().to_string(),
@@ -2570,7 +2722,10 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                             _ => dir_path.clone(),
                         };
                         let err_fn: LuaFunction = core.get("error")?;
-                        err_fn.call::<()>(format!("Error: unable to create folder \"{}\": {} ({})", dir_path, err, err_path))?;
+                        err_fn.call::<()>(format!(
+                            "Error: unable to create folder \"{}\": {} ({})",
+                            dir_path, err, err_path
+                        ))?;
                         return Ok(());
                     }
                     let log_fn: LuaFunction = core.get("log")?;
@@ -2580,19 +2735,24 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 })?;
                 opts.set("submit", submit)?;
 
-                let project_path: Option<String> = if let LuaValue::Table(ref p) = item.get::<LuaValue>("project")? {
-                    p.get("path")?
-                } else {
-                    None
-                };
+                let project_path: Option<String> =
+                    if let LuaValue::Table(ref p) = item.get::<LuaValue>("project")? {
+                        p.get("path")?
+                    } else {
+                        None
+                    };
                 let pp = project_path.clone();
-                let suggest = lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
-                    let common: LuaTable = require_table(lua, "core.common")?;
-                    common.call_function("path_suggest", (text, pp.clone()))
-                })?;
+                let suggest =
+                    lua.create_function(move |lua, text: String| -> LuaResult<LuaValue> {
+                        let common: LuaTable = require_table(lua, "core.common")?;
+                        common.call_function("path_suggest", (text, pp.clone()))
+                    })?;
                 opts.set("suggest", suggest)?;
 
-                core.set("_treeview_newfolder_project", item.get::<LuaValue>("project")?)?;
+                core.set(
+                    "_treeview_newfolder_project",
+                    item.get::<LuaValue>("project")?,
+                )?;
                 command_view.call_method::<()>("enter", ("Folder Name", opts))?;
                 Ok(())
             })?

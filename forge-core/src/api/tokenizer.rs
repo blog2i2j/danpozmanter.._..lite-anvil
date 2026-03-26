@@ -54,7 +54,10 @@ fn resolve_graph_value(
         let t = lua.create_table()?;
         // Pre-insert before filling to handle any cyclic refs.
         cache.insert(ref_id.clone(), t.clone());
-        let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or("object");
+        let kind = node
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .unwrap_or("object");
         if let Some(values) = node.get("values") {
             if kind == "array" {
                 if let JsonValue::Array(arr) = values {
@@ -119,9 +122,7 @@ fn load_assets_impl(lua: &Lua, datadir: &str) -> LuaResult<LuaTable> {
             Err(_) => continue,
         };
         let payload = decoded.get("syntax").unwrap_or(&decoded);
-        let table = if let (Some(graph), Some(root)) =
-            (payload.get("graph"), payload.get("root"))
-        {
+        let table = if let (Some(graph), Some(root)) = (payload.get("graph"), payload.get("root")) {
             let Some(nodes) = graph.get("nodes").and_then(|n| n.as_object()) else {
                 continue;
             };

@@ -301,10 +301,7 @@ fn utf8_insert(lua: &Lua, args: LuaMultiValue) -> LuaResult<LuaString> {
 }
 
 /// Remove characters from start to fin (1-based character indices).
-fn utf8_remove(
-    lua: &Lua,
-    (s, start, fin): (LuaString, i64, Option<i64>),
-) -> LuaResult<LuaString> {
+fn utf8_remove(lua: &Lua, (s, start, fin): (LuaString, i64, Option<i64>)) -> LuaResult<LuaString> {
     let borrowed = s.as_bytes();
     let bytes: &[u8] = &borrowed;
     let fin = fin.unwrap_or(start);

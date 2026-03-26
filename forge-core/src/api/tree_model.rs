@@ -813,9 +813,7 @@ fn ensure_tree(root: &str, options: &TreeOptionsKey) -> LuaResult<()> {
             Some(entry) => {
                 let config_changed = entry.options != *options;
                 let is_dirty = entry.dirty.load(Ordering::Relaxed);
-                if entry.rebuilding.load(Ordering::Relaxed)
-                    || (!config_changed && !is_dirty)
-                {
+                if entry.rebuilding.load(Ordering::Relaxed) || (!config_changed && !is_dirty) {
                     Work::None
                 } else {
                     if is_dirty && !config_changed {

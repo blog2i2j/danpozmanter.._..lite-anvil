@@ -12,9 +12,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 
             command.set(
                 "generate_predicate",
-                lua.create_function(|lua, predicate: LuaValue| {
-                    generate_predicate(lua, predicate)
-                })?,
+                lua.create_function(|lua, predicate: LuaValue| generate_predicate(lua, predicate))?,
             )?;
 
             // command.add(predicate, map)
@@ -25,8 +23,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     move |lua, (predicate, fn_map): (LuaValue, LuaTable)| {
                         let cmd: LuaTable = lua.registry_value(&cmd_ref)?;
                         let gen_pred: LuaFunction = cmd.get("generate_predicate")?;
-                        let predicate_fn: LuaFunction =
-                            gen_pred.call::<LuaFunction>(predicate)?;
+                        let predicate_fn: LuaFunction = gen_pred.call::<LuaFunction>(predicate)?;
                         let cmd_map: LuaTable = cmd.get("map")?;
                         let core: LuaTable = lua
                             .globals()
@@ -153,8 +150,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                                 let predicate: LuaFunction = entry.get("predicate")?;
                                 let perform_fn: LuaFunction = entry.get("perform")?;
 
-                                let pred_result: LuaMultiValue =
-                                    predicate.call(args.clone())?;
+                                let pred_result: LuaMultiValue = predicate.call(args.clone())?;
                                 let mut pred_values: Vec<LuaValue> =
                                     pred_result.into_iter().collect();
 
@@ -195,8 +191,16 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 lua.create_function(|lua, ()| {
                     let require: LuaFunction = lua.globals().get("require")?;
                     let modules = [
-                        "core", "root", "command", "doc", "findreplace", "files",
-                        "dialog", "log", "statusbar", "contextmenu",
+                        "core",
+                        "root",
+                        "command",
+                        "doc",
+                        "findreplace",
+                        "files",
+                        "dialog",
+                        "log",
+                        "statusbar",
+                        "contextmenu",
                     ];
                     for name in &modules {
                         let module_path = format!("core.commands.{name}");
@@ -236,11 +240,7 @@ fn generate_predicate(lua: &Lua, predicate: LuaValue) -> LuaResult<LuaFunction> 
 }
 
 /// Builds a predicate function that checks `core.active_view:extends(class)` or `:is(class)`.
-fn make_class_predicate(
-    lua: &Lua,
-    class: LuaValue,
-    strict: bool,
-) -> LuaResult<LuaFunction> {
+fn make_class_predicate(lua: &Lua, class: LuaValue, strict: bool) -> LuaResult<LuaFunction> {
     let class_key = lua.create_registry_value(class)?;
     lua.create_function(move |lua, args: LuaMultiValue| {
         let core: LuaTable = lua
@@ -308,19 +308,13 @@ fn prettify_search_command(name: &str) -> Option<String> {
     }
 
     let (label, remainder) = if action.contains("swap") {
-        let r = action
-            .trim_start_matches("swap")
-            .trim_start_matches('-');
+        let r = action.trim_start_matches("swap").trim_start_matches('-');
         ("Swap", r)
     } else if action.contains("replace") {
-        let r = action
-            .trim_start_matches("replace")
-            .trim_start_matches('-');
+        let r = action.trim_start_matches("replace").trim_start_matches('-');
         ("Replace", r)
     } else if action.contains("find") {
-        let r = action
-            .trim_start_matches("find")
-            .trim_start_matches('-');
+        let r = action.trim_start_matches("find").trim_start_matches('-');
         ("Find", r)
     } else {
         ("Find", action)

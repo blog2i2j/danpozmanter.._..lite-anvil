@@ -106,13 +106,11 @@ fn install(lua: &Lua) -> LuaResult<()> {
                 let sol: LuaValue = lua.registry_value(&sol_key)?;
                 let eol: LuaValue = lua.registry_value(&eol_key)?;
 
-                let pos1: LuaMultiValue =
-                    doc.call_method("position_offset", (line1, col1, sol))?;
+                let pos1: LuaMultiValue = doc.call_method("position_offset", (line1, col1, sol))?;
                 let l1 = to_i64(pos1.front().unwrap_or(&LuaValue::Integer(1)));
                 let c1 = to_i64(pos1.iter().nth(1).unwrap_or(&LuaValue::Integer(1)));
 
-                let pos2: LuaMultiValue =
-                    doc.call_method("position_offset", (line2, col2, eol))?;
+                let pos2: LuaMultiValue = doc.call_method("position_offset", (line2, col2, eol))?;
                 let l2 = to_i64(pos2.front().unwrap_or(&LuaValue::Integer(1)));
                 let c2 = to_i64(pos2.iter().nth(1).unwrap_or(&LuaValue::Integer(1)));
 
