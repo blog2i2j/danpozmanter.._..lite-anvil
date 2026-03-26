@@ -219,6 +219,7 @@ pub fn make_renderer(lua: &Lua) -> LuaResult<LuaTable> {
                             h: r.h,
                         })
                         .collect();
+                    // SAFETY: window is valid; sdl_rects is a valid slice.
                     unsafe {
                         SDL_UpdateWindowSurfaceRects(
                             window,

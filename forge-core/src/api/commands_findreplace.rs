@@ -66,12 +66,15 @@ fn get_find_tooltip(lua: &Lua, state: &LuaTable) -> LuaResult<String> {
     let find_regex: bool = state.get("find_regex")?;
     let case_sensitive: bool = state.get("case_sensitive")?;
     let whole_word: bool = state.get("whole_word")?;
+    let in_selection: bool = state.get("in_selection")?;
 
     let rf: LuaValue = keymap.call_function("get_binding", "find-replace:repeat-find")?;
     let sa: LuaValue = keymap.call_function("get_binding", "find-replace:select-all-found")?;
     let ti: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-sensitivity")?;
     let tr: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-regex")?;
     let tw: LuaValue = keymap.call_function("get_binding", "find-replace:toggle-whole-word")?;
+    let ts: LuaValue =
+        keymap.call_function("get_binding", "find-replace:toggle-in-selection")?;
 
     let mut result = String::new();
     if find_regex {
@@ -82,6 +85,9 @@ fn get_find_tooltip(lua: &Lua, state: &LuaTable) -> LuaResult<String> {
     }
     if whole_word {
         result.push_str("[Whole Word] ");
+    }
+    if in_selection {
+        result.push_str("[In Selection] ");
     }
     if let LuaValue::String(s) = &rf {
         result.push_str(&format!("Press {} to select the next match.", s.to_str()?));
@@ -100,6 +106,9 @@ fn get_find_tooltip(lua: &Lua, state: &LuaTable) -> LuaResult<String> {
     }
     if let LuaValue::String(s) = &tw {
         result.push_str(&format!(" {} toggles whole word.", s.to_str()?));
+    }
+    if let LuaValue::String(s) = &ts {
+        result.push_str(&format!(" {} toggles in-selection.", s.to_str()?));
     }
     Ok(result)
 }
@@ -193,6 +202,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         "whole_word",
         config.get::<bool>("find_whole_word").unwrap_or(false),
     )?;
+    state.set("in_selection", false)?;
     state.set("found_expression", false)?;
     state.set("find_ui_active", false)?;
     let state_key = Arc::new(lua.create_registry_value(state)?);
@@ -424,12 +434,23 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             state.set("last_view", active_view.clone())?;
 
             let doc: LuaTable = active_view.get("doc")?;
-            let sel: LuaMultiValue = doc.call_method("get_selection", ())?;
+            let sel: LuaMultiValue = doc.call_method("get_selection", true)?;
+            let sel_vals: Vec<LuaValue> = sel.into_iter().collect();
             let sel_tbl = lua.create_table()?;
-            for (i, v) in sel.into_iter().enumerate() {
-                sel_tbl.set(i + 1, v)?;
+            for (i, v) in sel_vals.iter().enumerate() {
+                sel_tbl.set(i + 1, v.clone())?;
             }
             state.set("last_sel", sel_tbl.clone())?;
+
+            // Detect multi-line selection for in_selection mode
+            let sel_l1 = lua_to_i64(&sel_vals[0]);
+            let sel_l2 = lua_to_i64(&sel_vals[2]);
+            if sel_l1 != sel_l2 {
+                // Multi-line selection: store boundaries for in_selection constraint
+                state.set("selection_bounds", sel_tbl.clone())?;
+            } else {
+                state.set("selection_bounds", LuaValue::Nil)?;
+            }
 
             let table_mod: LuaTable = lua.globals().get("table")?;
             let unpack: LuaFunction = table_mod.get("unpack")?;
@@ -442,27 +463,71 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let sv: LuaTable = core.get("status_view")?;
             sv.call_method::<()>("show_tooltip", tooltip)?;
 
-            // Create the search_fn that wraps search.find with options
+            // Create the search_fn that wraps search.find with options,
+            // constraining results to selection bounds when in_selection is active.
             let sk2 = sk.clone();
             let search_fn = lua.create_function(move |lua, args: LuaMultiValue| -> LuaResult<LuaMultiValue> {
                 let state: LuaTable = lua.registry_value(&sk2)?;
                 let search: LuaTable = require_table(lua, "core.doc.search")?;
                 let whole_word: bool = state.get("whole_word")?;
+                let in_selection: bool = state.get("in_selection")?;
                 let a: Vec<LuaValue> = args.into_iter().collect();
                 // args: doc, line, col, text, case_sensitive, find_regex, find_reverse, _whole_word
                 let case_sensitive = matches!(a.get(4), Some(LuaValue::Boolean(true)));
                 let find_regex = matches!(a.get(5), Some(LuaValue::Boolean(true)));
                 let find_reverse = matches!(a.get(6), Some(LuaValue::Boolean(true)));
                 let opt = lua.create_table()?;
-                opt.set("wrap", true)?;
                 opt.set("no_case", !case_sensitive)?;
                 opt.set("regex", find_regex)?;
                 opt.set("reverse", find_reverse)?;
                 opt.set("whole_word", whole_word)?;
-                search.call_function(
+
+                // When constraining to selection, disable wrap to avoid infinite loops
+                let bounds = if in_selection {
+                    match state.get::<LuaValue>("selection_bounds")? {
+                        LuaValue::Table(b) => {
+                            opt.set("wrap", false)?;
+                            let bl1 = lua_to_i64(&b.get::<LuaValue>(1)?);
+                            let bc1 = lua_to_i64(&b.get::<LuaValue>(2)?);
+                            let bl2 = lua_to_i64(&b.get::<LuaValue>(3)?);
+                            let bc2 = lua_to_i64(&b.get::<LuaValue>(4)?);
+                            Some((bl1, bc1, bl2, bc2))
+                        }
+                        _ => {
+                            opt.set("wrap", true)?;
+                            None
+                        }
+                    }
+                } else {
+                    opt.set("wrap", true)?;
+                    None
+                };
+
+                let result: LuaMultiValue = search.call_function(
                     "find",
                     (a[0].clone(), a[1].clone(), a[2].clone(), a[3].clone(), opt),
-                )
+                )?;
+
+                if let Some((bl1, bc1, bl2, bc2)) = bounds {
+                    let r: Vec<LuaValue> = result.into_iter().collect();
+                    if r.len() >= 4 && !r[0].is_nil() {
+                        let rl1 = lua_to_i64(&r[0]);
+                        let rc1 = lua_to_i64(&r[1]);
+                        let rl2 = lua_to_i64(&r[2]);
+                        let rc2 = lua_to_i64(&r[3]);
+                        // Match start must be at or after selection start
+                        let start_ok = rl1 > bl1 || (rl1 == bl1 && rc1 >= bc1);
+                        // Match end must be at or before selection end
+                        let end_ok = rl2 < bl2 || (rl2 == bl2 && rc2 <= bc2);
+                        if start_ok && end_ok {
+                            return Ok(LuaMultiValue::from_vec(r));
+                        }
+                        return Ok(LuaMultiValue::new());
+                    }
+                    return Ok(LuaMultiValue::from_vec(r));
+                }
+
+                Ok(result)
             })?;
 
             let sk3 = sk.clone();
@@ -945,6 +1010,30 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         })?,
     )?;
 
+    let sk = state_key.clone();
+    toggle_cmds.set(
+        "find-replace:toggle-in-selection",
+        lua.create_function(move |lua, ()| {
+            let state: LuaTable = lua.registry_value(&sk)?;
+            let core: LuaTable = require_table(lua, "core")?;
+            let is: bool = state.get("in_selection")?;
+            state.set("in_selection", !is)?;
+            let tooltip = get_find_tooltip(lua, &state)?;
+            let sv: LuaTable = core.get("status_view")?;
+            sv.call_method::<()>("show_tooltip", tooltip)?;
+            let last_sel: LuaValue = state.get("last_sel")?;
+            if let LuaValue::Table(sel) = last_sel {
+                let last_fn: LuaValue = state.get("last_fn")?;
+                let last_text: LuaValue = state.get("last_text")?;
+                if let (LuaValue::Function(f), LuaValue::String(t)) = (last_fn, last_text) {
+                    let text = t.to_str()?.to_string();
+                    update_preview(lua, &state, &sel, &f, &text)?;
+                }
+            }
+            Ok(())
+        })?,
+    )?;
+
     add_fn.call::<()>(("core.commandview", toggle_cmds))?;
 
     // --- Status bar item ---
@@ -989,6 +1078,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let cs: bool = state.get("case_sensitive")?;
             let fr: bool = state.get("find_regex")?;
             let ww: bool = state.get("whole_word")?;
+            let is: bool = state.get("in_selection")?;
 
             let result = lua.create_table()?;
             result.push(if cs { accent.clone() } else { dim.clone() })?;
@@ -999,16 +1089,29 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             result.push(".*")?;
             result.push(dim.clone())?;
             result.push(" ")?;
-            result.push(if ww { accent } else { dim })?;
+            result.push(if ww { accent.clone() } else { dim.clone() })?;
             result.push("W")?;
+            result.push(dim.clone())?;
+            result.push(" ")?;
+            result.push(if is { accent } else { dim })?;
+            result.push("S")?;
             Ok(result)
         })?,
     )?;
 
-    item_tbl.set("tooltip", "Search toggles: case, regex, whole word")?;
+    item_tbl.set("tooltip", "Search toggles: case, regex, whole word, in selection")?;
     sv.call_method::<()>("add_item", item_tbl)?;
 
     Ok(())
+}
+
+/// Extracts an i64 from a LuaValue (Integer or Number).
+fn lua_to_i64(v: &LuaValue) -> i64 {
+    match v {
+        LuaValue::Integer(i) => *i,
+        LuaValue::Number(n) => *n as i64,
+        _ => 0,
+    }
 }
 
 /// Checks if (line, col) is inside the selection (l1,c1)-(l2,c2).
@@ -1020,19 +1123,12 @@ fn is_in_selection(
     l2: &LuaValue,
     c2: &LuaValue,
 ) -> bool {
-    let to_i64 = |v: &LuaValue| -> i64 {
-        match v {
-            LuaValue::Integer(i) => *i,
-            LuaValue::Number(n) => *n as i64,
-            _ => 0,
-        }
-    };
-    let line = to_i64(line);
-    let col = to_i64(col);
-    let l1 = to_i64(l1);
-    let c1 = to_i64(c1);
-    let l2 = to_i64(l2);
-    let c2 = to_i64(c2);
+    let line = lua_to_i64(line);
+    let col = lua_to_i64(col);
+    let l1 = lua_to_i64(l1);
+    let c1 = lua_to_i64(c1);
+    let l2 = lua_to_i64(l2);
+    let c2 = lua_to_i64(c2);
 
     if line < l1 || line > l2 {
         return false;

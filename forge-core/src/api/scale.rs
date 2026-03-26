@@ -618,7 +618,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                 };
                 if let Some(s) = scale_val {
                     let set_scale: LuaFunction = state.get("set_scale")?;
-                    let _ = set_scale.call::<()>(s);
+                    if let Err(e) = set_scale.call::<()>(s) {
+                        log::warn!("failed to restore scale: {e}");
+                    }
                 }
             }
 
@@ -643,7 +645,9 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if let LuaValue::Number(s) = data {
                         let state: LuaTable = lua.registry_value(&sk2)?;
                         let set_scale: LuaFunction = state.get("set_scale")?;
-                        let _ = set_scale.call::<()>(s);
+                        if let Err(e) = set_scale.call::<()>(s) {
+                            log::warn!("failed to set scale from session: {e}");
+                        }
                     }
                     Ok(())
                 })?;

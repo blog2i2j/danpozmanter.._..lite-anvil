@@ -8,6 +8,27 @@ fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
     require.call(name)
 }
 
+/// Move element at 1-based `from` to 1-based `to` in a Lua array table.
+fn lua_table_move_element(t: &LuaTable, from: i64, to: i64) -> LuaResult<()> {
+    if from == to {
+        return Ok(());
+    }
+    let val: LuaValue = t.raw_get(from)?;
+    if from < to {
+        for i in from..to {
+            let next: LuaValue = t.raw_get(i + 1)?;
+            t.raw_set(i, next)?;
+        }
+    } else {
+        for i in (to..from).rev() {
+            let prev: LuaValue = t.raw_get(i)?;
+            t.raw_set(i + 1, prev)?;
+        }
+    }
+    t.raw_set(to, val)?;
+    Ok(())
+}
+
 /// Computes the sub-rectangle for a drag-split overlay based on split direction.
 fn split_rect(split_type: &str, x: f64, y: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
     match split_type {
@@ -1370,22 +1391,33 @@ fn build_rootview(lua: &Lua) -> LuaResult<LuaTable> {
                                                 "get_drag_overlay_tab_position",
                                                 (mx, my, dragged_node_ref.clone(), idx),
                                             )?;
-                                            dragged_node_ref.call_method::<()>(
-                                                "remove_view",
-                                                (root_node.clone(), view.clone()),
-                                            )?;
-                                            node_tbl.call_method::<()>(
-                                                "add_view",
-                                                (view.clone(), tab_index),
-                                            )?;
-                                            let set_node: LuaTable = root_node.call_method(
-                                                "get_node_for_view",
-                                                view.clone(),
-                                            )?;
-                                            set_node.call_method::<()>(
-                                                "set_active_view",
-                                                view,
-                                            )?;
+                                            if *node_tbl == dragged_node_ref {
+                                                let views: LuaTable =
+                                                    dragged_node_ref.get("views")?;
+                                                lua_table_move_element(&views, idx, tab_index)?;
+                                                node_tbl.call_method::<()>(
+                                                    "set_active_view",
+                                                    view,
+                                                )?;
+                                            } else {
+                                                dragged_node_ref.call_method::<()>(
+                                                    "remove_view",
+                                                    (root_node.clone(), view.clone()),
+                                                )?;
+                                                node_tbl.call_method::<()>(
+                                                    "add_view",
+                                                    (view.clone(), tab_index),
+                                                )?;
+                                                let set_node: LuaTable =
+                                                    root_node.call_method(
+                                                        "get_node_for_view",
+                                                        view.clone(),
+                                                    )?;
+                                                set_node.call_method::<()>(
+                                                    "set_active_view",
+                                                    view,
+                                                )?;
+                                            }
                                         }
                                         root_node.call_method::<()>("update_layout", ())?;
                                         core.set("redraw", true)?;

@@ -53,7 +53,9 @@ impl LuaUserData for DirMonitor {
         methods.add_method("unwatch", |_, this, watch_id: i32| -> LuaResult<()> {
             let mut inner = this.0.lock();
             if let Some(path) = inner.id_to_path.remove(&watch_id) {
-                let _ = inner.watcher.unwatch(&path);
+                if let Err(e) = inner.watcher.unwatch(&path) {
+                    log::warn!("dirmonitor unwatch failed for {}: {e}", path.display());
+                }
                 inner.path_to_id.remove(&path);
             }
             Ok(())
@@ -100,7 +102,9 @@ impl LuaUserData for DirMonitor {
                 for id in fired_ids {
                     if let Err(e) = callback.call::<()>(id) {
                         if let Some(ref ecb) = error_cb {
-                            let _ = ecb.call::<()>(e.to_string());
+                            if let Err(e2) = ecb.call::<()>(e.to_string()) {
+                                log::warn!("dirmonitor error callback failed: {e2}");
+                            }
                         }
                     }
                 }

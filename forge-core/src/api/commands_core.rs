@@ -188,6 +188,18 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
         "suggest",
         lua.create_function(|lua, text: String| {
             let common: LuaTable = require_table(lua, "core.common")?;
+            if text.is_empty() {
+                let core: LuaTable = require_table(lua, "core")?;
+                let recent: LuaValue =
+                    core.get::<LuaValue>("recent_files").unwrap_or(LuaValue::Nil);
+                if let LuaValue::Table(ref t) = recent {
+                    if t.raw_len() > 0 {
+                        let ranked = recent_items_fn(lua, recent, String::new())?;
+                        return common
+                            .call_function::<LuaValue>("home_encode_list", ranked);
+                    }
+                }
+            }
             let expanded: String = common.call_function("home_expand", text)?;
             let project_path = current_project_path(lua)?;
             let suggested: LuaValue =

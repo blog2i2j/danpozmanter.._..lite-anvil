@@ -1468,13 +1468,22 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         show_ro.call::<()>(this)?;
                         return Ok(());
                     }
+                    let old_lines = this.get::<LuaTable>("lines")?.raw_len() as i64;
                     let doc_native: LuaTable = require_table(lua, "doc_native")?;
                     let buf_id: LuaValue = this.get("buffer_id")?;
                     let snap: LuaValue = doc_native.call_function("buffer_undo", buf_id)?;
                     let apply: LuaFunction = lua.registry_value(&ask)?;
                     apply.call::<()>((this.clone(), snap))?;
+                    let new_lines = this.get::<LuaTable>("lines")?.raw_len() as i64;
                     let hl: LuaTable = this.get("highlighter")?;
-                    hl.call_method::<()>("soft_reset", ())?;
+                    let line_delta = new_lines - old_lines;
+                    if line_delta > 0 {
+                        hl.call_method::<()>("insert_notify", (1, line_delta))?;
+                    } else if line_delta < 0 {
+                        hl.call_method::<()>("remove_notify", (1, -line_delta))?;
+                    } else {
+                        hl.call_method::<()>("invalidate", 1)?;
+                    }
                     this.call_method::<()>("on_text_change", "undo")?;
                     Ok(())
                 })?
@@ -1493,13 +1502,22 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         show_ro.call::<()>(this)?;
                         return Ok(());
                     }
+                    let old_lines = this.get::<LuaTable>("lines")?.raw_len() as i64;
                     let doc_native: LuaTable = require_table(lua, "doc_native")?;
                     let buf_id: LuaValue = this.get("buffer_id")?;
                     let snap: LuaValue = doc_native.call_function("buffer_redo", buf_id)?;
                     let apply: LuaFunction = lua.registry_value(&ask)?;
                     apply.call::<()>((this.clone(), snap))?;
+                    let new_lines = this.get::<LuaTable>("lines")?.raw_len() as i64;
                     let hl: LuaTable = this.get("highlighter")?;
-                    hl.call_method::<()>("soft_reset", ())?;
+                    let line_delta = new_lines - old_lines;
+                    if line_delta > 0 {
+                        hl.call_method::<()>("insert_notify", (1, line_delta))?;
+                    } else if line_delta < 0 {
+                        hl.call_method::<()>("remove_notify", (1, -line_delta))?;
+                    } else {
+                        hl.call_method::<()>("invalidate", 1)?;
+                    }
                     this.call_method::<()>("on_text_change", "undo")?;
                     Ok(())
                 })?

@@ -350,7 +350,14 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
 }
 
 fn move_to_line_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize, offset: isize) -> LuaResult<(usize, usize)> {
-    let last_x_offset: LuaTable = this.get("last_x_offset")?;
+    let last_x_offset: LuaTable = match this.get::<Option<LuaTable>>("last_x_offset")? {
+        Some(t) => t,
+        None => {
+            let t = lua.create_table()?;
+            this.set("last_x_offset", t.clone())?;
+            t
+        }
+    };
     let xo_line = last_x_offset.get::<Option<usize>>("line")?;
     let xo_col = last_x_offset.get::<Option<usize>>("col")?;
     if xo_line != Some(line) || xo_col != Some(col) {

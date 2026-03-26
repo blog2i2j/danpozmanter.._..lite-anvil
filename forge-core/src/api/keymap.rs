@@ -1034,6 +1034,7 @@ fn build_default_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         ("shift+f3", &["find-replace:previous-find"]),
         ("ctrl+i", &["find-replace:toggle-sensitivity"]),
         ("ctrl+shift+i", &["find-replace:toggle-regex"]),
+        ("alt+s", &["find-replace:toggle-in-selection"]),
         ("ctrl+g", &["doc:go-to-line"]),
         ("ctrl+s", &["doc:save"]),
         ("ctrl+shift+s", &["doc:save-as"]),

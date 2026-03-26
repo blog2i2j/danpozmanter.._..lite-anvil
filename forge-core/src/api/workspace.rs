@@ -533,14 +533,18 @@ fn install(lua: &Lua) -> LuaResult<LuaTable> {
 
     let register_session_load_hook: LuaFunction = core.get("register_session_load_hook")?;
     let load_hook = lua.create_function(|lua, _: LuaMultiValue| {
-        let _ = load_workspace(lua);
+        if let Err(e) = load_workspace(lua) {
+            log::warn!("failed to load workspace: {e}");
+        }
         Ok(())
     })?;
     register_session_load_hook.call::<()>(("workspace", load_hook))?;
 
     let old_set_project: LuaFunction = core.get("set_project")?;
     let set_project_wrapper = lua.create_function(move |lua, project: LuaValue| {
-        let _ = save_workspace(lua);
+        if let Err(e) = save_workspace(lua) {
+            log::warn!("failed to save workspace on set_project: {e}");
+        }
         old_set_project.call::<LuaValue>(project)
     })?;
     core.set("set_project", set_project_wrapper)?;
@@ -549,7 +553,9 @@ fn install(lua: &Lua) -> LuaResult<LuaTable> {
     let exit_wrapper =
         lua.create_function(move |lua, (quit_fn, force): (LuaFunction, Option<bool>)| {
             if force.unwrap_or(false) {
-                let _ = save_workspace(lua);
+                if let Err(e) = save_workspace(lua) {
+                    log::warn!("failed to save workspace on exit: {e}");
+                }
             }
             old_exit.call::<()>((quit_fn, force.unwrap_or(false)))
         })?;

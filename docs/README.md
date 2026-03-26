@@ -30,7 +30,7 @@ All global variables set by the runtime are documented in
 
 These modules are implemented in Rust but exposed as standard `require`-able
 Lua modules. They are not annotated here — refer to the source or the
-[PLUGINS_GUIDE.md](../PLUGINS_GUIDE.md) (when available) for their API:
+[PLUGINS_GUIDE.md](../PLUGINS_GUIDE.md) for their API and full config reference:
 
 - `core` — application lifecycle, threads, logging, projects, file dialogs
 - `core.command` — command registry (`add`, `perform`, predicates)

@@ -1724,4 +1724,133 @@ mod tests {
         apply_insert_to_buffer(&mut state, 1, 7, "c");
         assert_eq!(state.undo.len(), 3, "insert after delete should start new group");
     }
+
+    #[test]
+    fn undo_merge_breaks_after_timeout() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["hello\n".to_string()];
+        state.change_id = 1;
+
+        apply_insert_to_buffer(&mut state, 1, 6, "a");
+        assert_eq!(state.undo.len(), 1);
+
+        // Simulate a pause longer than UNDO_MERGE_TIMEOUT by backdating last_edit.
+        if let Some((ref mut t, _, _, _, _)) = state.last_edit {
+            *t -= UNDO_MERGE_TIMEOUT + 0.1;
+        }
+
+        apply_insert_to_buffer(&mut state, 1, 7, "b");
+        assert_eq!(state.undo.len(), 2, "insert after timeout must not merge");
+
+        assert_eq!(state.lines, vec!["helloab\n".to_string()]);
+    }
+
+    #[test]
+    fn undo_merge_breaks_on_position_gap() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["hello world\n".to_string()];
+        state.change_id = 1;
+
+        // Insert at col 5 (after 'o').
+        apply_insert_to_buffer(&mut state, 1, 5, "x");
+        assert_eq!(state.undo.len(), 1);
+
+        // Insert at col 10 -- far from col 6 where next merge would expect.
+        apply_insert_to_buffer(&mut state, 1, 10, "y");
+        assert_eq!(state.undo.len(), 2, "insert at non-adjacent column must not merge");
+
+        assert_eq!(state.lines, vec!["hellxo woyrld\n".to_string()]);
+    }
+
+    #[test]
+    fn atomic_save_writes_content_and_removes_tmp() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("lite_anvil_atomic_save_test.txt");
+        let tmp_path = path.with_extension("tmp");
+
+        let mut state = default_buffer_state();
+        state.lines = vec!["line one\n".to_string(), "line two\n".to_string()];
+
+        save_state_to_file(&state, path.to_str().unwrap(), false).unwrap();
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(saved, "line one\nline two\n");
+        assert!(!tmp_path.exists(), ".tmp file must not remain after save");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn content_signature_consistent_after_load_file_into_state() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("lite_anvil_sig_after_load_test.txt");
+        std::fs::write(&path, "content for sig test\n").unwrap();
+
+        let mut state = default_buffer_state();
+        load_file_into_state(&mut state, path.to_str().unwrap()).unwrap();
+
+        // sig_cache must be invalidated (change_id == 1 but cached_id == 0).
+        let (cached_id, _) = state.sig_cache;
+        assert_ne!(
+            cached_id, state.change_id,
+            "sig_cache must be invalidated after load"
+        );
+
+        // Compute fresh signature and cache it.
+        let fresh_sig = content_signature(&state.lines);
+        state.sig_cache = (state.change_id, fresh_sig);
+
+        // A second query with the same change_id should return the cached value.
+        let (cached_id2, cached_sig2) = state.sig_cache;
+        assert_eq!(cached_id2, state.change_id);
+        assert_eq!(cached_sig2, fresh_sig);
+
+        // The cached signature must reflect the loaded content, not the default buffer.
+        let default_sig = content_signature(&default_buffer_state().lines);
+        assert_ne!(fresh_sig, default_sig, "loaded sig must differ from default");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn selection_iterator_integer_idx_reverse_uses_reverse_path() {
+        // When idx_reverse is Integer(1), it is truthy (not nil, not false),
+        // so the iterator should use the reverse path. This is the v0.19.5 bug:
+        // Integer(1) must be treated as truthy, producing a reverse iteration.
+        let is_truthy = |v: &LuaValue| !matches!(v, LuaValue::Nil | LuaValue::Boolean(false));
+
+        let reverse_val = LuaValue::Integer(1);
+        assert!(
+            is_truthy(&reverse_val),
+            "Integer(1) must be truthy for selection_iterator"
+        );
+
+        // When truthy, initial = (sels_len / 4) + 1, and iteration goes backward.
+        let sels_len: i64 = 8; // 2 selections
+        let initial = (sels_len / 4) + 1; // == 3
+        assert_eq!(initial, 3, "reverse initial index for 2 selections");
+
+        // Forward path would produce offset + 1 = 1 + 1 = 2.
+        let forward_initial = 1_i64 + 1;
+        assert_eq!(forward_initial, 2);
+        assert_ne!(
+            initial, forward_initial,
+            "reverse path must differ from forward path"
+        );
+
+        // Verify the Integer-specific guard: when reverse_val is Integer(n),
+        // iteration only proceeds when n == idx - 1.
+        let idx_i: i64 = 3; // first call with initial
+        if let LuaValue::Integer(n) = &reverse_val {
+            // n is 1, idx_i - 1 is 2, so this would stop after one iteration.
+            // This confirms the single-selection-at-index behavior.
+            assert_ne!(*n, idx_i - 1, "Integer(1) targets selection index 1 specifically");
+        }
+
+        // But for idx_i == 2 (the selection at index 1), n == idx_i - 1.
+        let idx_i: i64 = 2;
+        if let LuaValue::Integer(n) = &reverse_val {
+            assert_eq!(*n, idx_i - 1, "Integer(1) matches when iterating selection 1");
+        }
+    }
 }

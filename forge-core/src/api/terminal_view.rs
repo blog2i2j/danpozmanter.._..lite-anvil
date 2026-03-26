@@ -260,7 +260,9 @@ fn spawn(lua: &Lua, (view, command_argv): (LuaTable, LuaTable)) -> LuaResult<()>
         Err(err) => {
             let core = require_table(lua, "core")?;
             let error_fn: LuaFunction = core.get("error")?;
-            let _ = error_fn.call::<()>(("Failed to start terminal: %s", err.to_string()));
+            if let Err(e) = error_fn.call::<()>(("Failed to start terminal: %s", err.to_string())) {
+                log::warn!("core.error callback failed: {e}");
+            }
         }
     }
     Ok(())
@@ -601,7 +603,9 @@ fn update(lua: &Lua, view: LuaTable) -> LuaResult<()> {
         view.set("last_dimensions", dim_key)?;
         resize_screen(&view, cols, rows)?;
         if let Some(handle) = view.get::<Option<LuaAnyUserData>>("handle")? {
-            let _ = handle.call_method::<bool>("resize", (cols as u16, rows as u16));
+            if let Err(e) = handle.call_method::<bool>("resize", (cols as u16, rows as u16)) {
+                log::warn!("terminal resize failed: {e}");
+            }
         }
     }
 
@@ -630,7 +634,9 @@ fn update(lua: &Lua, view: LuaTable) -> LuaResult<()> {
             let replies: LuaValue = buffer.call_method("process_output_replies", chunk)?;
             if let LuaValue::String(replies) = replies {
                 if !replies.as_bytes().is_empty() && handle.call_method::<bool>("running", ())? {
-                    let _ = handle.call_method::<LuaValue>("write", replies);
+                    if let Err(e) = handle.call_method::<LuaValue>("write", replies) {
+                        log::warn!("terminal write failed: {e}");
+                    }
                 }
             }
             let core = require_table(lua, "core")?;
@@ -901,7 +907,9 @@ fn populate_class(lua: &Lua, class: &LuaTable) -> LuaResult<()> {
                     let text: String = item.get("text")?;
                     if text == "Terminate" {
                         let h: LuaAnyUserData = lua.registry_value(&handle_ref)?;
-                        let _ = h.call_method::<()>("terminate", ());
+                        if let Err(e) = h.call_method::<()>("terminate", ()) {
+                            log::warn!("terminal terminate failed: {e}");
+                        }
                         let close_fn: LuaFunction = lua.registry_value(&close_ref)?;
                         close_fn.call::<()>(())?;
                     }

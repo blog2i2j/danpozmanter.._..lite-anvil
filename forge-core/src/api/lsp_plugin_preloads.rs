@@ -3758,7 +3758,9 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     let large2 = self_r.get::<bool>("large_file_mode").unwrap_or(false);
                     if !large2 {
                         let m: LuaTable = lua.registry_value(&mk2)?;
-                        let _ = m.get::<LuaFunction>("on_doc_save")?.call::<()>(self_r.clone());
+                        if let Err(e) = m.get::<LuaFunction>("on_doc_save")?.call::<()>(self_r.clone()) {
+                            log::warn!("LSP on_doc_save failed: {e}");
+                        }
                     }
                     self_r.set("_formatting_before_save", false)?;
                     Ok(())
@@ -3772,7 +3774,9 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             let result: LuaMultiValue = old.call(args)?;
             if !large {
                 let m: LuaTable = lua.registry_value(&mk)?;
-                let _ = m.get::<LuaFunction>("on_doc_save")?.call::<()>(self_);
+                if let Err(e) = m.get::<LuaFunction>("on_doc_save")?.call::<()>(self_) {
+                    log::warn!("LSP on_doc_save failed: {e}");
+                }
             }
             Ok(result)
         })?)?;

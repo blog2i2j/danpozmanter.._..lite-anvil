@@ -168,11 +168,10 @@ fn check_open_docs(
         let new_file: bool = doc.get("new_file").unwrap_or(false);
         if let Some(path) = abs_filename {
             if !new_file {
-                let info: Option<LuaTable> = system.call_function("get_file_info", path)?;
+                let info: Option<LuaTable> = system.call_function("get_file_info", path.clone())?;
                 if let Some(info) = info {
                     let mtime: LuaValue = info.get("modified")?;
                     let cached: LuaValue = times.raw_get(doc.clone())?;
-                    // Compare mtime != cached (by string/number equality).
                     let changed = !lua_values_equal(&mtime, &cached);
                     if changed {
                         let is_dirty: bool = doc.call_method("is_dirty", ())?;
@@ -187,6 +186,24 @@ fn check_open_docs(
                                 state_key.clone(),
                             )?;
                         }
+                    }
+                } else {
+                    // File no longer exists on disk.
+                    let cached: LuaValue = times.raw_get(doc.clone())?;
+                    if cached != LuaValue::Nil {
+                        let core: LuaTable = require_table(lua, "core")?;
+                        let log_fn: LuaFunction = core.get("log")?;
+                        let name: String = doc.call_method("get_name", ())?;
+                        log_fn.call::<()>(format!("File deleted from disk: {name}"))?;
+                        let nag: LuaTable = core.get("nag_view")?;
+                        let msg = format!("\"{path}\" has been deleted from disk.");
+                        let buttons = lua.create_table()?;
+                        let ok_btn = lua.create_table()?;
+                        ok_btn.set("text", "OK")?;
+                        ok_btn.set("default_yes", true)?;
+                        buttons.raw_set(1, ok_btn)?;
+                        nag.call_method::<()>("show", ("File Deleted", msg, buttons, lua.create_function(|_, _: LuaTable| Ok(()))?))?;
+                        times.raw_set(doc, LuaValue::Nil)?;
                     }
                 }
             }
@@ -360,8 +377,12 @@ fn patch_node_set_active_view(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaR
                         let userdir: String = lua.globals().get("USERDIR")?;
                         let dir = std::path::PathBuf::from(&userdir)
                             .join("storage").join("session");
-                        let _ = std::fs::create_dir_all(&dir);
-                        let _ = std::fs::write(dir.join("active_file"), format!("\"{}\"", path_str));
+                        if let Err(e) = std::fs::create_dir_all(&dir) {
+                            log::warn!("failed to create session dir: {e}");
+                        }
+                        if let Err(e) = std::fs::write(dir.join("active_file"), format!("\"{}\"", path_str)) {
+                            log::warn!("failed to write active_file: {e}");
+                        }
                     }
                 }
             }

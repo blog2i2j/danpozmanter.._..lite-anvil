@@ -56,6 +56,7 @@ struct TerminalInner {
 impl TerminalInner {
     fn close_fd(&mut self) {
         if self.fd != INVALID_FD {
+            // SAFETY: fd is valid and owned by this struct.
             unsafe { libc::close(self.fd) };
             self.fd = INVALID_FD;
         }
@@ -67,6 +68,7 @@ impl TerminalInner {
         }
 
         let mut raw_status: c_int = 0;
+        // SAFETY: self.pid is a valid child pid.
         let ret = unsafe { libc::waitpid(self.pid, &mut raw_status, libc::WNOHANG) };
         if ret != 0 {
             self.running = false;
@@ -82,6 +84,7 @@ impl TerminalInner {
     }
 
     fn signal(&mut self, sig: c_int) -> bool {
+        // SAFETY: -self.pid targets the process group; self.pid targets the process.
         let ok = unsafe { libc::kill(-self.pid, sig) == 0 || libc::kill(self.pid, sig) == 0 };
         self.poll();
         ok
@@ -158,6 +161,7 @@ impl LuaUserData for TerminalHandle {
             if inner.fd == INVALID_FD {
                 return Ok(LuaValue::Nil);
             }
+            // SAFETY: fd is valid and owned; bytes slice is valid for its length.
             let ret = unsafe {
                 libc::write(inner.fd, bytes.as_ptr() as *const libc::c_void, bytes.len())
             };
@@ -189,8 +193,10 @@ impl LuaUserData for TerminalHandle {
                     ws_xpixel: 0,
                     ws_ypixel: 0,
                 };
+                // SAFETY: fd is valid; winsz is a valid winsize struct.
                 let ok = unsafe { libc::ioctl(inner.fd, libc::TIOCSWINSZ, &winsz) == 0 };
                 if ok {
+                    // SAFETY: inner.pid is a valid child pid.
                     unsafe {
                         libc::kill(inner.pid, libc::SIGWINCH);
                     }
@@ -224,6 +230,7 @@ fn g_read(lua: &Lua, inner: &mut TerminalInner, n: usize) -> LuaResult<LuaValue>
     }
 
     let mut buf = vec![0u8; n];
+    // SAFETY: fd is valid and owned; buf is valid for n bytes.
     let ret = unsafe { libc::read(inner.fd, buf.as_mut_ptr() as *mut libc::c_void, n) };
     if ret > 0 {
         return Ok(LuaValue::String(lua.create_string(&buf[..ret as usize])?));
@@ -297,6 +304,7 @@ fn terminal_spawn(
     };
 
     let mut master_fd = INVALID_FD;
+    // SAFETY: Standard Unix forkpty; single-threaded at call time.
     let pid = unsafe {
         libc::forkpty(
             &mut master_fd,
@@ -313,6 +321,7 @@ fn terminal_spawn(
     }
 
     if pid == 0 {
+        // SAFETY: Child process; only async-signal-safe or exec functions called.
         unsafe {
             libc::setpgid(0, 0);
             for (k, v) in &env_pairs {
@@ -326,6 +335,7 @@ fn terminal_spawn(
         }
     }
 
+    // SAFETY: master_fd is a valid pty file descriptor from forkpty.
     let flags = unsafe { libc::fcntl(master_fd, libc::F_GETFL, 0) };
     if flags != -1 {
         unsafe {

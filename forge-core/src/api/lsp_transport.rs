@@ -314,7 +314,9 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         "terminate",
         lua.create_function(|_, id: u64| {
             if let Some(handle) = TRANSPORTS.lock().get_mut(&id) {
-                let _ = handle.child.kill();
+                if let Err(e) = handle.child.kill() {
+                    log::warn!("failed to kill LSP transport {id}: {e}");
+                }
                 Ok(true)
             } else {
                 Ok(false)
@@ -332,7 +334,9 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(|_, ()| {
             let mut transports = TRANSPORTS.lock();
             for handle in transports.values_mut() {
-                let _ = handle.child.kill();
+                if let Err(e) = handle.child.kill() {
+                    log::warn!("failed to kill LSP transport: {e}");
+                }
             }
             transports.clear();
             transports.shrink_to_fit();

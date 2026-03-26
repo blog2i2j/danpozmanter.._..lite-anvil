@@ -42,6 +42,7 @@ mod linewrapping;
 mod logview;
 mod plugin_macro;
 mod markdown_preview;
+mod minimap;
 mod modkeys_generic;
 mod modkeys_macos;
 mod nagview;
@@ -338,6 +339,7 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     language_md::register_preload(lua)?;
     lineguide::register_preload(lua)?;
     linewrapping::register_preload(lua)?;
+    minimap::register_preload(lua)?;
     plugin_macro::register_preload(lua)?;
     projectreplace::register_preload(lua)?;
     projectsearch::register_preload(lua)?;
@@ -366,6 +368,7 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
             "linewrapping",
             "macro",
             "markdown_preview",
+            "minimap",
             "projectreplace",
             "projectsearch",
             "quote",
@@ -685,21 +688,27 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
         "exec",
         lua.create_function(|_, cmd: String| -> LuaResult<()> {
             #[cfg(unix)]
-            let _ = std::process::Command::new("sh")
+            if let Err(e) = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&cmd)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn();
+                .spawn()
+            {
+                log::warn!("system.exec failed to spawn: {e}");
+            }
             #[cfg(windows)]
-            let _ = std::process::Command::new("cmd")
+            if let Err(e) = std::process::Command::new("cmd")
                 .arg("/C")
                 .arg(&cmd)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn();
+                .spawn()
+            {
+                log::warn!("system.exec failed to spawn: {e}");
+            }
             Ok(())
         })?,
     )?;
@@ -964,6 +973,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
     t.set(
         "get_clipboard",
         lua.create_function(|lua, ()| -> LuaResult<LuaValue> {
+            // SAFETY: SDL_GetClipboardText returns a valid C string that must be freed.
             let ptr = unsafe { sdl3_sys::everything::SDL_GetClipboardText() };
             if ptr.is_null() {
                 return Ok(LuaValue::String(lua.create_string("")?));
@@ -980,6 +990,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
         "set_clipboard",
         lua.create_function(|_, text: String| -> LuaResult<()> {
             if let Ok(cstr) = std::ffi::CString::new(text) {
+                // SAFETY: cstr is a valid null-terminated C string.
                 unsafe { sdl3_sys::everything::SDL_SetClipboardText(cstr.as_ptr()) };
             }
             Ok(())
@@ -991,6 +1002,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
     t.set(
         "get_primary_selection",
         lua.create_function(|lua, ()| -> LuaResult<LuaValue> {
+            // SAFETY: SDL_GetPrimarySelectionText returns a valid C string that must be freed.
             let ptr = unsafe { sdl3_sys::everything::SDL_GetPrimarySelectionText() };
             if ptr.is_null() {
                 return Ok(LuaValue::String(lua.create_string("")?));
@@ -1007,6 +1019,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
         "set_primary_selection",
         lua.create_function(|_, text: String| -> LuaResult<()> {
             if let Ok(cstr) = std::ffi::CString::new(text) {
+                // SAFETY: cstr is a valid null-terminated C string.
                 unsafe { sdl3_sys::everything::SDL_SetPrimarySelectionText(cstr.as_ptr()) };
             }
             Ok(())
@@ -1020,6 +1033,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
         lua.create_function(|_, (title, msg): (String, String)| -> LuaResult<()> {
             let t = std::ffi::CString::new(title).unwrap_or_default();
             let m = std::ffi::CString::new(msg).unwrap_or_default();
+            // SAFETY: t and m are valid null-terminated C strings.
             unsafe {
                 sdl3_sys::everything::SDL_ShowSimpleMessageBox(
                     sdl3_sys::everything::SDL_MESSAGEBOX_ERROR,
@@ -1038,6 +1052,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
         "text_input",
         lua.create_function(|_, (_win, enable): (LuaValue, bool)| -> LuaResult<()> {
             let win = crate::window::get_raw_window();
+            // SAFETY: win is a valid SDL_Window pointer from get_raw_window.
             if enable {
                 unsafe { sdl3_sys::everything::SDL_StartTextInput(win) };
             } else {
@@ -1053,6 +1068,7 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
             |_, (_win, x, y, w, h): (LuaValue, i32, i32, i32, i32)| -> LuaResult<()> {
                 let rect = sdl3_sys::everything::SDL_Rect { x, y, w, h };
                 let win = crate::window::get_raw_window();
+                // SAFETY: win is a valid SDL_Window; rect is a valid SDL_Rect.
                 unsafe { sdl3_sys::everything::SDL_SetTextInputArea(win, &rect, 0) };
                 Ok(())
             },

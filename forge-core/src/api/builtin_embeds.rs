@@ -4223,9 +4223,11 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                                 let err_msg = vals.get(1).cloned().unwrap_or(LuaValue::Nil);
                                 let error_fn: LuaResult<LuaFunction> = core.get("error");
                                 if let Ok(error_fn) = error_fn {
-                                    let _ = error_fn.call::<LuaValue>(
+                                    if let Err(e) = error_fn.call::<LuaValue>(
                                         ("Error running thread: %s", err_msg),
-                                    );
+                                    ) {
+                                        log::warn!("core.error callback failed: {e}");
+                                    }
                                 }
                                 threads.set(k, LuaValue::Nil)?;
                             } else {
@@ -4370,6 +4372,14 @@ fn register_run_loop(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                     }
                 } else {
                     run_threads_full = 0;
+                    // Check for pending events without blocking. If more
+                    // events arrived during the draw, skip the sleep so the
+                    // next step drains them immediately (key repeat latency).
+                    let has_pending: bool = wait_event_fn.call(0.0)?;
+                    if has_pending {
+                        next_step = None;
+                        continue;
+                    }
                     let now3: f64 = get_time.call(())?;
                     let elapsed = now3 - frame_start;
                     let next_frame = (frame_interval - elapsed).max(0.0);
@@ -4807,6 +4817,11 @@ fn build_default_config_content() -> &'static str {
      -- config.plugins.git.refresh_interval = 5\n\
      -- config.plugins.git.show_branch_in_statusbar = true\n\
      -- config.plugins.git.treeview_highlighting = true\n\
+     --\n\
+     -- minimap (code overview sidebar):\n\
+     -- config.plugins.minimap = { enabled = true }\n\
+     -- config.plugins.minimap.width = 120\n\
+     -- config.plugins.minimap.line_height = 4\n\
      --\n\
      -- project replace examples:\n\
      -- config.plugins.projectreplace.backup_originals = true\n\

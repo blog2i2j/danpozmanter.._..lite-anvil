@@ -1,5 +1,18 @@
 # Change Log
 
+## [1.0.0] - 2026-03-26 1.0.0 Release - stability and performance fixes + minimap and find in selection.
+
+* Find in selection — when a multi-line selection is active and Find is opened, search is limited to the selected region. Toggle with Alt+S. Status bar shows [S] when active.
+* Tab reordering — drag tabs within the same pane to reorder them (previously only cross-pane moves worked).
+* Recent files in Open File — when the Open File command palette is empty, shows recently opened files instead of directory listing.
+* Incremental highlighter — undo/redo no longer calls soft_reset() (which wiped ALL cached tokens). Now uses targeted insert_notify/remove_notify to invalidate only affected lines. Typing and undo on large files is significantly faster.
+* Event batching — after a redraw, immediately checks for pending events before sleeping. Key repeat & rapid undo no longer wait for the frame timer between events.
+* Add PLUGINS_GUIDE.md with API reference, config reference (79+ options), 10 recipes, lifecycle docs, and pitfall warnings.
+* 74 tests (up from 69). New tests for undo merge edge cases, atomic save, content signature, selection iterator truthiness.
+* SAFETY comments on all 40+ unsafe blocks. All are FFI (SDL3, FreeType, libc).
+* `let _ =` silent error swallows upgraded to `log::warn`.
+* Optional minimap.
+
 ## [0.20.0] - 2026-03-25 — Stability hardening for 1.0.
 * Atomic file writes for doc save and session save (write to .tmp, fsync, rename). Prevents data corruption on power loss or crash mid-write.
 * Guard undo merge stack pop against empty stack.

@@ -28,6 +28,7 @@ impl SdlWindow {
         let mut lh = 0i32;
         let mut pw = 0i32;
         let mut ph = 0i32;
+        // SAFETY: self.raw is a valid SDL_Window pointer owned by this struct.
         unsafe {
             SDL_GetWindowSize(self.raw, &mut lw, &mut lh);
             SDL_GetWindowSizeInPixels(self.raw, &mut pw, &mut ph);
@@ -37,6 +38,7 @@ impl SdlWindow {
     }
 
     fn flags(&self) -> SDL_WindowFlags {
+        // SAFETY: self.raw is a valid SDL_Window pointer.
         unsafe { SDL_GetWindowFlags(self.raw) }
     }
 
@@ -88,6 +90,7 @@ thread_local! {
 
 /// Returns a human-readable SDL3 error string.
 fn sdl_error() -> String {
+    // SAFETY: SDL_GetError returns a valid C string or null.
     unsafe {
         let ptr = SDL_GetError();
         if ptr.is_null() {
@@ -128,13 +131,16 @@ pub fn shutdown() {
     SDL.with(|s| {
         if let Some(mut state) = s.borrow_mut().take() {
             if let Some(w) = state.window.take() {
+                // SAFETY: w.raw is valid; ownership is consumed here.
                 unsafe { SDL_DestroyWindow(w.raw) };
             }
             if let Some(c) = state.cursor.take() {
+                // SAFETY: cursor is valid; ownership is consumed here.
                 unsafe { SDL_DestroyCursor(c) };
             }
         }
     });
+    // SAFETY: Called once at program exit after all SDL resources are freed.
     unsafe { SDL_Quit() };
 }
 
@@ -144,6 +150,7 @@ pub fn prepare_restart() {
         if let Some(ref mut state) = *s.borrow_mut() {
             if !state.persistent {
                 if let Some(w) = state.window.take() {
+                    // SAFETY: w.raw is valid; ownership is consumed here.
                     unsafe { SDL_DestroyWindow(w.raw) };
                 }
             }
@@ -198,7 +205,7 @@ fn set_window_icon(win: *mut SDL_Window) {
     let height = info.height as i32;
     let pitch = width * 4;
 
-    // SDL_PIXELFORMAT_RGBA32 maps to byte-order RGBA in memory on any endian.
+    // SAFETY: rgba buffer outlives the surface; win is a valid SDL_Window pointer.
     unsafe {
         let surface = SDL_CreateSurfaceFrom(
             width,
@@ -217,6 +224,7 @@ fn set_window_icon(win: *mut SDL_Window) {
 fn clamp_startup_backbuffer(win: &mut SdlWindow) {
     let mut pw = 0i32;
     let mut ph = 0i32;
+    // SAFETY: win.raw is a valid SDL_Window pointer.
     unsafe {
         SDL_GetWindowSizeInPixels(win.raw, &mut pw, &mut ph);
     }
@@ -232,6 +240,7 @@ fn clamp_startup_backbuffer(win: &mut SdlWindow) {
         target_pw.max(DEFAULT_WINDOW_MIN_W),
         target_ph.max(DEFAULT_WINDOW_MIN_H),
     );
+    // SAFETY: win.raw is a valid SDL_Window pointer.
     unsafe {
         SDL_SetWindowSize(win.raw, logical_w, logical_h);
     }
@@ -250,6 +259,7 @@ pub fn create_window(title: &str) -> Result<()> {
             w: 1280,
             h: 800,
         };
+        // SAFETY: SDL is initialized; display query functions are safe to call.
         unsafe {
             let disp = SDL_GetPrimaryDisplay();
             if !SDL_GetDisplayUsableBounds(disp, &mut bounds) {
@@ -263,6 +273,7 @@ pub fn create_window(title: &str) -> Result<()> {
 
         let title_cstr = CString::new(title).unwrap_or_default();
         let flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+        // SAFETY: SDL is initialized; title_cstr is a valid C string.
         let win = unsafe { SDL_CreateWindow(title_cstr.as_ptr(), width, height, flags) };
         if win.is_null() {
             return Err(anyhow::anyhow!("window creation failed: {}", sdl_error()));
@@ -275,6 +286,7 @@ pub fn create_window(title: &str) -> Result<()> {
         let mut lh = 0i32;
         let mut pw = 0i32;
         let mut ph = 0i32;
+        // SAFETY: win was just successfully created and is non-null.
         unsafe {
             SDL_GetWindowSize(win, &mut lw, &mut lh);
             SDL_GetWindowSizeInPixels(win, &mut pw, &mut ph);
@@ -318,6 +330,7 @@ pub fn show_window() {
     SDL.with(|s| {
         if let Some(ref mut st) = *s.borrow_mut() {
             if let Some(ref w) = st.window {
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 unsafe { SDL_ShowWindow(w.raw) };
             }
         }
@@ -330,6 +343,7 @@ pub fn show_if_hidden() {
     SDL.with(|s| {
         if let Some(ref st) = *s.borrow() {
             if let Some(ref w) = st.window {
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 if (unsafe { SDL_GetWindowFlags(w.raw) } & SDL_WINDOW_HIDDEN).0 != 0 {
                     unsafe { SDL_ShowWindow(w.raw) };
                 }
@@ -349,6 +363,7 @@ pub fn get_window_size() -> (i32, i32, i32, i32) {
                 let mut ph = 0i32;
                 let mut x = 0i32;
                 let mut y = 0i32;
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 unsafe {
                     SDL_GetWindowSizeInPixels(w.raw, &mut pw, &mut ph);
                     SDL_GetWindowPosition(w.raw, &mut x, &mut y);
@@ -374,6 +389,7 @@ pub fn set_window_size(w: i32, h: i32, x: i32, y: i32) {
                 } else {
                     (x, y)
                 };
+                // SAFETY: win.raw is a valid SDL_Window pointer.
                 unsafe {
                     SDL_SetWindowSize(win.raw, logical_w, logical_h);
                     if x != -1 || y != -1 {
@@ -391,6 +407,7 @@ pub fn set_window_title(title: &str) {
         if let Some(ref mut st) = *s.borrow_mut() {
             if let Some(ref w) = st.window {
                 let cstr = CString::new(title).unwrap_or_default();
+                // SAFETY: w.raw is a valid SDL_Window; cstr is a valid C string.
                 unsafe { SDL_SetWindowTitle(w.raw, cstr.as_ptr()) };
             }
         }
@@ -402,6 +419,7 @@ pub fn set_window_mode(mode: &str) {
     SDL.with(|s| {
         if let Some(ref mut st) = *s.borrow_mut() {
             if let Some(ref w) = st.window {
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 match mode {
                     "maximized" => unsafe {
                         SDL_MaximizeWindow(w.raw);
@@ -449,6 +467,7 @@ pub fn set_window_bordered(bordered: bool) {
     SDL.with(|s| {
         if let Some(ref mut st) = *s.borrow_mut() {
             if let Some(ref w) = st.window {
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 unsafe { SDL_SetWindowBordered(w.raw, bordered) };
             }
         }
@@ -477,6 +496,7 @@ pub fn get_screen_size() -> (i32, i32) {
                     w: 1920,
                     h: 1080,
                 };
+                // SAFETY: SDL is initialized; display query is safe to call.
                 unsafe {
                     let disp = SDL_GetPrimaryDisplay();
                     SDL_GetDisplayBounds(disp, &mut bounds);
@@ -507,6 +527,7 @@ pub fn set_cursor(name: &str) {
     };
     SDL.with(|s| {
         if let Some(ref mut st) = *s.borrow_mut() {
+            // SAFETY: SDL is initialized; cursor lifecycle managed by SdlState.
             unsafe {
                 let new_cur = SDL_CreateSystemCursor(id);
                 if !new_cur.is_null() {
@@ -577,6 +598,7 @@ pub fn get_drawable_size() -> (i32, i32) {
             .map(|w| {
                 let mut pw = 0i32;
                 let mut ph = 0i32;
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 unsafe { SDL_GetWindowSizeInPixels(w.raw, &mut pw, &mut ph) };
                 (pw, ph)
             })
@@ -613,6 +635,7 @@ pub fn raise_window() {
         let guard = s.borrow();
         if let Some(ref st) = *guard {
             if let Some(ref w) = st.window {
+                // SAFETY: w.raw is a valid SDL_Window pointer.
                 unsafe { SDL_RaiseWindow(w.raw) };
             }
         }
@@ -636,6 +659,7 @@ fn poll_raw(state: &mut SdlState) -> Option<SDL_Event> {
         return Some(e);
     }
     let mut e = SDL_Event::default();
+    // SAFETY: SDL is initialized; e is a valid mutable SDL_Event.
     if unsafe { SDL_PollEvent(&mut e) } {
         Some(e)
     } else {
@@ -668,6 +692,7 @@ pub fn wait_event(timeout_secs: Option<f64>) -> bool {
             return true;
         }
         let mut e = SDL_Event::default();
+        // SAFETY: SDL is initialized; e is a valid mutable SDL_Event.
         let got = match timeout_secs {
             Some(t) => {
                 let ms = (t * 1000.0).clamp(1.0, i32::MAX as f64) as i32;
@@ -682,6 +707,8 @@ pub fn wait_event(timeout_secs: Option<f64>) -> bool {
     })
 }
 
+// SAFETY for all union accesses below: the event type is checked before accessing
+// the corresponding union variant, matching SDL3's tagged-union contract.
 fn translate_event(state: &mut SdlState, event: SDL_Event) -> PollResult {
     use LuaEventVal::*;
 

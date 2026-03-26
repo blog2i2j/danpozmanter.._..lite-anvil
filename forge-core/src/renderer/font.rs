@@ -184,6 +184,7 @@ impl FontInner {
             }
         }
         // Space advance — load without hinting for accurate measurement.
+        // SAFETY: face is valid after FT_Set_Pixel_Sizes; glyph slot is valid after successful load.
         let flags = (FT_LOAD_BITMAP_METRICS_ONLY | FT_LOAD_NO_HINTING as i32) as FT_Int32;
         if unsafe { FT_Load_Char(face, b' ' as FT_ULong, flags) } == 0 {
             self.space_advance = unsafe { (*(*face).glyph).advance.x as f32 / 64.0 };
@@ -229,6 +230,7 @@ impl FontInner {
             };
         }
         let face = self.raw_face();
+        // SAFETY: face is valid; glyph slot is valid after successful FT_Load_Glyph.
         let glyph_id: FT_UInt = unsafe { FT_Get_Char_Index(face, codepoint as FT_ULong) };
 
         // Load without hinting to get the accurate xadvance.
@@ -259,6 +261,7 @@ impl FontInner {
             };
         }
 
+        // SAFETY: glyph slot is valid after successful FT_Render_Glyph above.
         let bitmap = unsafe { copy_glyph_bitmap((*face).glyph) };
         GlyphInfo { xadvance, bitmap }
     }
