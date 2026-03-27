@@ -233,6 +233,22 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     if ok {
                         this.set("new_file", false)?;
                         this.call_method::<()>("clean", ())?;
+                        // Restore persistent undo data if deferred.
+                        let undo_path: LuaValue = this.get("deferred_undo_path")?;
+                        if let LuaValue::String(ref up) = undo_path {
+                            this.set("deferred_undo_path", LuaValue::Nil)?;
+                            let up_str = up.to_str()?.to_string();
+                            if let Ok(undo_data) = std::fs::read(&up_str) {
+                                let buf_id: LuaValue = this.get("buffer_id")?;
+                                if !matches!(buf_id, LuaValue::Nil) {
+                                    let doc_native: LuaTable =
+                                        require_table(_lua, "doc_native")?;
+                                    let set_undo: LuaFunction =
+                                        doc_native.get("buffer_set_undo_data")?;
+                                    let _ = set_undo.call::<LuaValue>((buf_id, undo_data));
+                                }
+                            }
+                        }
                         Ok(LuaMultiValue::from_vec(vec![LuaValue::Boolean(true)]))
                     } else {
                         let err = result

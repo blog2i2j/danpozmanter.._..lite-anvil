@@ -262,6 +262,47 @@ mod tests {
     }
 
     #[test]
+    fn session_json_round_trip_preserves_active_file_and_undo_map() {
+        use super::to_lua;
+        let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default()).expect("lua");
+        let table = lua.create_table().expect("table");
+        table
+            .set("active_file", "/tmp/project/b.rs")
+            .expect("active_file");
+        let ofu = lua.create_table().expect("ofu");
+        ofu.set("/tmp/project/a.rs", "/backups/session_0.undo")
+            .expect("ofu entry");
+        ofu.set("/tmp/project/b.rs", "/backups/session_1.undo")
+            .expect("ofu entry 2");
+        table.set("open_files_undo", ofu).expect("ofu set");
+
+        let json = table_to_json(table).expect("json");
+        assert_eq!(json["active_file"], "/tmp/project/b.rs");
+        assert_eq!(
+            json["open_files_undo"]["/tmp/project/a.rs"],
+            "/backups/session_0.undo"
+        );
+        assert_eq!(
+            json["open_files_undo"]["/tmp/project/b.rs"],
+            "/backups/session_1.undo"
+        );
+
+        // Verify round-trip: JSON -> Lua table -> lookup by string key.
+        let restored = to_lua(&lua, &json).expect("to_lua");
+        if let mlua::Value::Table(rt) = restored {
+            let af: String = rt.get("active_file").expect("get active_file");
+            assert_eq!(af, "/tmp/project/b.rs");
+            let ofu_rt: mlua::Table = rt.get("open_files_undo").expect("get ofu");
+            let v: String = ofu_rt
+                .get("/tmp/project/a.rs")
+                .expect("get ofu entry");
+            assert_eq!(v, "/backups/session_0.undo");
+        } else {
+            panic!("expected table from to_lua");
+        }
+    }
+
+    #[test]
     fn update_recent_deduplicates_and_caps() {
         let mut items = vec!["b".to_string(), "a".to_string(), "c".to_string()];
         update_recent(&mut items, "a", true, 3);

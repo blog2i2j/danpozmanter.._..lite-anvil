@@ -241,8 +241,11 @@ fn register_local_helpers(
                 }
             }
 
-            // open_files
+            // open_files + persistent undo for clean files
             let open_files = lua.create_table()?;
+            let open_files_undo = lua.create_table()?;
+            // Collect undo data in memory; files are written after backup dir is reset.
+            let mut pending_session_undo: Vec<(String, Vec<u8>)> = Vec::new();
             let skip: bool = core
                 .get::<LuaValue>("skip_session_open_files")
                 .map(|v| matches!(v, LuaValue::Boolean(true)))
@@ -250,6 +253,7 @@ fn register_local_helpers(
             if !skip {
                 let seen = lua.create_table()?;
                 let docs: LuaTable = core.get("docs")?;
+                let doc_native_of: LuaTable = get_module(lua, "doc_native")?;
                 for pair in docs.sequence_values::<LuaTable>() {
                     let doc = pair?;
                     let abs: LuaValue = doc.get("abs_filename")?;
@@ -260,6 +264,22 @@ fn register_local_helpers(
                             seen.set(key_str.as_str(), true)?;
                             let len = open_files.raw_len();
                             open_files.set(len + 1, abs.clone())?;
+                            // Collect undo data for clean files (dirty ones handled below).
+                            let dirty: bool = doc.call_method("is_dirty", ())?;
+                            let new_file: bool =
+                                doc.get::<Option<bool>>("new_file")?.unwrap_or(false);
+                            if !dirty && !new_file {
+                                let buf_id: LuaValue = doc.get("buffer_id")?;
+                                if !matches!(buf_id, LuaValue::Nil) {
+                                    let get_undo: LuaFunction =
+                                        doc_native_of.get("buffer_get_undo_data")?;
+                                    let undo_data: Vec<u8> = get_undo.call(buf_id)?;
+                                    if undo_data.len() > 8 {
+                                        pending_session_undo
+                                            .push((key_str.clone(), undo_data));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -352,6 +372,20 @@ fn register_local_helpers(
                 }
             }
 
+            // Write session undo files (after backup dir was reset above).
+            if !pending_session_undo.is_empty() {
+                let userdir_su: String = lua.globals().get("USERDIR")?;
+                let undo_dir = std::path::PathBuf::from(&userdir_su).join("backups");
+                let _ = std::fs::create_dir_all(&undo_dir);
+                for (idx, (abs_path, undo_data)) in pending_session_undo.iter().enumerate() {
+                    let undo_path = undo_dir.join(format!("session_{idx}.undo"));
+                    if std::fs::write(&undo_path, undo_data).is_ok() {
+                        let undo_str = undo_path.to_string_lossy().to_string();
+                        open_files_undo.set(abs_path.as_str(), undo_str)?;
+                    }
+                }
+            }
+
             // plugin_data
             let plugin_data = lua.create_table()?;
             let hooks: LuaValue = core.get("session_save_hooks")?;
@@ -429,7 +463,29 @@ fn register_local_helpers(
             )?;
             session_data.set("treeview_size", treeview_size)?;
             session_data.set("open_files", open_files)?;
+            session_data.set("open_files_undo", open_files_undo)?;
             session_data.set("plugin_data", plugin_data)?;
+
+            // Persist active file in session.json and on disk.
+            let mut active_file_val = LuaValue::Nil;
+            let active_view: LuaValue = core.get("active_view")?;
+            if let LuaValue::Table(ref av) = active_view {
+                let doc_val: LuaValue = av.get("doc")?;
+                if let LuaValue::Table(ref doc) = doc_val {
+                    let abs: LuaValue = doc.get("abs_filename")?;
+                    if let LuaValue::String(ref s) = abs {
+                        active_file_val = abs.clone();
+                        let userdir: String = lua.globals().get("USERDIR")?;
+                        let dir = std::path::PathBuf::from(&userdir)
+                            .join("storage")
+                            .join("session");
+                        let _ = std::fs::create_dir_all(&dir);
+                        let content = format!("\"{}\"", s.to_str()?);
+                        let _ = std::fs::write(dir.join("active_file"), &content);
+                    }
+                }
+            }
+            session_data.set("active_file", active_file_val)?;
 
             let save_fn: LuaFunction = session_native.get("save")?;
             save_fn.call::<()>(session_data)?;
@@ -1487,19 +1543,30 @@ fn register_init_fn(
                 let restore_fn = lua.create_function(|lua, ()| {
                     let core = get_core(lua)?;
 
-                    // Read active file directly from disk BEFORE opening files.
+                    // Read active file from disk, falling back to session.json.
                     let saved_active: Option<String> = {
                         let userdir: String = lua.globals().get("USERDIR")?;
                         let path = std::path::PathBuf::from(&userdir)
                             .join("storage").join("session").join("active_file");
-                        std::fs::read_to_string(&path).ok().and_then(|s| {
+                        let from_disk = std::fs::read_to_string(&path).ok().and_then(|s| {
                             let trimmed = s.trim();
                             if trimmed.starts_with('"') && trimmed.ends_with('"') {
                                 Some(trimmed[1..trimmed.len()-1].to_string())
                             } else {
                                 None
                             }
-                        })
+                        });
+                        if from_disk.is_some() {
+                            from_disk
+                        } else {
+                            let session: LuaTable = core.get("session")?;
+                            let af: LuaValue = session.get("active_file")?;
+                            if let LuaValue::String(s) = af {
+                                Some(s.to_str()?.to_string())
+                            } else {
+                                None
+                            }
+                        }
                     };
 
                     let root_view: LuaTable = core.get("root_view")?;
@@ -1529,10 +1596,12 @@ fn register_init_fn(
                     if !skip {
                         let session: LuaTable = core.get("session")?;
                         let open_files: LuaValue = session.get("open_files")?;
+                        let ofu: LuaValue = session.get("open_files_undo")?;
                         if let LuaValue::Table(of) = open_files {
                             let pcall2: LuaFunction = lua.globals().get("pcall")?;
                             let require2: LuaFunction = lua.globals().get("require")?;
                             let dv_cls: LuaValue = require2.call("core.docview")?;
+                            let doc_native_r: LuaTable = get_module(lua, "doc_native")?;
                             for path_val in of.sequence_values::<String>() {
                                 let path = path_val?;
                                 let open_doc: LuaFunction = core.get("open_doc")?;
@@ -1546,6 +1615,40 @@ fn register_init_fn(
                                 }).unwrap_or(false);
                                 if ok {
                                     if let Some(LuaValue::Table(doc)) = vals.get(1) {
+                                        // Restore persistent undo data for this file.
+                                        if let LuaValue::Table(ref ofu_t) = ofu {
+                                            let abs_fn: LuaValue = doc.get("abs_filename")?;
+                                            if let LuaValue::String(ref abs_s) = abs_fn {
+                                                let undo_path: LuaValue =
+                                                    ofu_t.get(abs_s.clone())?;
+                                                if let LuaValue::String(ref up) = undo_path {
+                                                    let up_str = up.to_str()?.to_string();
+                                                    let deferred: LuaValue =
+                                                        doc.get("deferred_load")?;
+                                                    if !matches!(deferred, LuaValue::Nil) {
+                                                        // Lazily loaded: defer undo restore.
+                                                        doc.set(
+                                                            "deferred_undo_path",
+                                                            up_str,
+                                                        )?;
+                                                    } else if let Ok(undo_data) =
+                                                        std::fs::read(&up_str)
+                                                    {
+                                                        let buf_id: LuaValue =
+                                                            doc.get("buffer_id")?;
+                                                        if !matches!(buf_id, LuaValue::Nil) {
+                                                            let set_undo: LuaFunction =
+                                                                doc_native_r
+                                                                    .get("buffer_set_undo_data")?;
+                                                            let _ = set_undo
+                                                                .call::<LuaValue>((
+                                                                    buf_id, undo_data,
+                                                                ));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                         // Check if already open.
                                         let views: LuaTable = primary.get("views")?;
                                         let mut already_open = false;

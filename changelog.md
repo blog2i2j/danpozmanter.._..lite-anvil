@@ -1,6 +1,11 @@
 # Change Log
 
-## [1.0.2] - 2026-03-26 — Persistent undo with 5MB cap.
+## [1.0.3] - 2026-03-27 — Fix persistent undo for saved files, fix active tab persistence.
+
+* Fix persistent undo not working for saved (clean) files. Undo history was only persisted for unsaved documents, clean files lost their undo stacks on restart.
+* Fix active tab being lost across sessions. Active file is now saved in session.json during session save.
+
+## [1.0.2] - 2026-03-27 — Persistent undo with 5MB cap.
 
 * Persistent undo history — undo/redo stacks are saved alongside backup files and restored when reopening unsaved/dirty documents.
 * 5MB cap per file on persistent undo storage to prevent excessive disk usage.
