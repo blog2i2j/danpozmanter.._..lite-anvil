@@ -829,7 +829,6 @@ fn build_default_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         require.call("core.command")?
     };
 
-    // y -> { "dialog:select-yes", function }
     {
         let y_cmds = lua.create_table()?;
         y_cmds.set(1, "dialog:select-yes")?;
@@ -847,7 +846,6 @@ fn build_default_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         t.set("y", y_cmds)?;
     }
 
-    // n -> { "dialog:select-no", function }
     {
         let n_cmds = lua.create_table()?;
         n_cmds.set(1, "dialog:select-no")?;
@@ -865,7 +863,6 @@ fn build_default_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         t.set("n", n_cmds)?;
     }
 
-    // t -> function
     t.set(
         "t",
         lua.create_function({
@@ -878,7 +875,6 @@ fn build_default_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         })?,
     )?;
 
-    // c -> function
     t.set(
         "c",
         lua.create_function({

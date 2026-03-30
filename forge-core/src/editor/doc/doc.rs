@@ -1470,8 +1470,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(|_, (buffer_id, data): (u64, Vec<u8>)| {
             with_buffer_mut(buffer_id, |state| {
                 if let Some((undo, redo)) = deserialize_history(&data) {
+                    let had_changes = !undo.is_empty();
                     state.undo = undo;
                     state.redo = redo;
+                    // Bump change_id so is_dirty() detects restored unsaved state.
+                    if had_changes {
+                        state.change_id += 1;
+                    }
                     Ok(true)
                 } else {
                     Ok(false)

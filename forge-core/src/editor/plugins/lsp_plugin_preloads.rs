@@ -276,6 +276,113 @@ fn mgr_apply_text_edit(
     Ok(())
 }
 
+/// Applies a snippet-format text edit: expands the snippet body, inserts the
+/// plain text, and places the cursor at the first tabstop (or `$0`).
+fn mgr_apply_snippet_edit(
+    _lua: &Lua,
+    doc: &LuaTable,
+    edit: &LuaTable,
+) -> LuaResult<()> {
+    use super::snippet;
+
+    let range: LuaTable = edit.get("range")?;
+    let start: LuaTable = range.get("start")?;
+    let end_t: LuaTable = range.get("end")?;
+    let (sl, sc) = mgr_doc_pos(doc, &start)?;
+    let (el, ec) = mgr_doc_pos(doc, &end_t)?;
+
+    doc.get::<LuaFunction>("remove")?
+        .call::<()>((doc.clone(), sl, sc, el, ec))?;
+
+    let raw_text: String = edit.get::<String>("newText").unwrap_or_default();
+    let expanded = snippet::expand(&raw_text);
+
+    if !expanded.text.is_empty() {
+        doc.get::<LuaFunction>("insert")?
+            .call::<()>((doc.clone(), sl, sc, expanded.text.clone()))?;
+    }
+
+    // Place cursor at the first tabstop ($1, or $0 if no $1).
+    let cursor_byte = expanded
+        .tabstops
+        .first()
+        .map(|t| t.start)
+        .unwrap_or(expanded.text.len());
+    let cursor_end_byte = expanded
+        .tabstops
+        .first()
+        .map(|t| t.end)
+        .unwrap_or(expanded.text.len());
+
+    let position_offset: LuaFunction = doc.get("position_offset")?;
+    let (cursor_line, cursor_col): (i64, i64) =
+        position_offset.call((doc.clone(), sl, sc, cursor_byte as i64))?;
+    let (sel_end_line, sel_end_col): (i64, i64) = if cursor_end_byte != cursor_byte {
+        position_offset.call((doc.clone(), sl, sc, cursor_end_byte as i64))?
+    } else {
+        (cursor_line, cursor_col)
+    };
+
+    doc.get::<LuaFunction>("set_selection")?.call::<()>((
+        doc.clone(),
+        cursor_line,
+        cursor_col,
+        sel_end_line,
+        sel_end_col,
+    ))?;
+
+    Ok(())
+}
+
+/// Expands an LSP snippet body, inserts it at the given position, and places
+/// the cursor at the first tabstop. Used for the simple `insertText` path.
+fn mgr_apply_snippet_insert(
+    _lua: &Lua,
+    doc: &LuaTable,
+    snippet_text: &str,
+    line: i64,
+    col: i64,
+) -> LuaResult<()> {
+    use super::snippet;
+
+    let expanded = snippet::expand(snippet_text);
+
+    if !expanded.text.is_empty() {
+        doc.get::<LuaFunction>("insert")?
+            .call::<()>((doc.clone(), line, col, expanded.text.clone()))?;
+    }
+
+    let cursor_byte = expanded
+        .tabstops
+        .first()
+        .map(|t| t.start)
+        .unwrap_or(expanded.text.len());
+    let cursor_end_byte = expanded
+        .tabstops
+        .first()
+        .map(|t| t.end)
+        .unwrap_or(expanded.text.len());
+
+    let position_offset: LuaFunction = doc.get("position_offset")?;
+    let (cursor_line, cursor_col): (i64, i64) =
+        position_offset.call((doc.clone(), line, col, cursor_byte as i64))?;
+    let (sel_end_line, sel_end_col): (i64, i64) = if cursor_end_byte != cursor_byte {
+        position_offset.call((doc.clone(), line, col, cursor_end_byte as i64))?
+    } else {
+        (cursor_line, cursor_col)
+    };
+
+    doc.get::<LuaFunction>("set_selection")?.call::<()>((
+        doc.clone(),
+        cursor_line,
+        cursor_col,
+        sel_end_line,
+        sel_end_col,
+    ))?;
+
+    Ok(())
+}
+
 fn mgr_range_sort_desc(lua: &Lua, edits: &LuaTable) -> LuaResult<()> {
     let table_lib: LuaTable = lua.globals().get("table")?;
     let sort: LuaFunction = table_lib.get("sort")?;
@@ -1449,7 +1556,7 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                     let comp = lua.create_table()?;
                     comp.set("dynamicRegistration", false)?;
                     let ci = lua.create_table()?;
-                    ci.set("snippetSupport", false)?;
+                    ci.set("snippetSupport", true)?;
                     let df = lua.create_table()?;
                     df.raw_set(1, "plaintext")?;
                     df.raw_set(2, "markdown")?;
@@ -3981,6 +4088,9 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                                     .and_then(|te| te.get("newText"))
                             })
                             .unwrap_or_else(|_| label_str.clone());
+                        // insertTextFormat: 1 = PlainText (default), 2 = Snippet
+                        let is_snippet =
+                            item.get::<i64>("insertTextFormat").unwrap_or(1) == 2;
                         let detail: LuaValue = item.get("detail").unwrap_or(LuaValue::Nil);
                         let doc_val: LuaValue = item.get("documentation").unwrap_or(LuaValue::Nil);
                         let desc = mgr_content_to_text(&doc_val)?;
@@ -4008,7 +4118,11 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                                 if let Ok(LuaValue::Table(text_edit)) =
                                     selected_item.get::<LuaValue>("textEdit")
                                 {
-                                    mgr_apply_text_edit(lua, &doc, &text_edit, true)?;
+                                    if is_snippet {
+                                        mgr_apply_snippet_edit(lua, &doc, &text_edit)?;
+                                    } else {
+                                        mgr_apply_text_edit(lua, &doc, &text_edit, true)?;
+                                    }
                                     if let Ok(LuaValue::Table(additional)) =
                                         selected_item.get::<LuaValue>("additionalTextEdits")
                                     {
@@ -4017,6 +4131,29 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                                             mgr_apply_text_edit(lua, &doc, &edit?, false)?;
                                         }
                                     }
+                                    return Ok(true);
+                                }
+                                if is_snippet {
+                                    // Remove the typed prefix, then insert the
+                                    // expanded snippet at the cursor position.
+                                    let translate: LuaTable =
+                                        req(lua, "core.doc.translate")?;
+                                    let (line, col): (i64, i64) =
+                                        doc.call_method("get_selection", ())?;
+                                    let sow: LuaFunction =
+                                        translate.get("start_of_word")?;
+                                    let (wl, wc): (i64, i64) = doc
+                                        .call_method("position_offset", (line, col, sow))?;
+                                    // Remove partial text.
+                                    doc.get::<LuaFunction>("remove")?
+                                        .call::<()>((doc.clone(), wl, wc, line, col))?;
+                                    mgr_apply_snippet_insert(
+                                        lua,
+                                        &doc,
+                                        &insert_text,
+                                        wl,
+                                        wc,
+                                    )?;
                                     return Ok(true);
                                 }
                                 selected.set("text", insert_text.clone())?;
@@ -4951,26 +5088,6 @@ fn init_client_module(lua: &Lua) -> LuaResult<LuaValue> {
 
 // ─── INLINE DIAGNOSTIC HELPERS ───────────────────────────────────────────────
 
-/// Trims leading and trailing whitespace from a Lua string value.
-fn trim_text(s: &str) -> &str {
-    s.trim()
-}
-
-/// Returns the one-line text used for the inline end-of-line diagnostic hint.
-fn inline_diagnostic_text(diagnostic: &LuaTable) -> LuaResult<Option<String>> {
-    let msg: String = match diagnostic.get::<LuaValue>("message")? {
-        LuaValue::String(s) => s.to_str()?.to_owned(),
-        _ => return Ok(None),
-    };
-    let msg = msg.replace("\r\n", "\n").replace('\r', "\n");
-    let first = trim_text(msg.split('\n').next().unwrap_or(""));
-    if first.is_empty() {
-        return Ok(None);
-    }
-    let collapsed: String = first.split_whitespace().collect::<Vec<_>>().join(" ");
-    Ok(Some(collapsed))
-}
-
 /// Builds a tooltip header string from a diagnostic table (severity · source · code).
 fn diagnostic_tooltip_text(diagnostic: &LuaTable) -> LuaResult<Option<String>> {
     let severity: i64 = diagnostic
@@ -5020,190 +5137,6 @@ fn diagnostic_tooltip_text(diagnostic: &LuaTable) -> LuaResult<Option<String>> {
     Ok(Some(format!("{prefix}\n{msg}")))
 }
 
-/// Draws the inline end-of-line diagnostic hint for `line` in `view`.
-fn draw_inline_diagnostic(lua: &Lua, view: &LuaTable, mgr: &LuaTable, line: i64) -> LuaResult<()> {
-    let get_inline: LuaFunction = mgr.get("get_inline_diagnostic")?;
-    let doc: LuaTable = view.get("doc")?;
-    let result: LuaMultiValue = get_inline.call((doc, line))?;
-    let mut it = result.into_iter();
-    let diag = match it.next() {
-        Some(LuaValue::Table(t)) => t,
-        _ => return Ok(()),
-    };
-    let end_col: Option<i64> = match it.next() {
-        Some(LuaValue::Integer(n)) => Some(n),
-        Some(LuaValue::Number(n)) => Some(n as i64),
-        _ => None,
-    };
-    let text = match inline_diagnostic_text(&diag)? {
-        Some(t) => t,
-        None => return Ok(()),
-    };
-
-    let style: LuaTable = req(lua, "core.style")?;
-    let font: LuaTable = view.get::<LuaFunction>("get_font")?.call(view.clone())?;
-    let get_width: LuaFunction = font.get("get_width")?;
-    let text_w: f64 = get_width.call((font.clone(), text.clone()))?;
-    if text_w <= 0.0 {
-        return Ok(());
-    }
-
-    let get_pos: LuaFunction = view.get("get_line_screen_position")?;
-    let pos: LuaMultiValue = get_pos.call((view.clone(), line))?;
-    let mut pit = pos.into_iter();
-    let x: f64 = match pit.next() {
-        Some(LuaValue::Number(n)) => n,
-        Some(LuaValue::Integer(n)) => n as f64,
-        _ => return Ok(()),
-    };
-    let y: f64 = match pit.next() {
-        Some(LuaValue::Number(n)) => n,
-        Some(LuaValue::Integer(n)) => n as f64,
-        _ => return Ok(()),
-    };
-    let lh: f64 = view
-        .get::<LuaFunction>("get_line_height")?
-        .call::<f64>(view.clone())?;
-
-    let v_scrollbar: LuaTable = view.get("v_scrollbar")?;
-    let track_rect: LuaMultiValue = v_scrollbar
-        .get::<LuaFunction>("get_track_rect")?
-        .call(v_scrollbar)?;
-    let mut tri = track_rect.into_iter();
-    let _: LuaValue = tri.next().unwrap_or(LuaValue::Nil);
-    let _: LuaValue = tri.next().unwrap_or(LuaValue::Nil);
-    let scroll_w: f64 = match tri.next() {
-        Some(LuaValue::Number(n)) => n,
-        Some(LuaValue::Integer(n)) => n as f64,
-        _ => 0.0,
-    };
-
-    let pos_x: f64 = view
-        .get::<LuaValue>("position")
-        .and_then(|v| {
-            if let LuaValue::Table(t) = v {
-                t.get::<f64>("x")
-            } else {
-                Ok(0.0)
-            }
-        })
-        .unwrap_or(0.0);
-    let size_x: f64 = view
-        .get::<LuaValue>("size")
-        .and_then(|v| {
-            if let LuaValue::Table(t) = v {
-                t.get::<f64>("x")
-            } else {
-                Ok(0.0)
-            }
-        })
-        .unwrap_or(0.0);
-    let gutter_w: f64 = view
-        .get::<LuaFunction>("get_gutter_width")?
-        .call::<f64>(view.clone())?;
-    let clip_left = pos_x + gutter_w;
-    let clip_right = pos_x + size_x - scroll_w;
-
-    let padding_x: f64 = style
-        .get::<LuaValue>("padding")
-        .ok()
-        .and_then(|v| {
-            if let LuaValue::Table(t) = v {
-                t.get::<f64>("x").ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(4.0);
-    let font_space_w: f64 = get_width.call((font.clone(), " "))?;
-    let inline_diagnostic_side_padding = f64::max(padding_x, font_space_w.floor());
-    let space2_w: f64 = get_width.call((font.clone(), "  "))?;
-    let inline_diagnostic_gap = space2_w.floor();
-
-    let max_x = clip_right - inline_diagnostic_side_padding - text_w;
-    if max_x <= clip_left {
-        return Ok(());
-    }
-
-    let line_text: String = {
-        let lines_tbl: LuaTable = view.get::<LuaTable>("doc")?.get("lines")?;
-        lines_tbl
-            .get::<LuaValue>(line)
-            .ok()
-            .and_then(|v| {
-                if let LuaValue::String(s) = v {
-                    s.to_str().ok().map(|s| s.to_owned())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| "\n".to_owned())
-    };
-    let line_len = line_text.len() as i64;
-    let anchor_col = i64::max(
-        1,
-        i64::min(end_col.unwrap_or(line_len + 1) + 1, line_len + 1),
-    );
-    let col_x: LuaMultiValue = view.get::<LuaFunction>("get_line_screen_position")?.call((
-        view.clone(),
-        line,
-        anchor_col,
-    ))?;
-    let anchor_x: f64 = match col_x.into_iter().next() {
-        Some(LuaValue::Number(n)) => n,
-        Some(LuaValue::Integer(n)) => n as f64,
-        _ => x,
-    };
-    let anchor_x = anchor_x + inline_diagnostic_gap;
-    let text_x = f64::max(anchor_x, max_x);
-    if text_x + text_w > clip_right - inline_diagnostic_side_padding {
-        return Ok(());
-    }
-
-    let severity: i64 = diag
-        .get::<LuaValue>("severity")
-        .ok()
-        .and_then(|v| {
-            if let LuaValue::Integer(n) = v {
-                Some(n)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(3);
-
-    let renderer: LuaTable = lua.globals().get("renderer")?;
-    let draw_rect: LuaFunction = renderer.get("draw_rect")?;
-    let bg: LuaValue = style.get("background")?;
-    draw_rect.call::<()>((
-        (text_x - inline_diagnostic_side_padding) as i64,
-        y as i64,
-        (text_w + inline_diagnostic_side_padding * 2.0) as i64,
-        lh as i64,
-        bg,
-    ))?;
-
-    let color = mgr_diagnostic_color(lua, severity)?;
-    let common: LuaTable = req(lua, "core.common")?;
-    let draw_text: LuaFunction = common.get("draw_text")?;
-    let text_y_off: f64 = view
-        .get::<LuaFunction>("get_line_text_y_offset")?
-        .call::<f64>(view.clone())?;
-    let font_h: f64 = font
-        .get::<LuaFunction>("get_height")?
-        .call::<f64>(font.clone())?;
-    draw_text.call::<()>((
-        font,
-        color,
-        text,
-        LuaValue::Nil,
-        text_x as i64,
-        (y + text_y_off) as i64,
-        text_w as i64,
-        font_h as i64,
-    ))?;
-    Ok(())
-}
 
 // ─── INIT MODULE (plugins.lsp) ────────────────────────────────────────────────
 
@@ -5725,7 +5658,6 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                             ))?;
                         }
                     }
-                    draw_inline_diagnostic(lua, &self_, &m, line)?;
                 }
 
                 // Tooltip deferred draw

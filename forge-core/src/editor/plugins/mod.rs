@@ -34,6 +34,7 @@ pub(crate) mod quote;
 pub(crate) mod reflow;
 pub(crate) mod remotessh;
 pub(crate) mod scale;
+pub(crate) mod snippet;
 pub(crate) mod tabularize;
 #[cfg(unix)]
 pub(crate) mod terminal;

@@ -697,14 +697,8 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(|_, _text: String| -> LuaResult<()> { Ok(()) })?,
     )?;
 
-    // show_fatal_error: log to stderr as fallback.
-    t.set(
-        "show_fatal_error",
-        lua.create_function(|_, (title, msg): (String, String)| -> LuaResult<()> {
-            eprintln!("FATAL: {title}: {msg}");
-            Ok(())
-        })?,
-    )?;
+    // Dialog stubs — overridden by SDL or headless dialog backends.
+    ui::dialog::register_dialog_fns(lua, &t)?;
 
     // IME stubs — SDL2 has no ClearComposition equivalent.
     t.set(
@@ -919,26 +913,6 @@ fn add_sdl_system_fns(lua: &Lua, t: &LuaTable) -> LuaResult<()> {
             if let Ok(cstr) = std::ffi::CString::new(text) {
                 // SAFETY: cstr is a valid null-terminated C string.
                 unsafe { sdl3_sys::everything::SDL_SetPrimarySelectionText(cstr.as_ptr()) };
-            }
-            Ok(())
-        })?,
-    )?;
-
-    // ── Fatal error dialog ─────────────────────────────────────────────────
-
-    t.set(
-        "show_fatal_error",
-        lua.create_function(|_, (title, msg): (String, String)| -> LuaResult<()> {
-            let t = std::ffi::CString::new(title).unwrap_or_default();
-            let m = std::ffi::CString::new(msg).unwrap_or_default();
-            // SAFETY: t and m are valid null-terminated C strings.
-            unsafe {
-                sdl3_sys::everything::SDL_ShowSimpleMessageBox(
-                    sdl3_sys::everything::SDL_MESSAGEBOX_ERROR,
-                    t.as_ptr(),
-                    m.as_ptr(),
-                    std::ptr::null_mut(),
-                );
             }
             Ok(())
         })?,

@@ -15,7 +15,7 @@
     "line_highlight": "#CECECE",
     "scrollbar": "#ADADAD",
     "scrollbar2": "#808080",
-    "nagbar": "#994D4D",
+    "nagbar": "#404040",
     "nagbar_text": "#E6E6E6",
     "nagbar_dim": "rgba(0,0,0,0.5)",
     "syntax": {

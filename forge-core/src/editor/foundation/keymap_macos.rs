@@ -21,8 +21,6 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
 fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
     let t = lua.create_table()?;
 
-    // Dialog keys with inline functions that require core.command lazily
-    // y -> { "dialog:select-yes", function }
     {
         let y_cmds = lua.create_table()?;
         y_cmds.set(1, "dialog:select-yes")?;
@@ -38,7 +36,6 @@ fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         t.set("y", y_cmds)?;
     }
 
-    // n -> { "dialog:select-no", function }
     {
         let n_cmds = lua.create_table()?;
         n_cmds.set(1, "dialog:select-no")?;
@@ -54,7 +51,6 @@ fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         t.set("n", n_cmds)?;
     }
 
-    // t -> function
     t.set(
         "t",
         lua.create_function(|lua, ()| -> LuaResult<LuaValue> {
@@ -65,7 +61,6 @@ fn build_macos_bindings(lua: &Lua) -> LuaResult<LuaTable> {
         })?,
     )?;
 
-    // c -> function
     t.set(
         "c",
         lua.create_function(|lua, ()| -> LuaResult<LuaValue> {

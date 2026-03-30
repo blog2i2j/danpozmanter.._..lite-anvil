@@ -1,5 +1,14 @@
 # Change Log
 
+## [1.2.0] - 2026-03-30 — LSP snippets, diagnostics hover-only, dirty state fix.
+
+* LSP snippet support -- completions with placeholders and tabstops now expand correctly.
+* Diagnostic text only shown on mouse hover; underlines and gutter markers always visible.
+* Fix dirty indicator not showing after restoring a file with unsaved undo history.
+* Fix quit dialog appearing multiple times on repeated close attempts.
+* Fix `extract_subsyntaxes` crash when toggling block/line comments.
+* Dialog bar color changed from red to neutral gray across all themes.
+
 ## [1.1.2] - 2026-03-29 — Fix quit confirmation, Windows CI reliability.
 
 * Fix quit confirmation dialog not waiting for user input when there are unsaved changes.

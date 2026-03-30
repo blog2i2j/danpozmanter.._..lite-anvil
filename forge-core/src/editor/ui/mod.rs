@@ -1,5 +1,6 @@
 pub(crate) mod commandview;
 pub(crate) mod contextmenu;
+pub(crate) mod dialog;
 pub(crate) mod emptyview;
 pub(crate) mod logview;
 pub(crate) mod nagview;

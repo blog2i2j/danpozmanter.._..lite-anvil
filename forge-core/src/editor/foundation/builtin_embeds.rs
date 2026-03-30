@@ -3853,7 +3853,10 @@ fn register_doc_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                 }
             }
 
-            if dirty_count > 0 {
+            // Skip confirmation when already exiting (user already said yes).
+            let exiting: bool = core.get::<Option<bool>>("_exiting")?.unwrap_or(false);
+
+            if dirty_count > 0 && !exiting {
                 let string_mod: LuaTable = lua.globals().get("string")?;
                 let format_fn: LuaFunction = string_mod.get("format")?;
                 let text: String = if dirty_count == 1 {
@@ -4399,8 +4402,15 @@ fn register_event_handling(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                     on_fg.call::<()>(LuaMultiValue::from_vec(call_args))?;
                 }
                 "quit" => {
-                    let quit: LuaFunction = core.get("quit")?;
-                    quit.call::<()>(())?;
+                    let nag: LuaTable = core.get("nag_view")?;
+                    let nag_visible: bool = nag
+                        .get::<LuaValue>("visible")?
+                        .as_boolean()
+                        .unwrap_or(false);
+                    if !nag_visible {
+                        let quit: LuaFunction = core.get("quit")?;
+                        quit.call::<()>(())?;
+                    }
                 }
                 _ => {}
             }

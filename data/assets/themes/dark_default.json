@@ -17,7 +17,7 @@
     "scrollbar": "#424242",
     "scrollbar2": "#4f4f4f",
     "scrollbar_track": "#1f1f1f",
-    "nagbar": "#f14c4c",
+    "nagbar": "#404040",
     "nagbar_text": "#ffffff",
     "nagbar_dim": "rgba(0, 0, 0, 0.45)",
     "drag_overlay": "rgba(255,255,255,0.08)",
