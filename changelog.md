@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.1.2] - 2026-03-29 — Fix quit confirmation, Windows CI reliability.
+
+* Fix quit confirmation dialog not waiting for user input when there are unsaved changes.
+* Add retry logic and binary caching for vcpkg installs to handle transient download failures.
+
 ## [1.1.1] - 2026-03-29 — Terminal opens in active file's directory.
 
 * New terminals open in the directory of the currently active tab. Falls back to project root or home for unsaved/untitled files.

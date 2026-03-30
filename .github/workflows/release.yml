@@ -88,10 +88,25 @@ jobs:
           ' Cargo.toml)"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
+      - uses: actions/cache@v5
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-x64-windows-sdl3-freetype-pcre2-v1
+
       - name: Install system dependencies
         run: |
           choco install pkgconfiglite -y
-          vcpkg install sdl3:x64-windows freetype:x64-windows pcre2:x64-windows
+          $maxRetries = 3
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            vcpkg install sdl3:x64-windows freetype:x64-windows pcre2:x64-windows
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($i -lt $maxRetries) {
+              Write-Host "vcpkg install attempt $i failed, retrying in 15s..."
+              Start-Sleep -Seconds 15
+            } else {
+              throw "vcpkg install failed after $maxRetries attempts"
+            }
+          }
           echo "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 

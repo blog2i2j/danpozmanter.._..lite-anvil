@@ -5003,24 +5003,34 @@ fn register_misc(
     } // end try() block
 
     // exit(quit_fn, force?)
-    // Always saves the session (including dirty-doc backups) and exits.
-    // The confirm dialog only appears when closing individual tabs.
+    // When force is false or absent, shows a confirmation dialog if any
+    // documents have unsaved changes. When force is true, exits immediately.
     core.set(
         "exit",
-        lua.create_function(|lua, (quit_fn, _force): (LuaFunction, Option<bool>)| {
+        lua.create_function(|lua, (quit_fn, force): (LuaFunction, Option<bool>)| {
             let core = get_core(lua)?;
-            core.set("_exiting", true)?;
-            let save: LuaFunction = core.get("_save_session")?;
-            save.call::<()>(())?;
-            let delete_temp: LuaFunction = core.get("delete_temp_files")?;
-            delete_temp.call::<()>(())?;
-            let projects: LuaTable = core.get("projects")?;
-            while projects.raw_len() > 0 {
-                let last: LuaValue = projects.get(projects.raw_len())?;
-                let remove: LuaFunction = core.get("remove_project")?;
-                remove.call::<()>((last, true))?;
+            let do_exit = lua.create_function(move |lua, ()| {
+                let core = get_core(lua)?;
+                core.set("_exiting", true)?;
+                let save: LuaFunction = core.get("_save_session")?;
+                save.call::<()>(())?;
+                let delete_temp: LuaFunction = core.get("delete_temp_files")?;
+                delete_temp.call::<()>(())?;
+                let projects: LuaTable = core.get("projects")?;
+                while projects.raw_len() > 0 {
+                    let last: LuaValue = projects.get(projects.raw_len())?;
+                    let remove: LuaFunction = core.get("remove_project")?;
+                    remove.call::<()>((last, true))?;
+                }
+                quit_fn.call::<()>(())?;
+                Ok(())
+            })?;
+            if force.unwrap_or(false) {
+                do_exit.call::<()>(())?;
+            } else {
+                let confirm: LuaFunction = core.get("confirm_close_docs")?;
+                confirm.call::<()>(do_exit)?;
             }
-            quit_fn.call::<()>(())?;
             Ok(())
         })?,
     )?;

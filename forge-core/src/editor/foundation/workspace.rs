@@ -584,10 +584,8 @@ fn install(lua: &Lua) -> LuaResult<LuaTable> {
     let old_exit: LuaFunction = core.get("exit")?;
     let exit_wrapper =
         lua.create_function(move |lua, (quit_fn, force): (LuaFunction, Option<bool>)| {
-            if force.unwrap_or(false) {
-                if let Err(e) = save_workspace(lua) {
-                    log::warn!("failed to save workspace on exit: {e}");
-                }
+            if let Err(e) = save_workspace(lua) {
+                log::warn!("failed to save workspace on exit: {e}");
             }
             old_exit.call::<()>((quit_fn, force.unwrap_or(false)))
         })?;
