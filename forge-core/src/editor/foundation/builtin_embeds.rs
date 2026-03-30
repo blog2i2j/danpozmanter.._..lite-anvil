@@ -467,8 +467,20 @@ fn register_local_helpers(
             session_data.set("plugin_data", plugin_data)?;
 
             // Persist active file in session.json and on disk.
+            // Try active_view first, fall back to last_active_view (the
+            // active view may be the NagView dialog during quit).
             let mut active_file_val = LuaValue::Nil;
-            let active_view: LuaValue = core.get("active_view")?;
+            let av_candidates = [
+                core.get::<LuaValue>("active_view")?,
+                core.get::<LuaValue>("last_active_view")?,
+            ];
+            let active_view = av_candidates
+                .iter()
+                .find(|v| {
+                    matches!(v, LuaValue::Table(t) if !matches!(t.get::<LuaValue>("doc"), Ok(LuaValue::Nil) | Err(_)))
+                })
+                .cloned()
+                .unwrap_or(LuaValue::Nil);
             if let LuaValue::Table(ref av) = active_view {
                 let doc_val: LuaValue = av.get("doc")?;
                 if let LuaValue::Table(ref doc) = doc_val {

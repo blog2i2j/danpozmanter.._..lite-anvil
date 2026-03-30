@@ -1,5 +1,12 @@
 # Change Log
 
+## [1.2.1] - 2026-03-30 — Diagnostics improvements.
+
+* Diagnostic tooltip width increased for readability.
+* Tooltip text wraps at word boundaries instead of splitting mid-word.
+* Single-character diagnostic underlines expand to cover the full word.
+* Fix diagnostics on load.
+
 ## [1.2.0] - 2026-03-30 — LSP snippets, diagnostics hover-only, dirty state fix.
 
 * LSP snippet support -- completions with placeholders and tabstops now expand correctly.

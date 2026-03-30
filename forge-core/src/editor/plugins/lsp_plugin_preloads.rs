@@ -612,7 +612,7 @@ fn mgr_wrap_tooltip_lines(
                 lines.raw_set(line_idx, remaining.clone())?;
                 break;
             }
-            // Binary search for cut point
+            // Find the last word boundary that fits within max_width.
             let chars: Vec<char> = remaining.chars().collect();
             let mut cut = chars.len();
             while cut > 1 {
@@ -623,13 +623,12 @@ fn mgr_wrap_tooltip_lines(
                 }
                 cut -= 1;
             }
-            // Try to break at whitespace
+            // Break at a word boundary — never split inside a word.
             let candidate_str: String = chars[..cut].iter().collect();
-            let split_pos = candidate_str.rfind(|c: char| c.is_whitespace());
-            let actual_cut = if let Some(p) = split_pos {
-                if p > 0 { p } else { cut }
-            } else {
-                cut
+            let actual_cut = match candidate_str.rfind(char::is_whitespace) {
+                Some(p) if p > 0 => p,
+                // First word exceeds max_width — keep it whole.
+                _ => cut,
             };
             let line_str: String = chars[..actual_cut].iter().collect();
             let line_str = line_str.trim().to_owned();
@@ -5298,6 +5297,35 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
         )?;
     }
 
+    // Patch Doc.ensure_loaded so lazy-loaded docs notify the LSP server.
+    {
+        let mk = Arc::clone(&mgr_key);
+        let doc_class: LuaTable = req(lua, "core.doc")?;
+        let old_fn: LuaFunction = doc_class.get("ensure_loaded")?;
+        let old_key = Arc::new(lua.create_registry_value(old_fn)?);
+        doc_class.set(
+            "ensure_loaded",
+            lua.create_function(move |lua, self_: LuaTable| {
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                let result: LuaMultiValue = old.call(self_.clone())?;
+                let ok = result
+                    .iter()
+                    .next()
+                    .is_some_and(|v| matches!(v, LuaValue::Boolean(true)));
+                if ok {
+                    let has_abs =
+                        !matches!(self_.get::<LuaValue>("abs_filename")?, LuaValue::Nil);
+                    let large = self_.get::<bool>("large_file_mode").unwrap_or(false);
+                    if has_abs && !large {
+                        let m: LuaTable = lua.registry_value(&mk)?;
+                        let _ = m.get::<LuaFunction>("open_doc")?.call::<()>(self_);
+                    }
+                }
+                Ok(result)
+            })?,
+        )?;
+    }
+
     // Patch RootView.on_text_input
     {
         let mk = Arc::clone(&mgr_key);
@@ -5572,6 +5600,24 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 }
 
                 let m: LuaTable = lua.registry_value(&mk)?;
+
+                // Ensure the LSP server knows about this doc. If it's not
+                // yet tracked, open_doc sends didOpen. If it is tracked but
+                // has no diagnostics, send a no-op didChange to nudge the
+                // server into re-publishing them.
+                let client: LuaValue =
+                    m.get::<LuaFunction>("open_doc")?.call(doc.clone())?;
+                if let LuaValue::Table(ref _c) = client {
+                    let diags = mgr_get_doc_diagnostics(lua, &doc)?;
+                    let nudged: bool =
+                        doc.get::<Option<bool>>("_lsp_nudged")?.unwrap_or(false);
+                    if diags.raw_len() == 0 && !nudged {
+                        doc.set("_lsp_nudged", true)?;
+                        let _ = m
+                            .get::<LuaFunction>("send_doc_change")
+                            .and_then(|f| f.call::<()>(doc.clone()));
+                    }
+                }
                 let range: LuaMultiValue =
                     self_.call_method::<LuaMultiValue>("get_visible_line_range", ())?;
                 let mut rit = range.into_iter();
@@ -5615,10 +5661,19 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                             _ => 0.0,
                         };
                         let lh: f64 = self_.call_method::<f64>("get_line_height", ())?;
+                        // Get line text once for word-boundary expansion.
+                        let line_text: String = {
+                            let lines_tbl: LuaTable = doc.get("lines")?;
+                            lines_tbl
+                                .get::<Option<String>>(line)?
+                                .unwrap_or_default()
+                        };
+                        let line_bytes = line_text.as_bytes();
+
                         for seg in segments.sequence_values::<LuaTable>() {
                             let seg = seg?;
-                            let col1: i64 = seg.get("col1")?;
-                            let col2: i64 = seg.get("col2")?;
+                            let mut col1: i64 = seg.get("col1")?;
+                            let mut col2: i64 = seg.get("col2")?;
                             let severity: i64 = seg
                                 .get::<LuaValue>("severity")
                                 .map(|v| match v {
@@ -5626,6 +5681,52 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                                     _ => 3,
                                 })
                                 .unwrap_or(3);
+
+                            // If the range is a single character or zero-width,
+                            // expand to the surrounding token so the underline
+                            // covers the whole word or symbol.
+                            if col2 - col1 <= 1 && !line_bytes.is_empty() {
+                                let is_token = |c: u8| {
+                                    !c.is_ascii_whitespace()
+                                        && !matches!(
+                                            c,
+                                            b'(' | b')' | b'[' | b']'
+                                                | b'{' | b'}' | b',' | b';'
+                                        )
+                                };
+                                // Find a non-whitespace anchor: start at the
+                                // diagnostic position, then try one position
+                                // back (handles zero-width between tokens).
+                                let raw = (col1 - 1).max(0) as usize;
+                                let anchor = if raw < line_bytes.len()
+                                    && is_token(line_bytes[raw])
+                                {
+                                    Some(raw)
+                                } else if raw > 0 && is_token(line_bytes[raw - 1]) {
+                                    Some(raw - 1)
+                                } else if raw + 1 < line_bytes.len()
+                                    && is_token(line_bytes[raw + 1])
+                                {
+                                    Some(raw + 1)
+                                } else {
+                                    None
+                                };
+                                if let Some(idx) = anchor {
+                                    let mut ws = idx;
+                                    while ws > 0 && is_token(line_bytes[ws - 1]) {
+                                        ws -= 1;
+                                    }
+                                    let mut we = idx;
+                                    while we + 1 < line_bytes.len()
+                                        && is_token(line_bytes[we + 1])
+                                    {
+                                        we += 1;
+                                    }
+                                    col1 = ws as i64 + 1;
+                                    col2 = we as i64 + 2;
+                                }
+                            }
+
                             let pos1: LuaMultiValue = self_.call_method::<LuaMultiValue>(
                                 "get_line_screen_position",
                                 (line, col1),
@@ -5762,18 +5863,15 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 };
 
                 let style: LuaTable = req(lua, "core.style")?;
-                let diagnostic_tooltip_max_width: i64 = {
-                    let scale: f64 = lua
-                        .globals()
-                        .get::<LuaValue>("SCALE")
-                        .map(|v| match v {
-                            LuaValue::Number(n) => n,
-                            LuaValue::Integer(n) => n as f64,
-                            _ => 1.0,
-                        })
-                        .unwrap_or(1.0);
-                    (420.0 * scale).floor() as i64
-                };
+                // Use half the window width as the wrap limit so tooltips
+                // are wide but still leave room for positioning.
+                let core_t: LuaTable = req(lua, "core")?;
+                let root_view_t: LuaTable = core_t.get("root_view")?;
+                let root_size_t: LuaTable =
+                    root_view_t.get::<LuaTable>("root_node")?.get("size")?;
+                let window_w: f64 = root_size_t.get::<f64>("x")?;
+                let padding_x: f64 = style.get::<LuaTable>("padding")?.get::<f64>("x")?;
+                let tooltip_max_w = (window_w * 0.6).max(300.0);
 
                 let existing_text: LuaValue = tooltip.get("text")?;
                 let same_text = match &existing_text {
@@ -5783,12 +5881,11 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 if !same_text {
                     tooltip.set("text", text.clone())?;
                     let font: LuaTable = style.get("font")?;
-                    let padding_x: f64 = style.get::<LuaTable>("padding")?.get::<f64>("x")?;
                     let lines = mgr_wrap_tooltip_lines(
                         lua,
                         &font,
                         &text,
-                        diagnostic_tooltip_max_width as f64 - padding_x * 2.0,
+                        tooltip_max_w - padding_x * 2.0,
                     )?;
                     tooltip.set("lines", lines)?;
                     let sys: LuaTable = lua.globals().get("system")?;
@@ -5881,20 +5978,10 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
 
                 let padding_x: f64 = style.get::<LuaTable>("padding")?.get::<f64>("x")?;
                 let padding_y: f64 = style.get::<LuaTable>("padding")?.get::<f64>("y")?;
-                let scale: f64 = lua
-                    .globals()
-                    .get::<LuaValue>("SCALE")
-                    .map(|v| match v {
-                        LuaValue::Number(n) => n,
-                        LuaValue::Integer(n) => n as f64,
-                        _ => 1.0,
-                    })
-                    .unwrap_or(1.0);
-                let diagnostic_tooltip_max_width = (420.0 * scale).floor();
                 let diagnostic_tooltip_border = 1i64;
                 let diagnostic_tooltip_offset = line_height;
 
-                let w = f64::min(diagnostic_tooltip_max_width, text_w + padding_x * 2.0);
+                let w = text_w + padding_x * 2.0;
                 let h = f64::max(line_height, n_lines as f64 * line_height) + padding_y * 2.0;
                 let tt_x: f64 = tt
                     .get::<LuaValue>("x")
