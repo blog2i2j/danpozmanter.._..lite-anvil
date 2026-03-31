@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.3.2] - 2026-03-31 — Dead code removal, float comparison fix, and error handling improvements.
+
+* Remove `#[allow(dead_code)]` on tree model watcher (legitimate RAII pattern, explicitly marked).
+* Fix float comparison with epsilon in session.lua_to_color.
+* Fix potential double-panic in ProcessHandle Drop implementation.
+* Replace `unreachable!()` with proper error handling in command core.
+* Clean up enumerate pattern in runtime args processing.
+
 ## [1.3.1] - 2026-03-31 — Bug fixes and dead code cleanup.
 
 * Fix panic on truncated multi-byte UTF-8 sequences in the renderer text cache.

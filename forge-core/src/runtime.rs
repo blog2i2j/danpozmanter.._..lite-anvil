@@ -47,8 +47,8 @@ impl RuntimeContext {
         let globals = lua.globals();
 
         let args_table = lua.create_table()?;
-        for (i, arg) in args.iter().enumerate() {
-            args_table.set(i as i64 + 1, arg.as_str())?;
+        for (i, arg) in (1i64..).zip(args.iter()) {
+            args_table.set(i, arg.as_str())?;
         }
         globals.set("ARGS", args_table)?;
 

@@ -782,7 +782,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             })?,
             "-picker" => lua.create_function(|_lua, ()| Ok(true))?,
             "-commandview" => lua.create_function(|_lua, ()| Ok(false))?,
-            _ => unreachable!(),
+            _ => return Err(mlua::Error::runtime(format!("unexpected dialog suffix: {suffix}"))),
         };
         let udf_key = std::sync::Arc::new(lua.create_registry_value(use_dialog_fn)?);
 

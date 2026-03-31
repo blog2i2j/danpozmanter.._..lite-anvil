@@ -25,7 +25,6 @@ struct TreeEntry {
     rebuilding: Arc<AtomicBool>,
     last_event: Arc<Mutex<Option<Instant>>>,
     /// Held solely to keep the watcher alive via RAII; never explicitly read.
-    #[allow(dead_code)]
     _watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     expanded: Arc<Mutex<HashSet<String>>>,
     options: TreeOptionsKey,

@@ -100,7 +100,12 @@ pub struct ProcessHandle(Mutex<ProcessInner>);
 
 impl Drop for ProcessHandle {
     fn drop(&mut self) {
-        let inner = self.0.get_mut();
+        // Use try_lock to avoid panicking if the mutex is poisoned,
+        // preventing a double-panic that would abort the process.
+        let Some(mut guard) = self.0.try_lock() else {
+            return;
+        };
+        let inner = &mut *guard;
         // Close FDs first to unblock any pending reads.
         inner.close_fd(0);
         inner.close_fd(1);

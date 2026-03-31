@@ -58,7 +58,7 @@ fn table_to_json(table: LuaTable) -> LuaResult<Value> {
         match key {
             LuaValue::Integer(index) if index >= 1 && index as usize <= len => {}
             LuaValue::Number(index)
-                if index.fract() == 0.0 && index >= 1.0 && index as usize <= len => {}
+                if index.fract().abs() < 1e-10 && index >= 1.0 && index as usize <= len => {}
             _ => {
                 is_array = false;
             }
@@ -69,7 +69,7 @@ fn table_to_json(table: LuaTable) -> LuaResult<Value> {
                 LuaValue::String(v) => v.to_str()?.to_string(),
                 LuaValue::Integer(v) => v.to_string(),
                 LuaValue::Number(v) => {
-                    if v.fract() != 0.0 {
+                    if v.fract().abs() >= 1e-10 {
                         return Err(LuaError::RuntimeError(
                             "unsupported non-integer table key".to_string(),
                         ));
