@@ -11,7 +11,6 @@ site_dir: docs
 
 theme:
   name: material
-  custom_dir: docs_src/overrides
   logo: assets/logo.png
   favicon: assets/logo.png
   font:
@@ -33,9 +32,8 @@ theme:
   features:
     - navigation.instant
     - navigation.tabs
-    - navigation.sections
     - content.code.copy
-    - header.autohide
+    - toc.integrate
 
 extra_css:
   - stylesheets/extra.css

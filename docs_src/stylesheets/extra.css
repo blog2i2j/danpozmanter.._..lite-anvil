@@ -105,3 +105,15 @@
   border: 1px solid var(--md-accent-fg-color);
   color: var(--md-accent-fg-color);
 }
+
+/* Hide sidebars on desktop only -- mobile needs them for the hamburger menu */
+@media screen and (min-width: 76.25em) {
+  .md-sidebar {
+    display: none;
+  }
+}
+
+.md-content {
+  max-width: 52rem;
+  margin: 0 auto;
+}
