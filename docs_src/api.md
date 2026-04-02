@@ -17,18 +17,18 @@ when writing plugins or editing `config.lua`.
 
 | Module | Description | Source |
 |--------|-------------|--------|
-| `system` | File system, clipboard, window management, events | [system.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/system.lua) |
-| `renderer` | Drawing primitives, font loading and measurement | [renderer.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/renderer.lua) |
-| `regex` | PCRE2 regular expressions | [regex.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/regex.lua) |
-| `process` | Child process spawning and stream I/O | [process.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/process.lua) |
-| `renwindow` | Window creation and persistence | [renwindow.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/renwindow.lua) |
-| `dirmonitor` | File system change monitoring | [dirmonitor.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/dirmonitor.lua) |
-| `utf8extra` | UTF-8 string utilities | [utf8extra.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/utf8extra.lua) |
-| `string` (u* extensions) | UTF-8 methods injected into the string table | [string.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/string.lua) |
+| `system` | File system, clipboard, window management, events | [system.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/system.lua) |
+| `renderer` | Drawing primitives, font loading and measurement | [renderer.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/renderer.lua) |
+| `regex` | PCRE2 regular expressions | [regex.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/regex.lua) |
+| `process` | Child process spawning and stream I/O | [process.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/process.lua) |
+| `renwindow` | Window creation and persistence | [renwindow.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/renwindow.lua) |
+| `dirmonitor` | File system change monitoring | [dirmonitor.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/dirmonitor.lua) |
+| `utf8extra` | UTF-8 string utilities | [utf8extra.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/utf8extra.lua) |
+| `string` (u* extensions) | UTF-8 methods injected into the string table | [string.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/string.lua) |
 
 ## Globals
 
-All global variables set by the runtime (`ARGS`, `SCALE`, `PLATFORM`, `USERDIR`, `DATADIR`, `PATHSEP`, `VERSION`, etc.) are documented in [globals.lua](https://github.com/danpozmanter/lite-anvil/blob/main/docs/api/globals.lua).
+All global variables set by the runtime (`ARGS`, `SCALE`, `PLATFORM`, `USERDIR`, `DATADIR`, `PATHSEP`, `VERSION`, etc.) are documented in [globals.lua](https://github.com/danpozmanter/lite-anvil/blob/main/api/globals.lua).
 
 ## Core Modules
 
