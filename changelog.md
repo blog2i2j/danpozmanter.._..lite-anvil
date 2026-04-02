@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.5.2] - 2026-04-02 — Project session fixes.
+
+* Fix restart after closing a project opening `/` as a project: now starts with no project and a blank sidebar.
+* Fix `core.exit` being defined after plugin load, causing the workspace plugin's exit wrapper to be overwritten. Workspace state (open files/tabs) now saves correctly on quit.
+
 ## [1.5.1] - 2026-04-02 — Session fix.
 
 * Fix closed project reopening on restart: session restore now respects an explicitly closed project instead of falling back to the most recent one.
