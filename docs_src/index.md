@@ -1,6 +1,41 @@
 ---
 title: Lite-Anvil - Lightweight Code Editor Built in Rust
 description: A fast, lightweight code editor built in Rust with built-in LSP for 25+ languages, embedded terminal, Git integration, and 50+ syntax grammars.
+tags:
+  - code editor
+  - text editor
+  - lightweight editor
+  - rust editor
+  - LSP
+  - IDE
+  - syntax highlighting
+  - Rust
+  - Python
+  - Go
+  - TypeScript
+  - JavaScript
+  - C
+  - C++
+  - Java
+  - Kotlin
+  - Scala
+  - F#
+  - C#
+  - Haskell
+  - Zig
+  - Elixir
+  - Erlang
+  - OCaml
+  - Gleam
+  - Ruby
+  - PHP
+  - Lua
+  - Dart
+  - Swift
+  - Julia
+  - Clojure
+  - Crystal
+  - Bash
 ---
 
 <div class="hero" markdown>

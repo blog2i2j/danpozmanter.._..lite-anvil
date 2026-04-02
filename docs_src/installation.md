@@ -1,6 +1,13 @@
 ---
 title: Installation
 description: How to install Lite-Anvil from prebuilt binaries or build from source on Linux, macOS, and Windows.
+tags:
+  - install
+  - build from source
+  - Linux
+  - macOS
+  - Windows
+  - Rust
 ---
 
 # Installation
