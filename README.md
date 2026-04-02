@@ -17,20 +17,26 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 ## Features
 
 - **Mostly native Rust** — all core modules, views, commands, and bundled plugins are pure Rust via mlua. User plugins and config are Lua
-- **Built-in LSP** with diagnostics, inline diagnostics, semantic highlighting, completion, hover, go-to-definition, references, rename, symbols, code actions, formatting, snippets, signature help, call hierarchy, and type hierarchy
+- **Built-in LSP** for 25+ languages with diagnostics, semantic highlighting, completion, hover, go-to-definition, references, rename, symbols, code actions, formatting, snippets, signature help, inlay hints, call/type hierarchy. See [LSP_SUPPORT.md](LSP_SUPPORT.md)
 - **Embedded PTY terminal** with ANSI colors, scrollback, color schemes, and configurable placement
-- **Integrated test runner** with auto-detection for Cargo, npm/vitest/jest, pytest, Go, and Make projects
+- **Integrated test runner** with auto-detection for Cargo, npm/vitest/jest, pytest, Go, dotnet, Gradle, Maven, sbt, PHPUnit, and Make
+- **Bookmarks** — toggle line bookmarks (Ctrl+F2), navigate with F2/Shift+F2, gutter markers
+- **Indent guides** — vertical lines at each indentation level (`indent-guide:toggle`)
+- **Line sorting** — sort, reverse, unique, case-insensitive sort on selected lines
+- **Per-project workspace memory** — open files/tabs/splits restore when switching projects
 - **Native file watching** via inotify/FSEvents/ReadDirectoryChanges for instant external-change detection
 - **Project-wide search, replace, and swap** plus native single-file find and replace
 - **Git integration** — branch/status in UI, tree highlighting, status view, diff views
 - **Multi-cursor editing**, command palette, project file picker, split panes
+- **Sidebar context menu** — Open, Copy Path, Copy Relative Path, Refresh, Rename, Delete, New File, New Folder
+- **Goto-line in file picker** — type `file.rs:42` to open at a specific line
 - **Find in selection** — limit search to the selected region (`Alt+S` to toggle)
 - **Minimap** — optional code overview sidebar with syntax-colored blocks, click/drag to scroll (`minimap:toggle`)
 - **Tab reordering** — drag tabs within a pane to reorder
 - **Smart undo** — consecutive typing merges into a single undo entry; Ctrl+Z undoes the entire run
 - **Session restore** — open files, active tab, line wrapping preference, font scale, and terminal state persist across restarts
+- **50 built-in syntax grammars** including Rust, Go, Python, TypeScript, TSX, F#, C#, Kotlin, Scala, Groovy, Dockerfile, Vue, Svelte, Zig, Haskell, Julia, Lisp, OCaml, Erlang, Elixir, Gleam, and more
 - **JSON-backed color themes** (`data/assets/themes/*.json`) — editable without recompiling
-- **48 built-in syntax grammars** including Rust, Go, Python, TypeScript, TSX, Vue, Svelte, Zig, Haskell, Julia, Lisp, OCaml, PowerShell, and more
 - **"Open With" file associations** on Linux, macOS, and Windows for all supported file types
 - **Remote SSH editing** via `sshfs`
 - **Config-driven** UI theming, fonts, syntax colors, and behavior tuning through [`config.lua`](PLUGINS_GUIDE.md)
@@ -66,6 +72,8 @@ Requires `sshfs` installed and working SSH authentication.
 
 | Key | Action |
 |-----|--------|
+| Key | Action |
+|-----|--------|
 | `Ctrl+P` | Command palette |
 | `Ctrl+Shift+O` | Open file from project |
 | `Ctrl+Alt+O` | Open project folder |
@@ -76,6 +84,8 @@ Requires `sshfs` installed and working SSH authentication.
 | `Ctrl+F` | Find in file |
 | `Alt+S` | Toggle find-in-selection (while Find is open) |
 | `Ctrl+H` | Replace in file |
+| `Ctrl+F2` | Toggle bookmark |
+| `F2` / `Shift+F2` | Next / previous bookmark |
 | `Alt+F12` | Incoming calls (LSP call hierarchy) |
 | `Ctrl+Shift+F12` | Outgoing calls (LSP call hierarchy) |
 | `Alt+F11` | Supertypes (LSP type hierarchy) |
@@ -83,7 +93,7 @@ Requires `sshfs` installed and working SSH authentication.
 
 ### Test runner
 
-The integrated test runner auto-detects your project's test framework (Cargo, npm/vitest/jest, pytest, Go, or Make) and runs tests from the editor.
+The integrated test runner auto-detects your project's test framework and runs tests from the editor. Supported: Cargo, npm/vitest/jest, pytest, Go, dotnet, Gradle, Maven, sbt, PHPUnit, Make.
 
 | Key | Action |
 |-----|--------|
