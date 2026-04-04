@@ -1,5 +1,9 @@
 # Change Log
 
+## [1.5.4] - 2026-04-03 — Folder open post startup fix.
+
+* Fix crash on folder open after restart: `_goto_positions` table was nil when the arg-parsing block didn't run (e.g. on `core:restart`).
+
 ## [1.5.3] - 2026-04-03 — Command line arguments.
 
 * Add `-n` / `--new-window`: launch with no project and a blank file, skipping session/workspace/backup restore.

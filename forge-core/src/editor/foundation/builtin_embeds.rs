@@ -1673,7 +1673,7 @@ fn register_init_fn(
                 close_all.call::<()>(root_view_close.clone())?;
             }
 
-            let goto_pos: LuaTable = core.get("_goto_positions")?;
+            let goto_pos: Option<LuaTable> = core.get("_goto_positions")?;
             for file_val in files_list.sequence_values::<String>() {
                 let filename = file_val?;
                 let root_view2: LuaTable = core.get("root_view")?;
@@ -1681,12 +1681,13 @@ fn register_init_fn(
                 let doc: LuaTable = open_doc_fn.call(filename.clone())?;
                 let rv_open: LuaFunction = root_view2.get("open_doc")?;
                 let dv: LuaTable = rv_open.call((root_view2, doc.clone()))?;
-                // Apply goto position if specified via -g or file:line[:col].
-                if let Ok(LuaValue::Table(pos)) = goto_pos.get::<LuaValue>(filename.as_str()) {
-                    let line: i64 = pos.get("line").unwrap_or(1);
-                    let col: i64 = pos.get("col").unwrap_or(1);
-                    doc.call_method::<()>("set_selection", (line, col))?;
-                    dv.call_method::<()>("scroll_to_line", (line, true, true))?;
+                if let Some(ref gp) = goto_pos {
+                    if let Ok(LuaValue::Table(pos)) = gp.get::<LuaValue>(filename.as_str()) {
+                        let line: i64 = pos.get("line").unwrap_or(1);
+                        let col: i64 = pos.get("col").unwrap_or(1);
+                        doc.call_method::<()>("set_selection", (line, col))?;
+                        dv.call_method::<()>("scroll_to_line", (line, true, true))?;
+                    }
                 }
             }
 
