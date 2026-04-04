@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.5.3] - 2026-04-03 — Command line arguments.
+
+* Add `-n` / `--new-window`: launch with no project and a blank file, skipping session/workspace/backup restore.
+* Add `-g` / `--goto <file:line[:col]>`: open a file at a specific line and optional column.
+* Add `-h` / `--help`: print usage and exit.
+* Support `file:line[:col]` syntax in bare path arguments (e.g. `lite-anvil src/main.rs:42:10`).
+* Invalid file paths and unknown flags are logged and skipped.
+
 ## [1.5.2] - 2026-04-02 — Project session fixes.
 
 * Fix restart after closing a project opening `/` as a project: now starts with no project and a blank sidebar.

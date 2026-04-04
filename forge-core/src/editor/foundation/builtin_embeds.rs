@@ -1,5 +1,37 @@
 use mlua::prelude::*;
 
+/// Parses `file:line[:col]` syntax, returning `(file_path, Option<line>, Option<col>)`.
+/// If the path contains no `:line` suffix, returns the original string with None.
+fn parse_file_location(input: &str) -> (String, Option<i64>, Option<i64>) {
+    // Try to match file:line:col or file:line from the end.
+    // Be careful with Windows paths like C:\foo (colon at index 1).
+    if let Some(last_colon) = input.rfind(':') {
+        if last_colon == 0 {
+            return (input.to_owned(), None, None);
+        }
+        let after = &input[last_colon + 1..];
+        if let Ok(num) = after.parse::<i64>() {
+            let before = &input[..last_colon];
+            // Check for file:line:col (two colons).
+            if let Some(second_colon) = before.rfind(':') {
+                if second_colon > 0 {
+                    let mid = &before[second_colon + 1..];
+                    if let Ok(line) = mid.parse::<i64>() {
+                        return (
+                            before[..second_colon].to_owned(),
+                            Some(line),
+                            Some(num),
+                        );
+                    }
+                }
+            }
+            // file:line (one colon with a number).
+            return (before.to_owned(), Some(num), None);
+        }
+    }
+    (input.to_owned(), None, None)
+}
+
 /// Registers `core` as a native Rust preload, replacing `data/core/core.lua`.
 pub fn register_builtin_preloads(lua: &Lua) -> LuaResult<()> {
     let package: LuaTable = lua.globals().get("package")?;
@@ -1272,7 +1304,7 @@ fn register_init_fn(
             let restarted: LuaValue = lua.globals().get("RESTARTED")?;
             if restarted == LuaValue::Nil || restarted == LuaValue::Boolean(false) {
                 let args: LuaTable = lua.globals().get("ARGS")?;
-                let args_len = args.raw_len();
+                let args_len = args.raw_len() as i64;
                 let common: LuaTable = get_module(lua, "core.common")?;
                 let system_t: LuaTable = lua.globals().get("system")?;
                 let strip_fn: LuaFunction = core.get("_strip_trailing_slash")?;
@@ -1281,9 +1313,56 @@ fn register_init_fn(
                 let normalize_path: LuaFunction = common.get("normalize_path")?;
                 let get_file_info: LuaFunction = system_t.get("get_file_info")?;
 
-                for i in 2..=args_len {
+                let mut empty_mode = false;
+                let mut goto_next = false;
+                // Parallel table: file_abs -> {line, col} for -g/--goto.
+                let goto_positions = lua.create_table()?;
+
+                let mut i = 2i64;
+                while i <= args_len {
                     let arg: String = args.get(i)?;
-                    let arg_filename: String = strip_fn.call(arg.clone())?;
+                    i += 1;
+
+                    if arg == "-n" || arg == "--new-window" {
+                        project_dir = String::new();
+                        project_dir_explicit = true;
+                        empty_mode = true;
+                        continue;
+                    }
+                    if arg == "-h" || arg == "--help" {
+                        println!(
+                            "Usage: lite-anvil [options] [path...]\n\n\
+                             Options:\n  \
+                               -n, --new-window          Open with no project and a blank file\n  \
+                               -g, --goto <file:line[:col]>  Open file at line and optional column\n  \
+                               -h, --help                Show this help message\n\n\
+                             Arguments:\n  \
+                               <directory>               Open directory as project\n  \
+                               <file>                    Open file (supports file:line[:col] syntax)"
+                        );
+                        std::process::exit(0);
+                    }
+                    if arg == "-g" || arg == "--goto" {
+                        goto_next = true;
+                        continue;
+                    }
+                    if arg.starts_with('-') {
+                        if !arg.starts_with("-psn") {
+                            let log_quiet: LuaFunction = core.get("log_quiet")?;
+                            log_quiet.call::<()>((
+                                "Ignoring unknown command line argument: %s",
+                                arg,
+                            ))?;
+                        }
+                        continue;
+                    }
+
+                    // Parse file:line[:col] syntax (from -g or bare args).
+                    let (file_path_str, goto_line, goto_col) = parse_file_location(&arg);
+                    let use_goto = goto_next || goto_line.is_some();
+                    goto_next = false;
+
+                    let arg_filename: String = strip_fn.call(file_path_str.clone())?;
                     let info: LuaValue = get_file_info.call(arg_filename.clone())?;
                     let info_type: LuaValue = if let LuaValue::Table(ref t) = info {
                         t.get("type")?
@@ -1293,7 +1372,7 @@ fn register_init_fn(
                     if info_type == LuaValue::String(lua.create_string("dir")?) {
                         project_dir = arg_filename;
                         project_dir_explicit = true;
-                    } else if !arg.starts_with("-psn") {
+                    } else if info_type == LuaValue::String(lua.create_string("file")?) {
                         let is_absolute: bool = is_abs.call(arg_filename.clone())?;
                         let file_abs: String = if is_absolute {
                             arg_filename
@@ -1304,13 +1383,28 @@ fn register_init_fn(
                         };
                         let fl = files_list.raw_len() + 1;
                         files_list.set(fl, file_abs.clone())?;
-                        // Extract directory from file path.
+                        if use_goto {
+                            let pos = lua.create_table()?;
+                            pos.set("line", goto_line.unwrap_or(1))?;
+                            pos.set("col", goto_col.unwrap_or(1))?;
+                            goto_positions.set(file_abs.as_str(), pos)?;
+                        }
                         if let Some(pos) = file_abs.rfind(['/', '\\']) {
                             project_dir = file_abs[..pos].to_string();
                         }
                         project_dir_explicit = true;
+                    } else {
+                        let log_quiet: LuaFunction = core.get("log_quiet")?;
+                        log_quiet.call::<()>((
+                            "Ignoring invalid command line path: %s",
+                            arg,
+                        ))?;
                     }
                 }
+                if empty_mode {
+                    core.set("_empty_mode", true)?;
+                }
+                core.set("_goto_positions", goto_positions)?;
             }
 
             // Ensure user directory exists.
@@ -1579,13 +1673,21 @@ fn register_init_fn(
                 close_all.call::<()>(root_view_close.clone())?;
             }
 
+            let goto_pos: LuaTable = core.get("_goto_positions")?;
             for file_val in files_list.sequence_values::<String>() {
                 let filename = file_val?;
                 let root_view2: LuaTable = core.get("root_view")?;
                 let open_doc_fn: LuaFunction = core.get("open_doc")?;
-                let doc: LuaValue = open_doc_fn.call(filename)?;
+                let doc: LuaTable = open_doc_fn.call(filename.clone())?;
                 let rv_open: LuaFunction = root_view2.get("open_doc")?;
-                rv_open.call::<()>((root_view2, doc))?;
+                let dv: LuaTable = rv_open.call((root_view2, doc.clone()))?;
+                // Apply goto position if specified via -g or file:line[:col].
+                if let Ok(LuaValue::Table(pos)) = goto_pos.get::<LuaValue>(filename.as_str()) {
+                    let line: i64 = pos.get("line").unwrap_or(1);
+                    let col: i64 = pos.get("col").unwrap_or(1);
+                    doc.call_method::<()>("set_selection", (line, col))?;
+                    dv.call_method::<()>("scroll_to_line", (line, true, true))?;
+                }
             }
 
             if files_list.raw_len() == 0 {
@@ -1623,27 +1725,34 @@ fn register_init_fn(
                     let root_view: LuaTable = core.get("root_view")?;
                     let get_primary: LuaFunction = root_view.get("get_primary_node")?;
                     let primary: LuaTable = get_primary.call(root_view.clone())?;
+                    let is_empty_mode: bool = core
+                        .get::<Option<bool>>("_empty_mode")?
+                        .unwrap_or(false);
                     core.set("skip_session_restore_open_files", false)?;
 
-                    let hooks: LuaValue = core.get("session_load_hooks")?;
-                    if let LuaValue::Table(hooks_t) = hooks {
-                        let session: LuaTable = core.get("session")?;
-                        let plugin_data: LuaValue = session.get("plugin_data")?;
-                        let pcall: LuaFunction = lua.globals().get("pcall")?;
-                        for pair in hooks_t.pairs::<LuaValue, LuaFunction>() {
-                            let (name, hook) = pair?;
-                            let data = if let LuaValue::Table(ref pd) = plugin_data {
-                                pd.get(name)?
-                            } else {
-                                LuaValue::Nil
-                            };
-                            pcall.call::<()>((hook, data, primary.clone()))?;
+                    // In --empty mode, skip workspace/session load hooks entirely.
+                    if !is_empty_mode {
+                        let hooks: LuaValue = core.get("session_load_hooks")?;
+                        if let LuaValue::Table(hooks_t) = hooks {
+                            let session: LuaTable = core.get("session")?;
+                            let plugin_data: LuaValue = session.get("plugin_data")?;
+                            let pcall: LuaFunction = lua.globals().get("pcall")?;
+                            for pair in hooks_t.pairs::<LuaValue, LuaFunction>() {
+                                let (name, hook) = pair?;
+                                let data = if let LuaValue::Table(ref pd) = plugin_data {
+                                    pd.get(name)?
+                                } else {
+                                    LuaValue::Nil
+                                };
+                                pcall.call::<()>((hook, data, primary.clone()))?;
+                            }
                         }
                     }
 
-                    let skip: bool = core
-                        .get::<LuaValue>("skip_session_restore_open_files")?
-                        .eq(&LuaValue::Boolean(true));
+                    let skip: bool = is_empty_mode
+                        || core
+                            .get::<LuaValue>("skip_session_restore_open_files")?
+                            .eq(&LuaValue::Boolean(true));
                     if !skip {
                         let session: LuaTable = core.get("session")?;
                         let open_files: LuaValue = session.get("open_files")?;
@@ -1765,9 +1874,9 @@ fn register_init_fn(
                         }
                     }
 
-                    // Restore backed-up dirty/unsaved docs.
+                    // Restore backed-up dirty/unsaved docs (skip in --empty mode).
                     let mut last_backup_view: Option<LuaTable> = None;
-                    {
+                    if !is_empty_mode {
                         let userdir: String = lua.globals().get("USERDIR")?;
                         let manifest_path = std::path::PathBuf::from(&userdir)
                             .join("backups")
