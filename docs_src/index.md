@@ -1,13 +1,13 @@
 ---
-title: Lite-Anvil - Lightweight Code Editor Built in Rust
-description: Fast, lightweight code editor built in Rust with SDL3. Built-in LSP, embedded terminal, Git integration, and 50+ syntax grammars.
+title: Lite-Anvil - Code Editor Built in Rust
+description: Fast code editor built in Rust with SDL3. Built-in LSP, embedded terminal, Git integration, and 50+ syntax grammars.
 ---
 
 <div class="hero" markdown>
 
 # Lite-Anvil
 
-<p class="tagline">A fast and lightweight code editor built in Rust with SDL3.</p>
+<p class="tagline">A fast code editor built in Rust with SDL3.</p>
 
 <div class="button-row">
   <a href="installation/" class="primary">Get Started</a>
@@ -56,7 +56,7 @@ Rust, Go, Python, TypeScript, C/C++, Java, Kotlin, Scala, F#, C#, Haskell, Zig, 
 
 <div class="feature-card" markdown>
 
-### Fast & Lightweight
+### Fast
 
 Pure Rust. Sub-second startup. Low memory footprint. Ring-buffer terminal scrollback, glyph cache with ASCII pre-warming, merged undo entries.
 

@@ -343,14 +343,59 @@ pub fn capitalize_first(s: &str) -> String {
 
 /// Format a command name for display.
 pub fn prettify_name(name: &str) -> String {
-    // Strip namespace prefix (core:, doc:, root:, etc).
-    let stripped = name.split_once(':').map(|(_, rest)| rest).unwrap_or(name);
-    stripped
+    // Strip namespace prefix (core:, doc:, root:, etc) for the body.
+    let (ns, rest) = match name.split_once(':') {
+        Some((ns, rest)) => (ns, rest),
+        None => ("", name),
+    };
+    let body = rest
         .replace('-', " ")
         .split_whitespace()
         .map(capitalize_first)
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    // Keep the "Git" namespace visible so palette entries read like
+    // "Git Pull" / "Git Commit" instead of bare verbs.
+    if ns == "git" {
+        return format!("Git {body}");
+    }
+    // The scale: commands operate on font size — bare "Increase" / "Decrease"
+    // is too ambiguous in the palette.
+    if ns == "scale" {
+        return format!("{body} Font Size");
+    }
+    body
+}
+
+/// Whether a command is meaningful in the command palette. Filters out the
+/// raw key-input commands (Backspace, Return, cursor movement, ...) and the
+/// internal namespaces that exist only to receive routed key events.
+pub fn is_palette_command(cmd: &str) -> bool {
+    if cmd.starts_with("command:")
+        || cmd.starts_with("context-menu:")
+        || cmd.starts_with("dialog:")
+    {
+        return false;
+    }
+    if cmd.starts_with("doc:move-to-")
+        || cmd.starts_with("doc:select-to-")
+        || cmd.starts_with("doc:create-cursor-")
+    {
+        return false;
+    }
+    !matches!(
+        cmd,
+        "doc:backspace"
+            | "doc:delete"
+            | "doc:delete-to-previous-word-start"
+            | "doc:delete-to-next-word-end"
+            | "doc:newline"
+            | "doc:newline-above"
+            | "doc:newline-below"
+            | "doc:indent"
+            | "doc:unindent"
+            | "doc:select-none"
+    )
 }
 
 #[cfg(test)]

@@ -331,7 +331,13 @@ pub fn load_syntax_assets(datadir: &str) -> Vec<SyntaxDefinition> {
         };
 
         let payload = decoded.get("syntax").unwrap_or(&decoded);
-        let gv = if let (Some(graph), Some(root)) = (payload.get("graph"), payload.get("root")) {
+        // Some grammars nest `root` inside `graph` (`graph.root`); others put
+        // it as a sibling (`graph` + `root`). Accept either layout.
+        let graph = payload.get("graph");
+        let root = payload
+            .get("root")
+            .or_else(|| graph.and_then(|g| g.get("root")));
+        let gv = if let (Some(graph), Some(root)) = (graph, root) {
             let Some(nodes) = graph.get("nodes").and_then(|n| n.as_object()) else {
                 continue;
             };

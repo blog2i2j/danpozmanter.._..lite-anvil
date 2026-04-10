@@ -185,6 +185,40 @@ impl AutoreloadState {
     }
 }
 
+/// Comment style chosen for the toggle-line-comments command.
+#[derive(Debug, Clone)]
+enum CommentMarker {
+    /// `prefix` is prepended after the indent (e.g. `//` for Rust, `#` for Python).
+    Line(String),
+    /// `(open, close)` wraps each line individually (e.g. `<!-- ... -->` for HTML).
+    /// Used for languages that have no line-comment form.
+    Block(String, String),
+}
+
+/// Resolve the comment marker for a document based on its filename's matched
+/// syntax. Returns `None` when no syntax matches or when the language has
+/// neither a line- nor a block-comment form — callers must treat that as
+/// "no-op" rather than substituting a default.
+fn comment_marker_for_path(
+    path: &str,
+    syntaxes: &[SyntaxDefinition],
+) -> Option<CommentMarker> {
+    if path.is_empty() {
+        return None;
+    }
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path);
+    let def = match_syntax_for_file(filename, syntaxes)?;
+    if let Some(line) = &def.comment {
+        return Some(CommentMarker::Line(line.clone()));
+    }
+    def.block_comment
+        .as_ref()
+        .map(|(o, c)| CommentMarker::Block(o.clone(), c.clone()))
+}
+
 /// Match a syntax definition to a filename by checking `files` patterns.
 fn match_syntax_for_file<'a>(
     filename: &str,
@@ -513,6 +547,15 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     let mut replace_active = false;
     let mut replace_query = String::new();
     let mut find_focus_on_replace = false;
+    let mut find_use_regex = false;
+    let mut find_whole_word = false;
+    let mut find_case_insensitive = false;
+    // All current matches as (line, col, end_col) with 1-based columns.
+    let mut find_matches: Vec<(usize, usize, usize)> = Vec::new();
+    let mut find_current: Option<usize> = None;
+    // Anchor (line, col) captured when find is opened — live-search re-centers here
+    // so typing a longer query doesn't skip past matches the user hasn't seen yet.
+    let mut find_anchor: (usize, usize) = (1, 1);
 
     // Nag view state.
     let mut nag_active = false;
@@ -529,10 +572,14 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     // Build command list for palette from keymap.
     let all_commands: Vec<(String, String)> = {
         let mut cmds = Vec::new();
-        // Extract unique command names from keymap bindings.
+        // Extract unique command names from keymap bindings, skipping the
+        // raw key-input commands that aren't meaningful in the palette.
         let mut seen = std::collections::HashSet::new();
         for (stroke, cmd_names) in keymap.iter_bindings() {
             for cmd in cmd_names {
+                if !crate::editor::keymap::is_palette_command(cmd) {
+                    continue;
+                }
                 if seen.insert(cmd.clone()) {
                     let display = crate::editor::keymap::prettify_name(cmd);
                     cmds.push((cmd.clone(), format!("{display}  ({stroke})")));
@@ -1066,6 +1113,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     replace_active = false;
                     find_focus_on_replace = false;
                     find_query.clear();
+                    find_matches.clear();
+                    find_current = None;
+                    if let Some(doc) = docs.get(active_tab) {
+                        find_anchor = doc_cursor(&doc.view);
+                    }
                 }
                 "core:find-replace" | "find-replace:replace" => {
                     find_active = true;
@@ -1073,6 +1125,45 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     find_focus_on_replace = false;
                     find_query.clear();
                     replace_query.clear();
+                    find_matches.clear();
+                    find_current = None;
+                    if let Some(doc) = docs.get(active_tab) {
+                        find_anchor = doc_cursor(&doc.view);
+                    }
+                }
+                "find-replace:repeat-find" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        let dv = &mut doc.view;
+                        if find_matches.is_empty() && !find_query.is_empty() {
+                            find_matches = compute_find_matches(
+                                dv, &find_query, find_use_regex, find_whole_word, find_case_insensitive,
+                            );
+                        }
+                        if !find_matches.is_empty() {
+                            let (cl, cc) = doc_cursor(dv);
+                            let idx = find_match_at_or_after(&find_matches, cl, cc)
+                                .unwrap_or(0);
+                            find_current = Some(idx);
+                            select_find_match(dv, find_matches[idx]);
+                        }
+                    }
+                }
+                "find-replace:previous-find" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        let dv = &mut doc.view;
+                        if find_matches.is_empty() && !find_query.is_empty() {
+                            find_matches = compute_find_matches(
+                                dv, &find_query, find_use_regex, find_whole_word, find_case_insensitive,
+                            );
+                        }
+                        if !find_matches.is_empty() {
+                            let (al, ac) = doc_anchor(dv);
+                            let idx = find_match_before(&find_matches, al, ac)
+                                .unwrap_or(find_matches.len() - 1);
+                            find_current = Some(idx);
+                            select_find_match(dv, find_matches[idx]);
+                        }
+                    }
                 }
                 "doc:go-to-line" => {
                     cmdview_active = true;
@@ -1329,7 +1420,15 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                 _ => {
                     // Default: forward to handle_doc_command and bump LSP edit tracking.
                     if let Some(doc) = docs.get_mut(active_tab) {
-                        handle_doc_command(&mut doc.view, &cmd, &style, &doc.indent_type, doc.indent_size);
+                        let marker = comment_marker_for_path(&doc.path, &syntax_defs);
+                        handle_doc_command(
+                            &mut doc.view,
+                            &cmd,
+                            &style,
+                            &doc.indent_type,
+                            doc.indent_size,
+                            marker.as_ref(),
+                        );
                     }
                     let is_edit_cmd = matches!(cmd.as_str(),
                         "doc:newline" | "doc:newline-below" | "doc:newline-above"
@@ -1471,12 +1570,14 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                             let cmd = cmd.clone();
                                             context_menu.hide();
                                             if let Some(doc) = docs.get_mut(active_tab) {
+                                                let marker = comment_marker_for_path(&doc.path, &syntax_defs);
                                                 handle_doc_command(
                                                     &mut doc.view,
                                                     &cmd,
                                                     &style,
                                                     &doc.indent_type,
                                                     doc.indent_size,
+                                                    marker.as_ref(),
                                                 );
                                             }
                                         } else {
@@ -2124,7 +2225,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             }
                             "backspace" => { palette_query.pop(); }
                             "up" => { palette_selected = palette_selected.saturating_sub(1); }
-                            "down" => { palette_selected += 1; }
+                            "down" => {
+                                if palette_selected + 1 < palette_results.len() {
+                                    palette_selected += 1;
+                                }
+                            }
                             _ => { continue; }
                         }
                         // Filter commands with fuzzy matching.
@@ -2136,6 +2241,32 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
 
                     // Find bar intercepts keys when active.
                     if find_active {
+                        // Alt-chorded toggles apply regardless of which input has focus.
+                        if mods.alt && !mods.ctrl {
+                            let toggled = match key.as_str() {
+                                "r" => { find_use_regex = !find_use_regex; true }
+                                "w" => { find_whole_word = !find_whole_word; true }
+                                "i" => { find_case_insensitive = !find_case_insensitive; true }
+                                _ => false,
+                            };
+                            if toggled {
+                                if let Some(doc) = docs.get_mut(active_tab) {
+                                    let dv = &mut doc.view;
+                                    find_matches = compute_find_matches(
+                                        dv, &find_query, find_use_regex,
+                                        find_whole_word, find_case_insensitive,
+                                    );
+                                    find_current = find_match_at_or_after(
+                                        &find_matches, find_anchor.0, find_anchor.1,
+                                    );
+                                    if let Some(i) = find_current {
+                                        select_find_match(dv, find_matches[i]);
+                                    }
+                                }
+                                redraw = true;
+                                continue;
+                            }
+                        }
                         match key.as_str() {
                             "escape" => {
                                 find_active = false;
@@ -2149,20 +2280,64 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 redraw = true;
                                 continue;
                             }
+                            "f3" => {
+                                if let Some(doc) = docs.get_mut(active_tab) {
+                                    let dv = &mut doc.view;
+                                    if !find_matches.is_empty() {
+                                        let idx = if mods.shift {
+                                            let (al, ac) = doc_anchor(dv);
+                                            find_match_before(&find_matches, al, ac)
+                                                .unwrap_or(find_matches.len() - 1)
+                                        } else {
+                                            let (cl, cc) = doc_cursor(dv);
+                                            find_match_at_or_after(&find_matches, cl, cc)
+                                                .unwrap_or(0)
+                                        };
+                                        find_current = Some(idx);
+                                        select_find_match(dv, find_matches[idx]);
+                                    }
+                                }
+                                redraw = true;
+                                continue;
+                            }
                             "return" | "keypad enter" if mods.ctrl && replace_active => {
-                                // Replace current match and find next.
                                 if let Some(doc) = docs.get_mut(active_tab) {
                                     let dv = &mut doc.view;
                                     replace_current_match(dv, &find_query, &replace_query);
-                                    find_next_in_doc(dv, &find_query);
+                                    find_matches = compute_find_matches(
+                                        dv, &find_query, find_use_regex,
+                                        find_whole_word, find_case_insensitive,
+                                    );
+                                    if !find_matches.is_empty() {
+                                        let (cl, cc) = doc_cursor(dv);
+                                        let idx = find_match_at_or_after(&find_matches, cl, cc)
+                                            .unwrap_or(0);
+                                        find_current = Some(idx);
+                                        select_find_match(dv, find_matches[idx]);
+                                    } else {
+                                        find_current = None;
+                                    }
                                 }
                                 redraw = true;
                                 continue;
                             }
                             "return" | "keypad enter" => {
+                                // Shift+Enter = previous, Enter = next.
                                 if let Some(doc) = docs.get_mut(active_tab) {
                                     let dv = &mut doc.view;
-                                    find_next_in_doc(dv, &find_query);
+                                    if !find_matches.is_empty() {
+                                        let idx = if mods.shift {
+                                            let (al, ac) = doc_anchor(dv);
+                                            find_match_before(&find_matches, al, ac)
+                                                .unwrap_or(find_matches.len() - 1)
+                                        } else {
+                                            let (cl, cc) = doc_cursor(dv);
+                                            find_match_at_or_after(&find_matches, cl, cc)
+                                                .unwrap_or(0)
+                                        };
+                                        find_current = Some(idx);
+                                        select_find_match(dv, find_matches[idx]);
+                                    }
                                 }
                                 redraw = true;
                                 continue;
@@ -2172,6 +2347,19 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     replace_query.pop();
                                 } else {
                                     find_query.pop();
+                                    if let Some(doc) = docs.get_mut(active_tab) {
+                                        let dv = &mut doc.view;
+                                        find_matches = compute_find_matches(
+                                            dv, &find_query, find_use_regex,
+                                            find_whole_word, find_case_insensitive,
+                                        );
+                                        find_current = find_match_at_or_after(
+                                            &find_matches, find_anchor.0, find_anchor.1,
+                                        );
+                                        if let Some(i) = find_current {
+                                            select_find_match(dv, find_matches[i]);
+                                        }
+                                    }
                                 }
                                 redraw = true;
                                 continue;
@@ -2329,6 +2517,19 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             replace_query.push_str(text);
                         } else {
                             find_query.push_str(text);
+                            if let Some(doc) = docs.get_mut(active_tab) {
+                                let dv = &mut doc.view;
+                                find_matches = compute_find_matches(
+                                    dv, &find_query, find_use_regex,
+                                    find_whole_word, find_case_insensitive,
+                                );
+                                find_current = find_match_at_or_after(
+                                    &find_matches, find_anchor.0, find_anchor.1,
+                                );
+                                if let Some(i) = find_current {
+                                    select_find_match(dv, find_matches[i]);
+                                }
+                            }
                         }
                         redraw = true;
                         continue;
@@ -2576,7 +2777,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     let cmd = cmd.clone();
                                     context_menu.hide();
                                     if let Some(doc) = docs.get_mut(active_tab) {
-                                        handle_doc_command(&mut doc.view, &cmd, &style, &doc.indent_type, doc.indent_size);
+                                        let marker = comment_marker_for_path(&doc.path, &syntax_defs);
+                                        handle_doc_command(
+                                            &mut doc.view, &cmd, &style,
+                                            &doc.indent_type, doc.indent_size, marker.as_ref(),
+                                        );
                                     }
                                     redraw = true;
                                     continue;
@@ -4397,34 +4602,71 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
 
                 status_view.draw_native(&mut draw_ctx, &style);
 
-                // Draw find bar (and optionally replace bar).
+                // Draw find bar (and optionally replace bar) at the top of the editor,
+                // just below the tab and breadcrumb bars, so transient UX is consistent.
+                // The bar spans only the active editor's column (not the sidebar/minimap)
+                // so the user's eye stays anchored to the document being searched.
                 if find_active {
                     crate::editor::app_state::clip_init(width, height);
                     use crate::editor::view::DrawContext as _;
-                    let bar_h = style.font_height + style.padding_y * 2.0;
-                    let total_bars = if replace_active { 2.0 } else { 1.0 };
-                    let bar_y =
-                        height - bar_h * total_bars - (style.font_height + style.padding_y * 2.0);
+                    let row_h = style.font_height + style.padding_y * 2.0;
+                    let total_rows = if replace_active { 3.0 } else { 2.0 };
+                    let bar_x = sidebar_w;
+                    let bar_w = (width - sidebar_w - minimap_w).max(0.0);
+                    let bar_y = tab_h + breadcrumb_h;
+                    let bar_total_h = row_h * total_rows;
 
-                    draw_ctx.draw_rect(0.0, bar_y, width, bar_h * total_bars, style.background3.to_array());
-                    draw_ctx.draw_rect(0.0, bar_y, width, style.divider_size, style.divider.to_array());
+                    draw_ctx.draw_rect(bar_x, bar_y, bar_w, bar_total_h, style.background3.to_array());
+                    draw_ctx.draw_rect(bar_x, bar_y, bar_w, style.divider_size, style.divider.to_array());
+                    draw_ctx.draw_rect(
+                        bar_x,
+                        bar_y + bar_total_h - style.divider_size,
+                        bar_w,
+                        style.divider_size,
+                        style.divider.to_array(),
+                    );
 
+                    // Row 1: Find input + count indicator on the right.
                     let find_cursor = if !find_focus_on_replace { "_" } else { "" };
                     let find_label = format!("Find: {find_query}{find_cursor}");
                     draw_ctx.draw_text(
                         style.font,
                         &find_label,
-                        style.padding_x,
+                        bar_x + style.padding_x,
                         bar_y + style.padding_y,
                         style.text.to_array(),
                     );
+                    let count_label = if find_query.is_empty() {
+                        String::new()
+                    } else if find_matches.is_empty() {
+                        "0/0".to_string()
+                    } else {
+                        let cur = find_current.map(|i| i + 1).unwrap_or(0);
+                        format!("{cur}/{}", find_matches.len())
+                    };
+                    if !count_label.is_empty() {
+                        let cw = draw_ctx.font_width(style.font, &count_label);
+                        draw_ctx.draw_text(
+                            style.font,
+                            &count_label,
+                            bar_x + bar_w - cw - style.padding_x,
+                            bar_y + style.padding_y,
+                            if find_matches.is_empty() {
+                                style.error.to_array()
+                            } else {
+                                style.dim.to_array()
+                            },
+                        );
+                    }
 
+                    // Optional Row 2: Replace input.
+                    let mut next_row_y = bar_y + row_h;
                     if replace_active {
-                        let replace_y = bar_y + bar_h;
+                        let replace_y = next_row_y;
                         draw_ctx.draw_rect(
-                            0.0,
+                            bar_x,
                             replace_y,
-                            width,
+                            bar_w,
                             style.divider_size,
                             style.divider.to_array(),
                         );
@@ -4434,11 +4676,36 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         draw_ctx.draw_text(
                             style.font,
                             &repl_label,
-                            style.padding_x,
+                            bar_x + style.padding_x,
                             replace_y + style.padding_y,
                             style.text.to_array(),
                         );
+                        next_row_y += row_h;
                     }
+
+                    // Final row: keybinding hints with on/off indicators for the toggles.
+                    let hint_y = next_row_y;
+                    draw_ctx.draw_rect(
+                        bar_x,
+                        hint_y,
+                        bar_w,
+                        style.divider_size,
+                        style.divider.to_array(),
+                    );
+                    let mark = |on: bool| if on { "[x]" } else { "[ ]" };
+                    let hint = format!(
+                        "Alt+R Regex {}  Alt+W Word {}  Alt+I Case {}   F3 Next  Shift+F3 Prev  Esc Close",
+                        mark(find_use_regex),
+                        mark(find_whole_word),
+                        mark(find_case_insensitive),
+                    );
+                    draw_ctx.draw_text(
+                        style.font,
+                        &hint,
+                        bar_x + style.padding_x,
+                        hint_y + style.padding_y,
+                        style.dim.to_array(),
+                    );
                 }
 
                 // Draw nag bar if active.
@@ -4546,11 +4813,23 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         style.divider.to_array(),
                     );
 
-                    for (i, (_, display)) in
-                        palette_results.iter().enumerate().take(max_visible)
+                    // Scroll the visible window so palette_selected stays in view.
+                    let scroll_off = if palette_selected >= max_visible {
+                        palette_selected - max_visible + 1
+                    } else {
+                        0
+                    };
+                    for (i, (_, display)) in palette_results
+                        .iter()
+                        .enumerate()
+                        .skip(scroll_off)
+                        .take(max_visible)
                     {
-                        let ry =
-                            input_y + line_h + style.divider_size + i as f64 * line_h;
+                        let display_idx = i - scroll_off;
+                        let ry = input_y
+                            + line_h
+                            + style.divider_size
+                            + display_idx as f64 * line_h;
                         if i == palette_selected {
                             draw_ctx.draw_rect(
                                 pal_x,
@@ -5032,55 +5311,176 @@ fn fuzzy_filter_commands(
         .collect()
 }
 
-/// Find the next occurrence of query in the document, starting from cursor.
+/// Escape a literal string for safe inclusion in a PCRE2 pattern.
 #[cfg(feature = "sdl")]
-fn find_next_in_doc(dv: &mut DocView, query: &str) {
-    if query.is_empty() { return; }
-    let Some(buf_id) = dv.buffer_id else { return };
-    let _ = buffer::with_buffer_mut(buf_id, |b| {
-        let start_line = *b.selections.get(2).unwrap_or(&1);
-        let start_col = *b.selections.get(3).unwrap_or(&1);
-        let line_count = b.lines.len();
+fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if "\\.+*?()|[]{}^$".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
 
-        // Search from cursor position forward, wrapping around.
-        for offset in 0..line_count {
-            let ln = ((start_line - 1 + offset) % line_count) + 1;
-            let text = b.lines[ln - 1].trim_end_matches('\n');
-            let search_from = if ln == start_line {
-                
-                text.char_indices()
-                    .nth(start_col.saturating_sub(1))
-                    .map(|(i, _)| i)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            if let Some(byte_pos) = text[search_from..].find(query) {
-                let abs_byte = search_from + byte_pos;
-                let col = text[..abs_byte].chars().count() + 1;
-                let end_col = col + query.chars().count();
-                b.selections = vec![ln, col, ln, end_col];
-                return Ok(());
+/// Compile the find pattern based on the current toggle state.
+#[cfg(feature = "sdl")]
+fn build_find_regex(
+    query: &str,
+    use_regex: bool,
+    whole_word: bool,
+    case_insensitive: bool,
+) -> Option<crate::editor::regex::NativeRegex> {
+    if query.is_empty() {
+        return None;
+    }
+    let mut pat = if use_regex {
+        query.to_string()
+    } else {
+        regex_escape(query)
+    };
+    if whole_word {
+        pat = format!(r"\b(?:{pat})\b");
+    }
+    let flags = crate::editor::regex::CompileFlags {
+        caseless: case_insensitive,
+        ..Default::default()
+    };
+    crate::editor::regex::NativeRegex::compile(&pat, flags).ok()
+}
+
+/// Scan the document and return every match as (line, col, end_col). All values
+/// are 1-based. Multi-line matches are not supported — each line is searched
+/// independently, matching the single-line cursor model.
+#[cfg(feature = "sdl")]
+fn compute_find_matches(
+    dv: &DocView,
+    query: &str,
+    use_regex: bool,
+    whole_word: bool,
+    case_insensitive: bool,
+) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    let Some(re) = build_find_regex(query, use_regex, whole_word, case_insensitive) else {
+        return out;
+    };
+    let Some(buf_id) = dv.buffer_id else {
+        return out;
+    };
+    let _ = buffer::with_buffer(buf_id, |b| {
+        for (i, raw) in b.lines.iter().enumerate() {
+            let line = raw.trim_end_matches('\n');
+            let bytes = line.as_bytes();
+            for m in re.find_iter(bytes, 0) {
+                let Ok(m) = m else { break };
+                let (s, e) = m.span();
+                if e <= s {
+                    continue;
+                }
+                let col = line[..s].chars().count() + 1;
+                let end_col = col + line[s..e].chars().count();
+                out.push((i + 1, col, end_col));
             }
         }
         Ok(())
     });
-    // Auto-scroll to found position.
-    let _ = buffer::with_buffer(dv.buffer_id.unwrap(), |b| {
-        let cursor_line = *b.selections.get(2).unwrap_or(&1);
-        let line_h = 20.0; // approximate
-        let cursor_y = (cursor_line as f64 - 1.0) * line_h;
-        let view_h = dv.rect().h;
-        if cursor_y < dv.scroll_y || cursor_y + line_h > dv.scroll_y + view_h {
-            let new_scroll = (cursor_y - view_h / 2.0).max(0.0);
-            dv.scroll_y = new_scroll;
-            dv.target_scroll_y = new_scroll;
-        }
-        Ok(())
-    });
+    out
 }
 
-/// Replace the current selection (match) with replacement text.
+/// Index of the first match at or after (line, col). Wraps to 0 if nothing
+/// later exists. Returns None only for an empty match list.
+#[cfg(feature = "sdl")]
+fn find_match_at_or_after(
+    matches: &[(usize, usize, usize)],
+    line: usize,
+    col: usize,
+) -> Option<usize> {
+    if matches.is_empty() {
+        return None;
+    }
+    for (i, m) in matches.iter().enumerate() {
+        if m.0 > line || (m.0 == line && m.1 >= col) {
+            return Some(i);
+        }
+    }
+    Some(0)
+}
+
+/// Index of the last match strictly before (line, col). Wraps to the final
+/// match if nothing earlier exists. Returns None only for an empty match list.
+#[cfg(feature = "sdl")]
+fn find_match_before(
+    matches: &[(usize, usize, usize)],
+    line: usize,
+    col: usize,
+) -> Option<usize> {
+    if matches.is_empty() {
+        return None;
+    }
+    let mut last = None;
+    for (i, m) in matches.iter().enumerate() {
+        if m.0 < line || (m.0 == line && m.1 < col) {
+            last = Some(i);
+        } else {
+            break;
+        }
+    }
+    Some(last.unwrap_or(matches.len() - 1))
+}
+
+/// Move the caret to the given match and scroll the view so it is visible.
+#[cfg(feature = "sdl")]
+fn select_find_match(dv: &mut DocView, m: (usize, usize, usize)) {
+    let (line, col, end_col) = m;
+    let Some(buf_id) = dv.buffer_id else { return };
+    let _ = buffer::with_buffer_mut(buf_id, |b| {
+        b.selections = vec![line, col, line, end_col];
+        Ok(())
+    });
+    let line_h = 20.0;
+    let cursor_y = (line as f64 - 1.0) * line_h;
+    let view_h = dv.rect().h;
+    if cursor_y < dv.scroll_y || cursor_y + line_h > dv.scroll_y + view_h {
+        let new_scroll = (cursor_y - view_h / 2.0).max(0.0);
+        dv.scroll_y = new_scroll;
+        dv.target_scroll_y = new_scroll;
+    }
+}
+
+/// Current caret as (line, col) using the "cursor end" of the selection.
+#[cfg(feature = "sdl")]
+fn doc_cursor(dv: &DocView) -> (usize, usize) {
+    dv.buffer_id
+        .and_then(|id| {
+            buffer::with_buffer(id, |b| {
+                let line = *b.selections.get(2).unwrap_or(&1);
+                let col = *b.selections.get(3).unwrap_or(&1);
+                Ok((line, col))
+            })
+            .ok()
+        })
+        .unwrap_or((1, 1))
+}
+
+/// Selection anchor as (line, col) — the "other end" from the caret.
+#[cfg(feature = "sdl")]
+fn doc_anchor(dv: &DocView) -> (usize, usize) {
+    dv.buffer_id
+        .and_then(|id| {
+            buffer::with_buffer(id, |b| {
+                let line = *b.selections.first().unwrap_or(&1);
+                let col = *b.selections.get(1).unwrap_or(&1);
+                Ok((line, col))
+            })
+            .ok()
+        })
+        .unwrap_or((1, 1))
+}
+
+/// Replace the current selection (match) with replacement text. Caller must
+/// ensure the selection is the active find match — we trust the find state
+/// machine to keep the caret aligned with `find_matches[find_current]`.
 #[cfg(feature = "sdl")]
 fn replace_current_match(dv: &mut DocView, find_query: &str, replacement: &str) {
     if find_query.is_empty() {
@@ -5088,8 +5488,7 @@ fn replace_current_match(dv: &mut DocView, find_query: &str, replacement: &str) 
     }
     let Some(buf_id) = dv.buffer_id else { return };
     let _ = buffer::with_buffer_mut(buf_id, |b| {
-        let selected = buffer::get_selected_text(b);
-        if selected != find_query {
+        if buffer::get_selected_text(b).is_empty() {
             return Ok(());
         }
         buffer::push_undo(b);
@@ -5128,6 +5527,7 @@ fn handle_doc_command(
     style: &StyleContext,
     indent_type: &str,
     indent_size: usize,
+    comment_marker: Option<&CommentMarker>,
 ) {
     let Some(buf_id) = dv.buffer_id else { return };
     let line_h = style.code_font_height * 1.2;
@@ -5578,39 +5978,141 @@ fn handle_doc_command(
                 }
             }
             "doc:toggle-line-comments" => {
+                let Some(marker) = comment_marker else {
+                    // Language has no defined comment style; do nothing
+                    // rather than guessing and corrupting the file.
+                    return Ok(());
+                };
                 buffer::push_undo(b);
-                let comment = "// ";
                 let (start, end) = if anchor_line != cursor_line {
-                    let s = anchor_line.min(cursor_line);
-                    let e = anchor_line.max(cursor_line);
-                    (s, e)
+                    (anchor_line.min(cursor_line), anchor_line.max(cursor_line))
                 } else {
                     (line, line)
                 };
-                // Check if all lines are already commented.
-                let all_commented = (start..=end).all(|i| {
-                    b.lines.get(i - 1).map(|l| l.trim_start().starts_with(comment.trim())).unwrap_or(false)
-                });
-                let _ = comment;
-                // Use "//" for most languages, "#" for python/shell/toml/yaml, "--" for lua/sql
-                // We don't have access to file ext here directly, so use a simple heuristic.
-                // The caller should ideally pass the ext. For now use "//" as default.
-                if all_commented {
-                    for i in start..=end {
-                        if let Some(l) = b.lines.get_mut(i - 1) {
-                            if let Some(pos) = l.find("// ") {
-                                l.replace_range(pos..pos + 3, "");
-                            } else if let Some(pos) = l.find("//") {
-                                l.replace_range(pos..pos + 2, "");
+                match marker {
+                    CommentMarker::Line(prefix) => {
+                        let prefix_space = format!("{prefix} ");
+                        // All non-blank lines must already start with the
+                        // prefix for the toggle to remove rather than add.
+                        let all_commented = (start..=end)
+                            .filter_map(|i| b.lines.get(i - 1))
+                            .filter(|l| !l.trim().is_empty())
+                            .all(|l| l.trim_start().starts_with(prefix.as_str()));
+                        if all_commented {
+                            for i in start..=end {
+                                if let Some(l) = b.lines.get_mut(i - 1) {
+                                    if let Some(pos) = l.find(&prefix_space) {
+                                        l.replace_range(pos..pos + prefix_space.len(), "");
+                                    } else if let Some(pos) = l.find(prefix.as_str()) {
+                                        l.replace_range(pos..pos + prefix.len(), "");
+                                    }
+                                }
+                            }
+                        } else {
+                            for i in start..=end {
+                                if let Some(l) = b.lines.get_mut(i - 1) {
+                                    if l.trim().is_empty() {
+                                        continue;
+                                    }
+                                    let indent_len = l
+                                        .chars()
+                                        .take_while(|c| *c == ' ' || *c == '\t')
+                                        .count();
+                                    let byte = l
+                                        .char_indices()
+                                        .nth(indent_len)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
+                                    l.insert_str(byte, &prefix_space);
+                                }
                             }
                         }
                     }
-                } else {
-                    for i in start..=end {
-                        if let Some(l) = b.lines.get_mut(i - 1) {
-                            let indent_len = l.chars().take_while(|c| *c == ' ' || *c == '\t').count();
-                            let byte = l.char_indices().nth(indent_len).map(|(i,_)| i).unwrap_or(0);
-                            l.insert_str(byte, "// ");
+                    CommentMarker::Block(open, close) => {
+                        // Per-line wrap: open at start (after indent), close at
+                        // end (before any trailing whitespace + newline). When
+                        // every non-blank line is already wrapped, strip instead.
+                        let all_wrapped = (start..=end)
+                            .filter_map(|i| b.lines.get(i - 1))
+                            .filter(|l| !l.trim().is_empty())
+                            .all(|l| {
+                                let trimmed = l.trim_end_matches('\n').trim_end();
+                                let stripped_left = l.trim_start();
+                                stripped_left.starts_with(open.as_str())
+                                    && trimmed.ends_with(close.as_str())
+                                    && trimmed.len() >= open.len() + close.len()
+                            });
+                        if all_wrapped {
+                            for i in start..=end {
+                                if let Some(l) = b.lines.get_mut(i - 1) {
+                                    let had_newline = l.ends_with('\n');
+                                    let body = l.trim_end_matches('\n').to_string();
+                                    let trailing_ws_len =
+                                        body.len() - body.trim_end().len();
+                                    let trailing_ws =
+                                        body[body.len() - trailing_ws_len..].to_string();
+                                    let core = body[..body.len() - trailing_ws_len].to_string();
+                                    // Strip closing marker (with optional preceding space).
+                                    let core = if let Some(c) = core.strip_suffix(close.as_str()) {
+                                        c.strip_suffix(' ').unwrap_or(c).to_string()
+                                    } else {
+                                        core
+                                    };
+                                    // Strip opening marker (with optional trailing space) after indent.
+                                    let indent_len = core
+                                        .chars()
+                                        .take_while(|c| *c == ' ' || *c == '\t')
+                                        .count();
+                                    let indent_byte = core
+                                        .char_indices()
+                                        .nth(indent_len)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(core.len());
+                                    let (indent, rest) = core.split_at(indent_byte);
+                                    let rest = rest.strip_prefix(open.as_str()).unwrap_or(rest);
+                                    let rest = rest.strip_prefix(' ').unwrap_or(rest);
+                                    let mut new_line =
+                                        format!("{indent}{rest}{trailing_ws}");
+                                    if had_newline {
+                                        new_line.push('\n');
+                                    }
+                                    *l = new_line;
+                                }
+                            }
+                        } else {
+                            for i in start..=end {
+                                if let Some(l) = b.lines.get_mut(i - 1) {
+                                    if l.trim().is_empty() {
+                                        continue;
+                                    }
+                                    let had_newline = l.ends_with('\n');
+                                    let body = l.trim_end_matches('\n').to_string();
+                                    let indent_len = body
+                                        .chars()
+                                        .take_while(|c| *c == ' ' || *c == '\t')
+                                        .count();
+                                    let indent_byte = body
+                                        .char_indices()
+                                        .nth(indent_len)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
+                                    let (indent, rest) = body.split_at(indent_byte);
+                                    let mut new_line = format!(
+                                        "{indent}{open} {} {close}",
+                                        rest.trim_end()
+                                    );
+                                    // Preserve any trailing whitespace after the close marker.
+                                    let trailing_ws_len = rest.len() - rest.trim_end().len();
+                                    if trailing_ws_len > 0 {
+                                        new_line
+                                            .push_str(&rest[rest.len() - trailing_ws_len..]);
+                                    }
+                                    if had_newline {
+                                        new_line.push('\n');
+                                    }
+                                    *l = new_line;
+                                }
+                            }
                         }
                     }
                 }

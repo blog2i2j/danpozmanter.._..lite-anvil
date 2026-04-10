@@ -4,7 +4,7 @@
 
 **[Documentation](https://danpozmanter.github.io/lite-anvil/)** | **[Releases](https://github.com/danpozmanter/lite-anvil/releases)**
 
-A fast and lightweight code editor built in Rust with SDL3.
+A fast code editor built in Rust with SDL3.
 
 Lite-Anvil is a fork of [Lite XL](https://github.com/lite-xl/lite-xl), rewritten from the ground up in Rust.
 

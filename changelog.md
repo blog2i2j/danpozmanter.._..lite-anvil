@@ -1,5 +1,19 @@
 # Change Log
 
+## [2.2.0] - 2026-04-09 — Enhanced Find/Replace, Command Palette fixes, comment fixes.
+
+* Find/Replace bar now appears at the top of the editor (just below the tabs and breadcrumb), matching the file picker, command palette, and project search. Previously it sat in the lower-left, splitting the user's attention between two corners of the window.
+* Find bar now spans only the active editor's column instead of the full window, so it visually belongs to the document being searched.
+* Live search: typing in the Find input immediately jumps to the next match from where the cursor was when Find opened.
+* Match counter (e.g. `3/12`) shown on the right of the Find row; renders in the error color when the query has no matches.
+* New toggles with hint row beneath the inputs: `Alt+R` regex, `Alt+W` whole word, `Alt+I` case-insensitive. Each shows a `[x]` / `[ ]` indicator.
+* `F3` jumps to the next match, `Shift+F3` to the previous, both with wraparound. Works whether the Find bar is open or closed (as long as a query exists).
+* `Enter` / `Shift+Enter` inside the Find input also navigate next / previous.
+* Command Palette Cleanup: filtered out raw key-input commands (Backspace, Return, Tab, cursor movement, selection extension, multi-cursor creation, and the `command:` / `context-menu:` / `dialog:` namespaces) so the palette only lists meaningful actions.
+* Git commands in the palette are now prefixed with "Git" — `Git Pull`, `Git Push`, `Git Commit`, `Git Stash` — instead of bare verbs.
+* `Ctrl+/` toggle line comments now picks the right marker for the active language by reading the `comment` field from the per-language syntax JSON.
+* Updated tagline / description across `README.md`, `Cargo.toml`, `mkdocs.yml`, and the GitHub Pages site to drop "lightweight" — now consistently "code editor".
+
 ## [2.1.3] - 2026-04-09 — File picker editing, sidebar overflow, docs rebuild.
 
 * Fixed file/folder open picker text editing: arrow keys, Home, End, Delete, and Ctrl+Left / Ctrl+Right now work.
