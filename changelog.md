@@ -1,5 +1,18 @@
 # Change Log
 
+## [2.4.0] - 2026-04-10 — File type icons, hidden file toggle, check for updates, other ergonomic improvements.
+
+* Sidebar file icons now use the Seti icon font (MIT, from VS Code's Seti theme) for recognizable per-language glyphs -- Rust gear, Python snake, Go gopher, JS/TS badges, HTML brackets, Docker whale, and 90+ more. Each icon renders in the language's signature color. The Seti font (`data/fonts/seti.ttf`) scales perfectly at any DPI. Icon mappings (extension to codepoint + color) are in `data/assets/file_icons.json`. Directories keep the existing folder icon.
+* Added RGBA image blitting to the render cache (`DrawImageCmd`) for future use.
+* Toggle Hidden Files: new command `Toggle Hidden Files` in the command palette shows/hides dotfiles in the sidebar. Displays an info banner confirming the current state.
+* Check for Updates: new command `Check For Updates` in the command palette. Queries the GitHub releases API via curl and shows a banner with the result ("Up to date" or "New version available: vX.Y.Z").
+* Open file at line: `lite-anvil src/main.rs:42` (CLI) and the file picker (`Ctrl+O`) both support `:N` suffix to open a file scrolled to a specific line.
+* Format on paste: pasted text has its leading whitespace automatically converted to match the document's indent style (tabs to spaces or vice versa, preserving relative depth). Enabled by default; set `format_on_paste = false` in config.toml to disable.
+* Git Blame: `Git Blame` in the command palette toggles per-line blame annotations (author + date) shown at the right edge of the editor. Re-runs `git blame --porcelain` for the active file on toggle.
+* Git Log: `Git Log` in the command palette opens a scrollable overlay showing the last 50 commits for the active file (hash, date, message). Navigate with Up/Down, dismiss with Esc.
+* Per-project session memory: switching projects saves the current open files and active tab, and restores them when you switch back. Stored per-project in the user config directory.
+* Default scrollbar width doubled from 4px to 8px.
+
 ## [2.3.0] - 2026-04-10 — Bookmarks, find-in-selection, graceful font fallback.
 
 * Bookmarks: `Ctrl+F4` toggles a bookmark on the current line, `F4` jumps to the next bookmark, `Shift+F4` to the previous. Bookmarked lines show an accent-colored marker in the gutter. Bookmarks are per-document and wrap around.

@@ -24,7 +24,7 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 - **Bookmarks** -- toggle with Ctrl+F4, navigate with F4 / Shift+F4, accent marker in gutter
 - **Code folding** with indent-based fold detection
 - **Project-wide search** (Ctrl+Shift+F) with grep-based results
-- **Git integration** -- gutter markers, status view, push/pull/commit/stash from command palette
+- **Git integration** -- gutter markers, status view, blame annotations, file log, push/pull/commit/stash
 - **Multi-cursor editing** -- Ctrl+Shift+Up/Down to add cursors, Ctrl+D to select next occurrence
 - **Minimap** with syntax-colored blocks, click to scroll
 - **Language-aware line comments** -- Ctrl+/ picks the correct marker for 51 languages
@@ -32,7 +32,10 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 - **Session restore** -- open files, active tab, font scale persist across restarts
 - **Native file watching** via inotify for external-change detection
 - **JSON-backed color themes** (`data/assets/themes/*.json`) with runtime cycling (Ctrl+Shift+P)
-- **Keyboard-navigated file/folder open** with filesystem autocomplete
+- **Keyboard-navigated file/folder open** with filesystem autocomplete and `:N` line support
+- **Format on paste** -- converts pasted indent whitespace to match document style
+- **Color-coded sidebar icons** by file extension (90+ extensions)
+- **Check for Updates** from the command palette
 - **Graceful font fallback** -- falls back to built-in fonts with a warning if custom fonts fail
 
 ## Shortcuts
@@ -81,8 +84,11 @@ cargo build --release
 Rust 1.85+ required. See [BUILDING.md](BUILDING.md) for full instructions
 including macOS, Windows, and packaging.
 
+## Fonts
+
+- [Lilex](https://github.com/mishamyrt/Lilex) -- editor font
+- [Seti](https://github.com/jesseweed/seti-ui) -- file type icons
+
 ## License
 
 MIT -- see [LICENSE](LICENSE).
-
-Font: [Lilex](https://github.com/mishamyrt/Lilex)

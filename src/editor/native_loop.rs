@@ -95,7 +95,7 @@ fn normalize_path(p: &str) -> String {
 }
 
 /// Scan a directory non-recursively and return sorted sidebar entries at the given depth.
-fn scan_directory(dir: &str, depth: usize) -> Vec<SidebarEntry> {
+fn scan_directory(dir: &str, depth: usize, show_hidden: bool) -> Vec<SidebarEntry> {
     let mut entries = Vec::new();
     let Ok(read) = std::fs::read_dir(dir) else {
         return entries;
@@ -105,7 +105,7 @@ fn scan_directory(dir: &str, depth: usize) -> Vec<SidebarEntry> {
             continue;
         };
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
+        if !show_hidden && name.starts_with('.') {
             continue;
         }
         entries.push(SidebarEntry {
@@ -120,6 +120,47 @@ fn scan_directory(dir: &str, depth: usize) -> Vec<SidebarEntry> {
         b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name))
     });
     entries
+}
+
+/// A file-type icon: Seti font codepoint + color.
+struct FileIcon {
+    /// Unicode codepoint in the Seti icon font.
+    codepoint: u32,
+    color: [u8; 4],
+}
+
+/// Load file-extension to icon mapping from the JSON config.
+fn load_file_icons(datadir: &str) -> std::collections::HashMap<String, FileIcon> {
+    let path = format!("{datadir}/assets/file_icons.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return std::collections::HashMap::new();
+    };
+    let Ok(map) = serde_json::from_str::<
+        std::collections::HashMap<String, serde_json::Value>,
+    >(&text)
+    else {
+        return std::collections::HashMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(ext, val)| {
+            let obj = val.as_object()?;
+            let codepoint = obj.get("codepoint")?.as_u64()? as u32;
+            let color = obj.get("color")?.as_str().and_then(parse_hex_color)?;
+            Some((ext, FileIcon { codepoint, color }))
+        })
+        .collect()
+}
+
+/// Parse "#rrggbb" into [r, g, b, 255].
+fn parse_hex_color(s: &str) -> Option<[u8; 4]> {
+    let hex = s.strip_prefix('#')?;
+    if hex.len() < 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some([r, g, b, 255])
 }
 
 /// File watcher state for autoreload on external changes.
@@ -388,6 +429,13 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         indent_type: String,
         indent_size: usize,
         git_changes: std::collections::HashMap<usize, crate::editor::git::LineChange>,
+        /// Cached tokenized render lines. Invalidated only when the buffer
+        /// content changes (edits, undo/redo, reload), NOT on cursor movement.
+        cached_render: Vec<RenderLine>,
+        /// The buffer change_id when cached_render was last built.
+        cached_change_id: i64,
+        /// The scroll-y when cached_render was last built (rebuild on scroll).
+        cached_scroll_y: f64,
     }
 
     /// Check if a document has unsaved modifications by comparing content signature.
@@ -449,8 +497,76 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
             indent_type: indent_type.to_string(),
             indent_size,
             git_changes,
+            cached_render: Vec::new(),
+            cached_change_id: -1,
+            cached_scroll_y: -1.0,
         });
         true
+    }
+
+    /// Derive a storage-safe key from a project root path.
+    fn project_session_key(root: &str) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let canonical = std::fs::canonicalize(root)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| root.to_string());
+        let mut h = DefaultHasher::new();
+        canonical.hash(&mut h);
+        format!("proj_{:016x}", h.finish())
+    }
+
+    /// Save the current open files for a project so they can be restored later.
+    fn save_project_session(
+        userdir: &std::path::Path,
+        root: &str,
+        docs: &[OpenDoc],
+        active_tab: usize,
+    ) {
+        if root == "." || root.is_empty() {
+            return;
+        }
+        let files: Vec<String> = docs
+            .iter()
+            .filter(|d| !d.path.is_empty())
+            .map(|d| d.path.clone())
+            .collect();
+        let session = SessionData {
+            files,
+            active: active_tab,
+            active_project: root.to_string(),
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&session) {
+            let _ = storage::save_text(
+                userdir,
+                "project_session",
+                &project_session_key(root),
+                &json,
+            );
+        }
+    }
+
+    /// Restore previously saved open files for a project. Returns the active tab
+    /// index if files were restored.
+    fn restore_project_session(
+        userdir: &std::path::Path,
+        root: &str,
+        docs: &mut Vec<OpenDoc>,
+        autoreload: &mut AutoreloadState,
+    ) -> Option<usize> {
+        let key = project_session_key(root);
+        let data = storage::load_text(userdir, "project_session", &key).ok()??;
+        let session: SessionData = serde_json::from_str(&data).ok()?;
+        for file in &session.files {
+            if open_file_into(file, docs) {
+                autoreload.watch(file);
+            }
+        }
+        if docs.is_empty() {
+            None
+        } else {
+            Some(session.active.min(docs.len().saturating_sub(1)))
+        }
     }
 
     /// Split `path:N` into `(path, Some(N))`. Handles Windows drive letters
@@ -560,7 +676,9 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                 .unwrap_or_else(|| ".".to_string())
         }
     };
-    sidebar_entries = scan_directory(&project_root, 0);
+    let mut sidebar_show_hidden = false;
+    let file_icons = load_file_icons(datadir);
+    sidebar_entries = scan_directory(&project_root, 0, sidebar_show_hidden);
 
     // Recent projects list (persisted).
     let mut recent_projects: Vec<String> = crate::editor::storage::load_text(userdir_path, "session", "recent_projects")
@@ -600,6 +718,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     let mut quit = false;
     let mut window_title = String::new();
     let frame_interval = 1.0 / fps;
+    // Deferred render-line cache: written at the top of the next frame to
+    // avoid borrow-checker conflicts with the immutable doc borrow during
+    // rendering. Includes the tab index so we write to the correct doc even
+    // if the user switched tabs between frames.
+    let mut pending_render_cache: Option<(usize, Vec<RenderLine>, i64, f64)> = None;
 
     // Find bar state.
     let mut find_active = false;
@@ -658,6 +781,8 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
             "core:open-user-settings",
             "about:version",
             "core:force-quit",
+            "core:toggle-hidden-files",
+            "core:check-for-updates",
             "doc:upper-case",
             "doc:lower-case",
             "doc:reload",
@@ -665,6 +790,8 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
             "git:push",
             "git:commit",
             "git:stash",
+            "git:blame",
+            "git:log",
             "root:close-all",
             "root:close-all-others",
             "root:close-or-quit",
@@ -699,6 +826,15 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     let mut git_status_entries: Vec<(String, String, String)> = Vec::new();
     let mut git_status_selected: usize = 0;
 
+    // Git blame: per-line annotations shown inline at the right edge.
+    let mut git_blame_active = false;
+    let mut git_blame_lines: Vec<String> = Vec::new();
+
+    // Git history (log) for the current file.
+    let mut git_log_active = false;
+    let mut git_log_entries: Vec<(String, String, String)> = Vec::new(); // (hash, date, message)
+    let mut git_log_selected: usize = 0;
+
     fn run_git_status(root: &str) -> Vec<(String, String, String)> {
         let Ok(output) = std::process::Command::new("git")
             .arg("-C").arg(root)
@@ -714,6 +850,90 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                 let path = line[3..].trim().to_string();
                 let display = format!("[{code}] {path}");
                 Some((code, path, display))
+            })
+            .collect()
+    }
+
+    /// Run `git blame --porcelain` and return one summary string per line.
+    fn run_git_blame(file_path: &str) -> Vec<String> {
+        let Ok(output) = std::process::Command::new("git")
+            .args(["blame", "--porcelain", "--", file_path])
+            .output()
+        else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+        // Porcelain format: blocks of header lines followed by a tab-prefixed
+        // source line. Each block starts with a 40-char hash. We collect
+        // author + author-time for each block, then build a compact summary.
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut result: Vec<String> = Vec::new();
+        let mut hash = String::new();
+        let mut author = String::new();
+        let mut date = String::new();
+        for line in text.lines() {
+            // Block header: 40-char hash followed by line numbers.
+            if line.len() >= 40 && line.chars().take(40).all(|c| c.is_ascii_hexdigit()) {
+                hash = line[..8].to_string();
+            } else if let Some(a) = line.strip_prefix("author ") {
+                author = a.to_string();
+            } else if let Some(ts) = line.strip_prefix("author-time ") {
+                if let Ok(epoch) = ts.parse::<i64>() {
+                    let days = epoch / 86400;
+                    let (y, m, d) = epoch_to_ymd(days);
+                    date = format!("{y:04}-{m:02}-{d:02}");
+                }
+            } else if line.starts_with('\t') {
+                // End of block — emit the summary for this source line.
+                let short_author: String = author.chars().take(20).collect();
+                result.push(format!("{hash}  {short_author:<20}  {date}"));
+                author.clear();
+                date.clear();
+                hash.clear();
+            }
+        }
+        result
+    }
+
+    /// Trivial days-since-epoch to (year, month, day) for blame dates.
+    fn epoch_to_ymd(days_since_epoch: i64) -> (i64, i64, i64) {
+        // Algorithm from Howard Hinnant's civil_from_days (public domain).
+        let z = days_since_epoch + 719468;
+        let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+        let doe = z - era * 146097;
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        (y, m, d)
+    }
+
+    /// Run `git log --oneline` for a file and return (hash, date, message).
+    fn run_git_log(file_path: &str) -> Vec<(String, String, String)> {
+        let Ok(output) = std::process::Command::new("git")
+            .args([
+                "log", "--format=%h|%as|%s", "-50", "--", file_path,
+            ])
+            .output()
+        else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(3, '|');
+                let hash = parts.next()?.to_string();
+                let date = parts.next()?.to_string();
+                let msg = parts.next().unwrap_or("").to_string();
+                Some((hash, date, msg))
             })
             .collect()
     }
@@ -942,6 +1162,9 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         indent_type: "soft".to_string(),
                         indent_size: 2,
                         git_changes: std::collections::HashMap::new(),
+                        cached_render: Vec::new(),
+                        cached_change_id: -1,
+                        cached_scroll_y: -1.0,
                     });
                     active_tab = docs.len() - 1;
                 }
@@ -1044,6 +1267,41 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         doc.view.show_whitespace = !doc.view.show_whitespace;
                     }
                 }
+                "core:toggle-hidden-files" => {
+                    sidebar_show_hidden = !sidebar_show_hidden;
+                    sidebar_entries = scan_directory(&project_root, 0, sidebar_show_hidden);
+                    let label = if sidebar_show_hidden { "Showing hidden files" } else { "Hiding hidden files" };
+                    info_message = Some((label.to_string(), Instant::now()));
+                }
+                "core:check-for-updates" => {
+                    let current = env!("CARGO_PKG_VERSION");
+                    match std::process::Command::new("curl")
+                        .args(["-sL", "--max-time", "5",
+                               "https://api.github.com/repos/danpozmanter/lite-anvil/releases/latest"])
+                        .output()
+                    {
+                        Ok(output) if output.status.success() => {
+                            let body = String::from_utf8_lossy(&output.stdout);
+                            // Parse the tag_name from the JSON response.
+                            let latest = body
+                                .split("\"tag_name\"")
+                                .nth(1)
+                                .and_then(|s| s.split('"').nth(1))
+                                .map(|s| s.trim_start_matches('v'))
+                                .unwrap_or("");
+                            if latest.is_empty() {
+                                info_message = Some(("Could not determine latest version".to_string(), Instant::now()));
+                            } else if latest == current {
+                                info_message = Some((format!("Up to date (v{current})"), Instant::now()));
+                            } else {
+                                info_message = Some((format!("New version available: v{latest} (current: v{current})"), Instant::now()));
+                            }
+                        }
+                        _ => {
+                            info_message = Some(("Update check failed (no network or curl not found)".to_string(), Instant::now()));
+                        }
+                    }
+                }
                 "core:cycle-theme" => {
                     if !available_themes.is_empty() {
                         current_theme_idx = (current_theme_idx + 1) % available_themes.len();
@@ -1079,6 +1337,25 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     git_status_active = true;
                     git_status_entries = run_git_status(&project_root);
                     git_status_selected = 0;
+                }
+                "git:blame" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if !doc.path.is_empty() {
+                            git_blame_active = !git_blame_active;
+                            if git_blame_active {
+                                git_blame_lines = run_git_blame(&doc.path);
+                            }
+                        }
+                    }
+                }
+                "git:log" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if !doc.path.is_empty() {
+                            git_log_active = true;
+                            git_log_entries = run_git_log(&doc.path);
+                            git_log_selected = 0;
+                        }
+                    }
                 }
                 "core:open-recent" => {
                     cmdview_active = true;
@@ -1161,12 +1438,16 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
                                     nag_tab_to_close = None;
                                 } else {
+                                    save_project_session(userdir_path, &project_root, &docs, active_tab);
                                     for d in &docs { autoreload.unwatch(&d.path); }
                                     docs.clear();
                                     active_tab = 0;
                                     project_root = folder;
-                                    sidebar_entries = scan_directory(&project_root, 0);
+                                    sidebar_entries = scan_directory(&project_root, 0, sidebar_show_hidden);
                                     sidebar_visible = true;
+                                    if let Some(tab) = restore_project_session(userdir_path, &project_root, &mut docs, &mut autoreload) {
+                                        active_tab = tab;
+                                    }
                                     update_recent(&mut recent_projects, &project_root, 20);
                                     let _ = crate::editor::storage::save_text(userdir_path, "session", "recent_projects", &serde_json::to_string(&recent_projects).unwrap_or_default());
                                 }
@@ -1339,6 +1620,15 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     if let Some(doc) = docs.get_mut(active_tab) {
                         if let Some(buf_id) = doc.view.buffer_id {
                             if let Some(text) = crate::window::get_clipboard_text() {
+                                let text = if config.format_on_paste {
+                                    convert_paste_indent(
+                                        &text,
+                                        &doc.indent_type,
+                                        doc.indent_size,
+                                    )
+                                } else {
+                                    text
+                                };
                                 let _ = buffer::with_buffer_mut(buf_id, |b| {
                                     buffer::push_undo(b);
                                     buffer::delete_selection(b);
@@ -1893,7 +2183,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                                 nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
                                                 nag_tab_to_close = None;
                                             } else {
-                                                // Close all open docs from previous project.
+                                                save_project_session(userdir_path, &project_root, &docs, active_tab);
                                                 for d in &docs {
                                                     autoreload.unwatch(&d.path);
                                                 }
@@ -1901,9 +2191,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                                 active_tab = 0;
                                                 cmdview_active = false;
                                                 project_root = path;
-                                                sidebar_entries = scan_directory(&project_root, 0);
+                                                sidebar_entries = scan_directory(&project_root, 0, sidebar_show_hidden);
                                                 sidebar_visible = true;
-                                                // Update recent projects.
+                                                if let Some(tab) = restore_project_session(userdir_path, &project_root, &mut docs, &mut autoreload) {
+                                                    active_tab = tab;
+                                                }
                                                 let abs = std::fs::canonicalize(&project_root).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| project_root.clone());
                                                 recent_projects.retain(|p| p != &abs);
                                                 recent_projects.insert(0, abs);
@@ -1926,12 +2218,16 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                                 nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
                                                 nag_tab_to_close = None;
                                             } else {
+                                                save_project_session(userdir_path, &project_root, &docs, active_tab);
                                                 for d in &docs { autoreload.unwatch(&d.path); }
                                                 docs.clear();
                                                 active_tab = 0;
                                                 project_root = path;
-                                                sidebar_entries = scan_directory(&project_root, 0);
+                                                sidebar_entries = scan_directory(&project_root, 0, sidebar_show_hidden);
                                                 sidebar_visible = true;
+                                                if let Some(tab) = restore_project_session(userdir_path, &project_root, &mut docs, &mut autoreload) {
+                                                    active_tab = tab;
+                                                }
                                                 update_recent(&mut recent_projects, &project_root, 20);
                                                 let _ = crate::editor::storage::save_text(userdir_path, "session", "recent_projects", &serde_json::to_string(&recent_projects).unwrap_or_default());
                                             }
@@ -2101,6 +2397,22 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             "r" | "R" => {
                                 git_status_entries = run_git_status(&project_root);
                                 git_status_selected = 0;
+                            }
+                            _ => {}
+                        }
+                        redraw = true;
+                        continue;
+                    }
+
+                    // Git log view intercepts keys when active.
+                    if git_log_active {
+                        match key.as_str() {
+                            "escape" => { git_log_active = false; }
+                            "up" => { git_log_selected = git_log_selected.saturating_sub(1); }
+                            "down" => {
+                                if !git_log_entries.is_empty() {
+                                    git_log_selected = (git_log_selected + 1).min(git_log_entries.len() - 1);
+                                }
                             }
                             _ => {}
                         }
@@ -3064,7 +3376,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 } else {
                                     // Expand: insert children.
                                     sidebar_entries[click_idx].expanded = true;
-                                    let children = scan_directory(&path, depth + 1);
+                                    let children = scan_directory(&path, depth + 1, sidebar_show_hidden);
                                     let insert_at = click_idx + 1;
                                     for (i, child) in children.into_iter().enumerate() {
                                         sidebar_entries.insert(insert_at + i, child);
@@ -3204,6 +3516,9 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     }
 
                     if let Some(doc) = docs.get_mut(active_tab) { let dv = &mut doc.view;
+                        // Clicking in the document cancels any pending scroll
+                        // animation so the view stays exactly where it is.
+                        dv.target_scroll_y = dv.scroll_y;
                         if let Some(buf_id) = dv.buffer_id {
                             let line_h = style.code_font_height * 1.2;
                             let gutter_w = dv.gutter_width;
@@ -4039,8 +4354,8 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     let current = dv.scroll_y;
                     let diff = target - current;
                     if diff.abs() >= 1.0 {
-                        // Lerp toward target, then snap to integer pixels.
-                        let new_scroll = (current + diff * 0.35).round();
+                        // Lerp toward target with ease-out, snap to integer pixels.
+                        let new_scroll = (current + diff * 0.45).round();
                         if new_scroll != current {
                             dv.scroll_y = new_scroll;
                             redraw = true;
@@ -4245,21 +4560,31 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             }
 
                             // Icon (vertically centered in the row).
-                            let icon = if entry.is_dir {
-                                if entry.expanded { "D" } else { "d" }
+                            if entry.is_dir {
+                                let icon = if entry.expanded { "D" } else { "d" };
+                                let icon_y = ey + (entry_h - icon_font_h) / 2.0;
+                                draw_ctx.draw_text(style.icon_font, icon, x, icon_y, style.accent.to_array());
                             } else {
-                                "f"
-                            };
-                            let icon_color = if entry.is_dir {
-                                style.accent.to_array()
-                            } else {
-                                style.dim.to_array()
-                            };
-                            let icon_y = ey + (entry_h - icon_font_h) / 2.0;
-                            draw_ctx.draw_text(style.icon_font, icon, x, icon_y, icon_color);
+                                // Seti file-type icon glyph.
+                                let ext = entry.name.rsplit('.').next().unwrap_or("");
+                                let icon_info = file_icons.get(ext)
+                                    .or_else(|| file_icons.get(entry.name.as_str()))
+                                    .or_else(|| file_icons.get("_default"));
+                                if let Some(fi) = icon_info {
+                                    let glyph = char::from_u32(fi.codepoint)
+                                        .map(|c| c.to_string())
+                                        .unwrap_or_default();
+                                    let seti_h = draw_ctx.font_height(style.seti_font);
+                                    let icon_y = ey + (entry_h - seti_h) / 2.0;
+                                    draw_ctx.draw_text(
+                                        style.seti_font, &glyph, x, icon_y, fi.color,
+                                    );
+                                }
+                            }
 
                             // Name (vertically centered, same baseline alignment).
-                            let name_x = x + icon_w;
+                            // Add spacing between icon and name.
+                            let name_x = x + icon_w + style.padding_x * 0.7;
                             let name_color = if entry.is_dir {
                                 style.accent.to_array()
                             } else {
@@ -4298,6 +4623,14 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     crate::editor::app_state::clip_init(width, height);
                 }
 
+                // Apply deferred render cache from previous frame.
+                if let Some((tab_idx, lines, cid, sy)) = pending_render_cache.take() {
+                    if let Some(doc_mut) = docs.get_mut(tab_idx) {
+                        doc_mut.cached_render = lines;
+                        doc_mut.cached_change_id = cid;
+                        doc_mut.cached_scroll_y = sy;
+                    }
+                }
                 if let Some(doc) = docs.get(active_tab) {
                     let dv = &doc.view;
                     if let Some(buf_id) = dv.buffer_id {
@@ -4332,15 +4665,29 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             .unwrap_or(false);
                         let empty_hints = Vec::new();
                         let hints = if is_lsp_file { &lsp_state.inlay_hints } else { &empty_hints };
-                        let render_lines = build_render_lines(
-                            buf_id,
-                            dv,
-                            &style,
-                            ext,
-                            compiled_opt.as_ref(),
-                            wrap_w,
-                            hints,
-                        );
+                        // Use cached render lines if the buffer content and
+                        // scroll position haven't changed — avoids re-tokenizing
+                        // all visible lines on every cursor move.
+                        let current_change_id = buffer::with_buffer(buf_id, |b| Ok(b.change_id)).unwrap_or(0);
+                        let scroll_y_now = dv.scroll_y;
+                        let render_lines = if let Some(doc) = docs.get(active_tab) {
+                            if doc.cached_change_id == current_change_id
+                                && (doc.cached_scroll_y - scroll_y_now).abs() < 0.5
+                                && !doc.cached_render.is_empty()
+                            {
+                                doc.cached_render.clone()
+                            } else {
+                                build_render_lines(
+                                    buf_id, dv, &style, ext,
+                                    compiled_opt.as_ref(), wrap_w, hints,
+                                )
+                            }
+                        } else {
+                            build_render_lines(
+                                buf_id, dv, &style, ext,
+                                compiled_opt.as_ref(), wrap_w, hints,
+                            )
+                        };
                         let (sel, cursor_line, cursor_col, all_cursors) =
                             buffer::with_buffer(buf_id, |b| {
                                 let mut sels = Vec::new();
@@ -4388,6 +4735,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             &doc.git_changes,
                             &all_cursors,
                         );
+                        pending_render_cache = Some((active_tab, render_lines, current_change_id, scroll_y_now));
                         // Draw bracket match underlines at cursor position.
                         if let Some(buf_id) = dv.buffer_id {
                             let bracket = buffer::with_buffer(buf_id, |b| {
@@ -4463,6 +4811,35 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         }
                         }
                     }
+                    // Git blame annotations (right-aligned, dimmed).
+                    if git_blame_active && !git_blame_lines.is_empty() {
+                        if let Some(doc) = docs.get(active_tab) {
+                            let dv = &doc.view;
+                            use crate::editor::view::DrawContext as _;
+                            let line_h = style.code_font_height * 1.2;
+                            let first = ((dv.scroll_y / line_h).floor() as usize).max(0) + 1;
+                            let vis = ((dv.rect().h / line_h).ceil() as usize) + 2;
+                            let blame_color = style.dim.to_array();
+                            let right_edge = dv.rect().x + dv.rect().w - style.padding_x;
+                            for row in 0..vis {
+                                let ln = first + row;
+                                if ln > git_blame_lines.len() {
+                                    break;
+                                }
+                                let annotation = &git_blame_lines[ln - 1];
+                                let aw = draw_ctx.font_width(style.font, annotation);
+                                let ax = (right_edge - aw).max(dv.rect().x + dv.gutter_width);
+                                let ay = dv.rect().y + (ln as f64 - 1.0) * line_h - dv.scroll_y
+                                    + (line_h - style.font_height) / 2.0;
+                                if ay >= dv.rect().y && ay + style.font_height <= dv.rect().y + dv.rect().h {
+                                    draw_ctx.draw_text(
+                                        style.font, annotation, ax, ay, blame_color,
+                                    );
+                                }
+                            }
+                        }
+                    }
+
                     // Inlay hints are injected into render_lines via build_render_lines.
                     // Reset clip before drawing minimap.
                     crate::editor::app_state::clip_init(width, height);
@@ -5115,6 +5492,69 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     }
                 }
 
+                // Draw git log overlay.
+                if git_log_active {
+                    crate::editor::app_state::clip_init(width, height);
+                    use crate::editor::view::DrawContext as _;
+                    let gl_w = (width * 0.6).max(500.0).min(width - 20.0);
+                    let gl_x = (width - gl_w) / 2.0;
+                    let gl_y = style.padding_y * 2.0;
+                    let line_h = style.font_height + style.padding_y;
+                    let max_vis = 20usize;
+                    let vis = git_log_entries.len().min(max_vis);
+                    let gl_h = line_h * (vis as f64 + 1.0) + style.padding_y * 2.0;
+                    draw_ctx.draw_rect(
+                        gl_x - 1.0, gl_y - 1.0,
+                        gl_w + 2.0, gl_h + 2.0,
+                        style.divider.to_array(),
+                    );
+                    draw_ctx.draw_rect(gl_x, gl_y, gl_w, gl_h, style.background3.to_array());
+                    let input_y = gl_y + style.padding_y;
+                    let title = format!(
+                        "Git Log  ({} commits)  [Esc] close",
+                        git_log_entries.len()
+                    );
+                    draw_ctx.draw_text(
+                        style.font, &title,
+                        gl_x + style.padding_x, input_y,
+                        style.accent.to_array(),
+                    );
+                    draw_ctx.draw_rect(
+                        gl_x, input_y + line_h, gl_w, style.divider_size,
+                        style.divider.to_array(),
+                    );
+                    let scroll_off = if git_log_selected >= max_vis {
+                        git_log_selected - max_vis + 1
+                    } else {
+                        0
+                    };
+                    for (i, (hash, date, msg)) in
+                        git_log_entries.iter().enumerate().skip(scroll_off).take(max_vis)
+                    {
+                        let di = i - scroll_off;
+                        let ry = input_y + line_h + style.divider_size
+                            + di as f64 * line_h;
+                        if i == git_log_selected {
+                            draw_ctx.draw_rect(
+                                gl_x, ry, gl_w, line_h,
+                                style.selection.to_array(),
+                            );
+                        }
+                        let entry_text = format!("{hash}  {date}  {msg}");
+                        let hash_color = if i == git_log_selected {
+                            style.accent.to_array()
+                        } else {
+                            style.dim.to_array()
+                        };
+                        draw_ctx.draw_text(
+                            style.font, &entry_text,
+                            gl_x + style.padding_x,
+                            ry + style.padding_y / 2.0,
+                            hash_color,
+                        );
+                    }
+                }
+
                 // Draw command view (file/folder open with autocomplete) at top.
                 if cmdview_active {
                     crate::editor::app_state::clip_init(width, height);
@@ -5601,10 +6041,8 @@ fn select_find_match(dv: &mut DocView, m: (usize, usize, usize)) {
     let line_h = 20.0;
     let cursor_y = (line as f64 - 1.0) * line_h;
     let view_h = dv.rect().h;
-    if cursor_y < dv.scroll_y || cursor_y + line_h > dv.scroll_y + view_h {
-        let new_scroll = (cursor_y - view_h / 2.0).max(0.0);
-        dv.scroll_y = new_scroll;
-        dv.target_scroll_y = new_scroll;
+    if cursor_y < dv.target_scroll_y || cursor_y + line_h > dv.target_scroll_y + view_h {
+        dv.target_scroll_y = (cursor_y - view_h / 2.0).max(0.0);
     }
 }
 
@@ -5664,6 +6102,64 @@ fn replace_current_match(dv: &mut DocView, find_query: &str, replacement: &str) 
         }
         Ok(())
     });
+}
+
+/// Convert pasted text's leading whitespace to match the document's indent
+/// style. Detects whether the clipboard content uses tabs or spaces, then
+/// re-indents every line to the target style (preserving relative depth).
+fn convert_paste_indent(text: &str, doc_indent_type: &str, doc_indent_size: usize) -> String {
+    let size = doc_indent_size.max(1);
+    // Detect the paste's dominant indent character: if any non-blank line
+    // starts with a tab, treat the paste as tab-indented; otherwise spaces.
+    let paste_uses_tabs = text
+        .lines()
+        .any(|l| l.starts_with('\t'));
+    let paste_uses_spaces = !paste_uses_tabs
+        && text.lines().any(|l| l.starts_with(' '));
+    // Detect the paste's space-indent width (smallest leading-space run > 0).
+    let paste_space_width = if paste_uses_spaces {
+        text.lines()
+            .filter(|l| l.starts_with(' '))
+            .map(|l| l.chars().take_while(|c| *c == ' ').count())
+            .filter(|&n| n > 0)
+            .min()
+            .unwrap_or(size)
+    } else {
+        size
+    };
+    let doc_uses_tabs = doc_indent_type == "hard";
+    // No conversion needed if both sides agree.
+    if paste_uses_tabs == doc_uses_tabs && (!paste_uses_spaces || paste_space_width == size) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        // Count the indent level of this line in the paste's style.
+        let (indent_level, rest_start) = if paste_uses_tabs {
+            let tabs = line.chars().take_while(|c| *c == '\t').count();
+            let byte = line.char_indices().nth(tabs).map(|(i, _)| i).unwrap_or(line.len());
+            (tabs, byte)
+        } else {
+            let spaces = line.chars().take_while(|c| *c == ' ').count();
+            let byte = line.char_indices().nth(spaces).map(|(i, _)| i).unwrap_or(line.len());
+            (spaces / paste_space_width, byte)
+        };
+        // Re-indent in the document's style.
+        if doc_uses_tabs {
+            for _ in 0..indent_level {
+                out.push('\t');
+            }
+        } else {
+            for _ in 0..indent_level * size {
+                out.push(' ');
+            }
+        }
+        out.push_str(&line[rest_start..]);
+    }
+    out
 }
 
 /// Convert char index to byte index in a string.
@@ -6342,12 +6838,10 @@ fn handle_doc_command(
         }
         let cursor_y = (cursor_line as f64 - 1.0) * line_h;
         let view_h = dv.rect().h;
-        if cursor_y < dv.scroll_y {
-            dv.scroll_y = cursor_y;
+        if cursor_y < dv.target_scroll_y {
             dv.target_scroll_y = cursor_y;
-        } else if cursor_y + line_h > dv.scroll_y + view_h {
-            dv.scroll_y = cursor_y + line_h - view_h;
-            dv.target_scroll_y = dv.scroll_y;
+        } else if cursor_y + line_h > dv.target_scroll_y + view_h {
+            dv.target_scroll_y = cursor_y + line_h - view_h;
         }
         Ok(())
     });
@@ -6458,10 +6952,8 @@ fn scroll_to_cursor(dv: &mut DocView) {
         let line_h = 20.0;
         let cursor_y = (cursor_line as f64 - 1.0) * line_h;
         let view_h = dv.rect().h;
-        if cursor_y < dv.scroll_y || cursor_y + line_h > dv.scroll_y + view_h {
-            let new_scroll = (cursor_y - view_h / 2.0).max(0.0);
-            dv.scroll_y = new_scroll;
-            dv.target_scroll_y = new_scroll;
+        if cursor_y < dv.target_scroll_y || cursor_y + line_h > dv.target_scroll_y + view_h {
+            dv.target_scroll_y = (cursor_y - view_h / 2.0).max(0.0);
         }
         Ok(())
     });
@@ -7000,15 +7492,42 @@ fn load_fonts(
         load(&spec, &mut ctx)?
     };
 
-    FONT_SLOTS.with(|s| *s.borrow_mut() = Some((ui, code, icon, big, icon_big)));
+    // Load the Seti icon font for file-type icons in the sidebar.
+    let seti = {
+        let seti_path = config.fonts.icon.path.as_deref()
+            .map(|p| {
+                let dir = std::path::Path::new(p).parent().unwrap_or(std::path::Path::new("."));
+                dir.join("seti.ttf").to_string_lossy().to_string()
+            })
+            .unwrap_or_default();
+        if std::path::Path::new(&seti_path).exists() {
+            let spec = crate::editor::config::FontSpec {
+                path: Some(seti_path),
+                // Seti glyphs are designed small; scale to 150% of UI font
+                // to match VS Code's rendering and fill the sidebar row.
+                size: (config.fonts.ui.size as f64 * 1.5) as u32,
+                options: crate::editor::config::FontOptions {
+                    antialiasing: Some("grayscale".into()),
+                    hinting: Some("full".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            load(&spec, &mut ctx).unwrap_or(icon)
+        } else {
+            icon
+        }
+    };
+
+    FONT_SLOTS.with(|s| *s.borrow_mut() = Some((ui, code, icon, big, icon_big, seti)));
 
     Ok(ctx)
 }
 
 use std::cell::RefCell;
 
-/// (ui, code, icon, big, icon_big) font slot ids.
-type FontSlotIds = (u64, u64, u64, u64, u64);
+/// (ui, code, icon, big, icon_big, seti) font slot ids.
+type FontSlotIds = (u64, u64, u64, u64, u64, u64);
 
 thread_local! {
     static FONT_SLOTS: RefCell<Option<FontSlotIds>> = const { RefCell::new(None) };
@@ -7023,7 +7542,9 @@ fn build_style(
     use crate::editor::types::Color;
     use crate::editor::view::DrawContext as _;
 
-    let (ui, code, icon, big, icon_big) = FONT_SLOTS.with(|s| s.borrow().unwrap_or((0, 0, 0, 0, 0)));
+    let (ui, code, icon, big, icon_big, seti) = FONT_SLOTS.with(|s| {
+        s.borrow().unwrap_or((0, 0, 0, 0, 0, 0))
+    });
 
     StyleContext {
         font: ui,
@@ -7031,6 +7552,7 @@ fn build_style(
         icon_font: icon,
         icon_big_font: icon_big,
         big_font: big,
+        seti_font: seti,
         font_height: ctx.font_height(ui),
         code_font_height: ctx.font_height(code),
         padding_x: config.ui.padding_x as f64,

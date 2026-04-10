@@ -42,7 +42,7 @@ Full PTY terminal with ANSI/VT100 colors, scrollback, and multi-terminal support
 
 ### Git Integration
 
-Git status view, gutter markers for changed lines, push, pull, commit, stash from the command palette.
+Git status view, gutter markers, per-line blame annotations, file commit log, push, pull, commit, stash from the command palette.
 
 </div>
 

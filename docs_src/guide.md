@@ -101,8 +101,16 @@ Additional commands available from the palette:
 - `Sort Lines`, `Upper Case`, `Lower Case`
 - `Open User Settings`
 - `Toggle Minimap`, `Toggle Line Wrapping`, `Toggle Whitespace`
+- `Toggle Hidden Files` -- show/hide dotfiles in the sidebar
+- `Check For Updates` -- query GitHub for a newer release
 - `Git Pull`, `Git Push`, `Git Commit`, `Git Stash`, `Git Status`
+- `Git Blame` -- toggle per-line blame annotations (author + date)
+- `Git Log` -- show the last 50 commits for the active file
 - `Close All`, `Close All Others`
+
+## Sidebar
+
+File icons in the sidebar are color-coded by extension (e.g. Rust files in red, Python in blue, Go in cyan). Colors are loaded from `data/assets/file_icons.json`. Hidden files (dotfiles) are hidden by default; toggle visibility with `Toggle Hidden Files` from the command palette.
 
 ## Sidebar Context Menu
 
@@ -232,6 +240,7 @@ max_tabs = 8
 blink_period = 0.8
 disable_blink = false
 mac_command_as_ctrl = true     # macOS: fold Cmd into Ctrl (on by default on Mac)
+format_on_paste = true         # convert pasted indent to match document style
 
 [lsp]
 load_on_startup = true
@@ -271,9 +280,12 @@ Custom keybindings can be added under `[keybindings]`:
 
 ```
 lite-anvil [file...]          Open files
+lite-anvil file.rs:42         Open file at line 42
 lite-anvil -v                 Verbose mode (log LSP errors to stderr)
 lite-anvil --verbose          Same as -v
 ```
+
+The `:N` line-number suffix also works in the file picker (`Ctrl+O`).
 
 ### Themes
 

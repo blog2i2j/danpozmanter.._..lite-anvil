@@ -77,10 +77,20 @@ pub struct DrawTextCmd {
     pub bounding: RenRect,
 }
 
+/// An RGBA image to blit onto the surface.
+pub struct DrawImageCmd {
+    pub data: std::sync::Arc<Vec<u8>>,
+    pub width: i32,
+    pub height: i32,
+    pub x: i32,
+    pub y: i32,
+}
+
 pub enum Command {
     SetClip(RenRect),
     DrawRect { rect: RenRect, color: RenColor },
     DrawText(DrawTextCmd),
+    DrawImage(DrawImageCmd),
 }
 
 // ── RenCache ──────────────────────────────────────────────────────────────────
@@ -135,6 +145,27 @@ impl RenCache {
             return;
         }
         self.commands.push(Command::DrawRect { rect, color });
+    }
+
+    /// Push a DrawImage (RGBA bitmap) command.
+    pub fn push_draw_image(
+        &mut self,
+        data: std::sync::Arc<Vec<u8>>,
+        width: i32,
+        height: i32,
+        x: i32,
+        y: i32,
+    ) {
+        let rect = RenRect { x, y, w: width, h: height };
+        if self.last_clip.overlaps(rect) {
+            self.commands.push(Command::DrawImage(DrawImageCmd {
+                data,
+                width,
+                height,
+                x,
+                y,
+            }));
+        }
     }
 
     /// Push a DrawText command. Returns the new x position after the text.
@@ -241,6 +272,13 @@ fn cmd_hash(cmd: &Command) -> (RenRect, u32) {
             fnv1a_update(&mut h, &dt.x.to_bits().to_ne_bytes());
             fnv1a_update(&mut h, &dt.y.to_ne_bytes());
             fnv1a_update(&mut h, &[dt.color.r, dt.color.g, dt.color.b, dt.color.a]);
+            (r, h)
+        }
+        Command::DrawImage(di) => {
+            let r = RenRect { x: di.x, y: di.y, w: di.width, h: di.height };
+            fnv1a_update(&mut h, &di.x.to_ne_bytes());
+            fnv1a_update(&mut h, &di.y.to_ne_bytes());
+            fnv1a_update(&mut h, &(std::sync::Arc::as_ptr(&di.data) as usize).to_ne_bytes());
             (r, h)
         }
     }
@@ -385,11 +423,63 @@ pub unsafe fn render_dirty_rects(
                 Command::DrawText(dt) => {
                     unsafe { draw_text_surface(pixels, pitch, &fmt, dt, clip) };
                 }
+                Command::DrawImage(di) => {
+                    unsafe { draw_image_surface(pixels, pitch, &fmt, di, clip) };
+                }
             }
         }
     }
 
     unsafe { SDL_SetSurfaceClipRect(surface, std::ptr::null()) };
+}
+
+/// Alpha-blend an RGBA image onto the surface.
+unsafe fn draw_image_surface(
+    pixels: *mut u8,
+    pitch: usize,
+    fmt: &PixFmt,
+    di: &DrawImageCmd,
+    clip: RenRect,
+) {
+    let clip_x2 = clip.x + clip.w;
+    let clip_y2 = clip.y + clip.h;
+    let data = &di.data;
+    let src_stride = di.width as usize * 4;
+    for row in 0..di.height {
+        let dst_y = di.y + row;
+        if dst_y < clip.y || dst_y >= clip_y2 {
+            continue;
+        }
+        let src_row = row as usize * src_stride;
+        unsafe {
+            let row_ptr = pixels.add(dst_y as usize * pitch) as *mut u32;
+            for col in 0..di.width {
+                let dst_x = di.x + col;
+                if dst_x < clip.x || dst_x >= clip_x2 {
+                    continue;
+                }
+                let si = src_row + col as usize * 4;
+                let sr = data[si] as u32;
+                let sg = data[si + 1] as u32;
+                let sb = data[si + 2] as u32;
+                let sa = data[si + 3] as u32;
+                if sa == 0 {
+                    continue;
+                }
+                let dst_ptr = row_ptr.add(dst_x as usize);
+                if sa == 255 {
+                    *dst_ptr = fmt.pack(sr as u8, sg as u8, sb as u8, 255);
+                } else {
+                    let (dr, dg, db, da) = fmt.unpack(*dst_ptr);
+                    let ia = 255 - sa;
+                    let nr = ((sr * sa + dr as u32 * ia) >> 8) as u8;
+                    let ng = ((sg * sa + dg as u32 * ia) >> 8) as u8;
+                    let nb = ((sb * sa + db as u32 * ia) >> 8) as u8;
+                    *dst_ptr = fmt.pack(nr, ng, nb, da);
+                }
+            }
+        }
+    }
 }
 
 /// Fill a rectangle with a solid color, respecting the clip rect.

@@ -56,6 +56,7 @@ pub struct StyleContext {
     pub icon_font: u64,
     pub icon_big_font: u64,
     pub big_font: u64,
+    pub seti_font: u64,
 
     // Metrics
     pub font_height: f64,

@@ -15,6 +15,8 @@ pub trait DrawContext {
     fn font_height(&self, font_id: u64) -> f64;
     /// Get text width.
     fn font_width(&self, font_id: u64, text: &str) -> f64;
+    /// Draw an RGBA image at the given position.
+    fn draw_image(&mut self, data: &std::sync::Arc<Vec<u8>>, width: i32, height: i32, x: f64, y: f64);
 }
 
 /// Update context passed to views during the update phase.

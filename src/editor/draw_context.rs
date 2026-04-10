@@ -101,6 +101,12 @@ impl DrawContext for NativeDrawContext {
             .map(|f| f.lock().text_width(text, 0.0) as f64)
             .unwrap_or(0.0)
     }
+
+    fn draw_image(&mut self, data: &std::sync::Arc<Vec<u8>>, width: i32, height: i32, x: f64, y: f64) {
+        with_cache(|c| {
+            c.push_draw_image(data.clone(), width, height, x as i32, y as i32);
+        });
+    }
 }
 
 /// Headless DrawContext for testing and non-SDL builds.
@@ -118,6 +124,7 @@ impl DrawContext for HeadlessDrawContext {
     fn font_width(&self, _font_id: u64, _text: &str) -> f64 {
         0.0
     }
+    fn draw_image(&mut self, _data: &std::sync::Arc<Vec<u8>>, _width: i32, _height: i32, _x: f64, _y: f64) {}
 }
 
 #[cfg(test)]

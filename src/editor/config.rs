@@ -60,6 +60,9 @@ pub struct NativeConfig {
     /// true on macOS so shortcuts feel native. Set to false to use Ctrl
     /// uniformly across platforms. No-op on non-Mac.
     pub mac_command_as_ctrl: bool,
+    /// When true, pasted text has its leading whitespace converted to match the
+    /// document's indent style (tabs vs spaces) and size. Default true.
+    pub format_on_paste: bool,
     /// Color overrides (key -> "#rrggbb" or "#rrggbbaa").
     #[serde(default)]
     pub colors: ColorsConfig,
@@ -289,6 +292,7 @@ impl NativeConfig {
             stonks: true,
             use_system_file_picker: false,
             mac_command_as_ctrl: cfg!(target_os = "macos"),
+            format_on_paste: true,
             colors: ColorsConfig::default(),
             keybindings: HashMap::new(),
             plugins: HashMap::new(),
@@ -486,7 +490,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             divider_size: 1,
-            scrollbar_size: 4,
+            scrollbar_size: 8,
             expanded_scrollbar_size: 12,
             minimum_thumb_size: 20,
             contracted_scrollbar_margin: 8,
