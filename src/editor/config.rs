@@ -412,7 +412,7 @@ impl NativeConfig {
     }
 
     /// Fill in default font paths for fonts that have no path set.
-    fn resolve_font_paths(&mut self, datadir: &str) {
+    pub fn resolve_font_paths(&mut self, datadir: &str) {
         if self.fonts.ui.path.is_none() {
             self.fonts.ui.path = Some(format!("{datadir}/fonts/Lilex-Regular.ttf"));
         }

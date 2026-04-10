@@ -20,18 +20,20 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 
 - **Built-in LSP** with diagnostics, completion, hover, go-to-definition, references, inlay hints
 - **Embedded terminal** with ANSI colors, scrollback, and multi-terminal support
-- **Indent guides** at each indentation level
-- **Line sorting** on selected lines
-- **Project-wide search** (Ctrl+Shift+F) with grep-based results
-- **Git gutter markers** showing added, modified, and deleted lines
+- **Find & Replace** with live search, match counter, regex/whole-word/case toggles, and find-in-selection
+- **Bookmarks** -- toggle with Ctrl+F4, navigate with F4 / Shift+F4, accent marker in gutter
 - **Code folding** with indent-based fold detection
-- **Native file watching** via inotify for external-change detection
-- **Single-file find and replace**
+- **Project-wide search** (Ctrl+Shift+F) with grep-based results
+- **Git integration** -- gutter markers, status view, push/pull/commit/stash from command palette
+- **Multi-cursor editing** -- Ctrl+Shift+Up/Down to add cursors, Ctrl+D to select next occurrence
 - **Minimap** with syntax-colored blocks, click to scroll
+- **Language-aware line comments** -- Ctrl+/ picks the correct marker for 51 languages
+- **51 built-in syntax grammars** including Rust, Go, Python, TypeScript, C, C++, Java, and more
 - **Session restore** -- open files, active tab, font scale persist across restarts
-- **50 built-in syntax grammars** including Rust, Go, Python, TypeScript, C, C++, Java, and more
+- **Native file watching** via inotify for external-change detection
 - **JSON-backed color themes** (`data/assets/themes/*.json`) with runtime cycling (Ctrl+Shift+P)
 - **Keyboard-navigated file/folder open** with filesystem autocomplete
+- **Graceful font fallback** -- falls back to built-in fonts with a warning if custom fonts fail
 
 ## Shortcuts
 
@@ -42,18 +44,22 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 | `Ctrl+Shift+O` | Open project folder |
 | `Ctrl+Shift+R` | Open recent file or folder |
 | `Ctrl+Shift+F` | Project-wide search |
-| `Ctrl+Shift+P` | Cycle color theme |
-| `Ctrl+=` / `Ctrl+-` | Font zoom in / out |
 | `Ctrl+F` | Find in file |
 | `Ctrl+H` | Replace in file |
+| `F3` / `Shift+F3` | Next / previous match |
+| `Ctrl+/` | Toggle line comment |
+| `Ctrl+Up` / `Ctrl+Down` | Move line up / down |
+| `Ctrl+F4` | Toggle bookmark |
+| `F4` / `Shift+F4` | Next / previous bookmark |
+| `Ctrl+Shift+[` / `]` | Fold / unfold code block |
+| `Ctrl+=` / `Ctrl+-` | Font zoom in / out |
 | `Ctrl+M` | Toggle minimap |
 | `Alt+Z` | Toggle line wrapping |
 | `Ctrl+B` | Toggle sidebar |
-| `F5` | Toggle terminal |
+| `Ctrl+`` ` / `F5` | Toggle terminal |
 | `F12` | Go to definition (LSP) |
 | `Ctrl+K` | Hover info (LSP) |
-| `Ctrl+Shift+[` | Fold code block |
-| `Ctrl+Shift+]` | Unfold code block |
+| `Ctrl+Shift+P` | Cycle color theme |
 | `Ctrl+W` | Close tab |
 | `Ctrl+Tab` | Next tab |
 

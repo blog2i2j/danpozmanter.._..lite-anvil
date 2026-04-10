@@ -105,7 +105,7 @@ fn sdl_error() -> String {
 pub fn init() -> Result<()> {
     unsafe {
         SDL_SetAppMetadata(
-            c"Lite Anvil".as_ptr(),
+            c"Lite-Anvil".as_ptr(),
             concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast(),
             c"com.lite-anvil.LiteAnvil".as_ptr(),
         );

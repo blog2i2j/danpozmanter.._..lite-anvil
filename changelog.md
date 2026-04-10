@@ -1,5 +1,12 @@
 # Change Log
 
+## [2.3.0] - 2026-04-10 — Bookmarks, find-in-selection, graceful font fallback.
+
+* Bookmarks: `Ctrl+F4` toggles a bookmark on the current line, `F4` jumps to the next bookmark, `Shift+F4` to the previous. Bookmarked lines show an accent-colored marker in the gutter. Bookmarks are per-document and wrap around.
+* Find in selection: when a multi-line selection is active and `Ctrl+F` is pressed, search automatically scopes to the selected region. Toggle with `Alt+S` inside the find bar. The hint row shows `[x]` next to `Sel` when active.
+* Graceful font fallback: if a configured font path fails to load (e.g. missing file, bad path), the editor now resets to the built-in default fonts and shows a warning banner instead of crashing. If even the defaults fail, a clear error message is printed to stderr before exiting.
+* SDL Window title fix - consistent across platforms.
+
 ## [2.2.2] - 2026-04-10 — Mac font fix, Cmd-as-Ctrl on by default, docs overhaul.
 
 * Fixed `FT_New_Face failed (data/fonts/Lilex-Regular.ttf)` on macOS: `current_exe()` can return a relative path on macOS; we now canonicalize it before deriving the data directory. Also added a `Contents/Resources/data/` lookup for standard app-bundle layouts.

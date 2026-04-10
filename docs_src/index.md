@@ -88,6 +88,14 @@ Open files, active tab, font scale, and project root persist across restarts. Re
 
 <div class="feature-card" markdown>
 
+### Bookmarks & Find-in-Selection
+
+Ctrl+F4 to bookmark lines, F4/Shift+F4 to navigate. Find scopes to the selection when a multi-line region is active.
+
+</div>
+
+<div class="feature-card" markdown>
+
 ### Bracket Pair Colorization
 
 Matching brackets colored by nesting depth (gold, pink, blue) like VS Code.

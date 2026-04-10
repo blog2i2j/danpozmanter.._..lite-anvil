@@ -24,6 +24,8 @@ pub struct DocView {
     pub folds: Vec<(usize, usize)>,
     /// Whether to render whitespace markers (dots for spaces, arrows for tabs).
     pub show_whitespace: bool,
+    /// Bookmarked lines (1-based, kept sorted).
+    pub bookmarks: Vec<usize>,
 }
 
 impl DocView {
@@ -42,6 +44,7 @@ impl DocView {
             indent_size: 4,
             folds: Vec::new(),
             show_whitespace: false,
+            bookmarks: Vec::new(),
         }
     }
 }
@@ -156,6 +159,14 @@ impl DocView {
             if self.folds.iter().any(|(s, _)| *s == line.line_number) {
                 let fold_x = self.rect.x + 4.0;
                 ctx.draw_text(style.code_font, ">", fold_x, text_y, style.dim.to_array());
+            }
+
+            // Bookmark marker
+            if self.bookmarks.contains(&line.line_number) {
+                let bm_x = self.rect.x + 2.0;
+                let bm_y = y + line_h * 0.3;
+                let bm_size = line_h * 0.4;
+                ctx.draw_rect(bm_x, bm_y, bm_size, bm_size, style.accent.to_array());
             }
 
             // Git gutter marker

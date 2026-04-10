@@ -59,6 +59,7 @@ description: Keyboard shortcuts, LSP language server setup, configuration, and s
 | `Alt+R` | Toggle regex (inside find bar) |
 | `Alt+W` | Toggle whole word (inside find bar) |
 | `Alt+I` | Toggle case-insensitive (inside find bar) |
+| `Alt+S` | Toggle find-in-selection (inside find bar) |
 | `Ctrl+Enter` | Replace current match and find next |
 | `Ctrl+Shift+F` | Project-wide search |
 
@@ -71,6 +72,16 @@ description: Keyboard shortcuts, LSP language server setup, configuration, and s
 | `Shift+F12` | Find references |
 | `Ctrl+Shift+F12` | Go to type definition |
 | `Ctrl+K` | Hover |
+
+### Bookmarks
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+F4` | Toggle bookmark on current line |
+| `F4` | Jump to next bookmark |
+| `Shift+F4` | Jump to previous bookmark |
+
+Bookmarked lines show an accent-colored marker in the gutter. Bookmarks wrap around and are per-document.
 
 ### Navigation
 

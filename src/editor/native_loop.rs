@@ -291,11 +291,25 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         }
     }
 
+    let mut font_warning: Option<String> = None;
     let mut draw_ctx = match load_fonts(&config) {
         Ok(ctx) => ctx,
         Err(e) => {
-            log::error!("Font loading failed: {e}");
-            return false;
+            // Font loading failed (custom path or missing data dir). Try
+            // resetting to the built-in defaults before giving up entirely.
+            let msg = format!("Font loading failed: {e} -- falling back to defaults");
+            log::warn!("{msg}");
+            font_warning = Some(msg);
+            config.fonts = crate::editor::config::FontsConfig::default();
+            config.resolve_font_paths(datadir);
+            match load_fonts(&config) {
+                Ok(ctx) => ctx,
+                Err(e2) => {
+                    log::error!("Default font loading also failed: {e2}");
+                    eprintln!("Error: could not load any fonts. {e2}");
+                    return false;
+                }
+            }
         }
     };
     let display_scale = crate::window::get_display_scale();
@@ -439,13 +453,59 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         true
     }
 
+    /// Split `path:N` into `(path, Some(N))`. Handles Windows drive letters
+    /// (e.g. `C:\foo`) by only treating the trailing `:digits` as a line number.
+    fn split_path_line(input: &str) -> (&str, Option<usize>) {
+        if let Some(pos) = input.rfind(':') {
+            let suffix = &input[pos + 1..];
+            // Must be all digits and non-empty, and the part before the colon
+            // must be a non-empty path (rules out bare `:42`).
+            if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) && pos > 0 {
+                if let Ok(n) = suffix.parse::<usize>() {
+                    return (&input[..pos], Some(n));
+                }
+            }
+        }
+        (input, None)
+    }
+
+    /// After `open_file_into` pushes a doc, scroll it to `line`.
+    fn scroll_new_doc_to_line(docs: &mut [OpenDoc], line: usize, style_line_h: f64) {
+        if let Some(doc) = docs.last_mut() {
+            if let Some(buf_id) = doc.view.buffer_id {
+                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                    let ln = line.min(b.lines.len()).max(1);
+                    b.selections = vec![ln, 1, ln, 1];
+                    Ok(())
+                });
+                let y = ((line as f64 - 1.0) * style_line_h - doc.view.rect().h / 2.0).max(0.0);
+                doc.view.scroll_y = y;
+                doc.view.target_scroll_y = y;
+            }
+        }
+    }
+
+    let line_h_for_scroll = style.code_font_height * 1.2;
     let mut has_cli_files = false;
     for arg in _args.iter().skip(1) {
         if arg.starts_with('-') {
             continue;
         }
         has_cli_files = true;
-        open_file_into(arg, &mut docs);
+        let (path, goto_line) = split_path_line(arg);
+        // If path:N doesn't exist as-is but path does, use the split version.
+        let (actual_path, line) = if goto_line.is_some() && !std::path::Path::new(arg).is_file()
+            && std::path::Path::new(path).is_file()
+        {
+            (path, goto_line)
+        } else {
+            (arg.as_str(), None)
+        };
+        if open_file_into(actual_path, &mut docs) {
+            if let Some(ln) = line {
+                scroll_new_doc_to_line(&mut docs, ln, line_h_for_scroll);
+            }
+        }
     }
 
     // Session restore: if no CLI file args, try loading from storage.
@@ -556,12 +616,18 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     // Anchor (line, col) captured when find is opened — live-search re-centers here
     // so typing a longer query doesn't skip past matches the user hasn't seen yet.
     let mut find_anchor: (usize, usize) = (1, 1);
+    // Find-in-selection: when true, matches are limited to the captured range.
+    let mut find_in_selection = false;
+    // The selection range captured when find-in-selection was activated:
+    // (start_line, start_col, end_line, end_col), all 1-based.
+    let mut find_selection_range: Option<(usize, usize, usize, usize)> = None;
 
     // Nag view state.
     let mut nag_active = false;
     let mut nag_message = String::new();
     let mut nag_tab_to_close: Option<usize> = None;
-    let mut info_message: Option<(String, Instant)> = None;
+    let mut info_message: Option<(String, Instant)> = font_warning
+        .map(|msg| (msg, Instant::now()));
 
     // Command palette state.
     let mut palette_active = false;
@@ -1115,8 +1181,20 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     find_query.clear();
                     find_matches.clear();
                     find_current = None;
+                    find_in_selection = false;
+                    find_selection_range = None;
                     if let Some(doc) = docs.get(active_tab) {
                         find_anchor = doc_cursor(&doc.view);
+                        // If there's a multi-line selection, auto-enable
+                        // find-in-selection mode.
+                        let anchor = doc_anchor(&doc.view);
+                        let cursor = doc_cursor(&doc.view);
+                        if anchor.0 != cursor.0 {
+                            find_in_selection = true;
+                            let (sl, sc) = if anchor < cursor { anchor } else { cursor };
+                            let (el, ec) = if anchor < cursor { cursor } else { anchor };
+                            find_selection_range = Some((sl, sc, el, ec));
+                        }
                     }
                 }
                 "core:find-replace" | "find-replace:replace" => {
@@ -1135,8 +1213,9 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     if let Some(doc) = docs.get_mut(active_tab) {
                         let dv = &mut doc.view;
                         if find_matches.is_empty() && !find_query.is_empty() {
-                            find_matches = compute_find_matches(
-                                dv, &find_query, find_use_regex, find_whole_word, find_case_insensitive,
+                            let sel = if find_in_selection { find_selection_range } else { None };
+                            find_matches = compute_find_matches_filtered(
+                                dv, &find_query, find_use_regex, find_whole_word, find_case_insensitive, sel,
                             );
                         }
                         if !find_matches.is_empty() {
@@ -1152,8 +1231,9 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     if let Some(doc) = docs.get_mut(active_tab) {
                         let dv = &mut doc.view;
                         if find_matches.is_empty() && !find_query.is_empty() {
-                            find_matches = compute_find_matches(
-                                dv, &find_query, find_use_regex, find_whole_word, find_case_insensitive,
+                            let sel = if find_in_selection { find_selection_range } else { None };
+                            find_matches = compute_find_matches_filtered(
+                                dv, &find_query, find_use_regex, find_whole_word, find_case_insensitive, sel,
                             );
                         }
                         if !find_matches.is_empty() {
@@ -1773,14 +1853,31 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 let p = std::path::Path::new(&path);
                                 match cmdview_mode {
                                     CmdViewMode::OpenFile => {
-                                        if p.is_file() {
+                                        // Support path:N to open at a specific line.
+                                        let (file_path, goto_line) = split_path_line(&path);
+                                        let (actual, line) = if goto_line.is_some()
+                                            && !p.is_file()
+                                            && std::path::Path::new(file_path).is_file()
+                                        {
+                                            (file_path.to_string(), goto_line)
+                                        } else {
+                                            (path.clone(), None)
+                                        };
+                                        let ap = std::path::Path::new(&actual);
+                                        if ap.is_file() {
                                             cmdview_active = false;
-                                            if open_file_into(&path, &mut docs) {
+                                            if open_file_into(&actual, &mut docs) {
                                                 active_tab = docs.len() - 1;
-                                                autoreload.watch(&path);
-                                                update_recent(&mut recent_files, &path, 100);
+                                                autoreload.watch(&actual);
+                                                update_recent(&mut recent_files, &actual, 100);
+                                                if let Some(ln) = line {
+                                                    scroll_new_doc_to_line(
+                                                        &mut docs, ln,
+                                                        style.code_font_height * 1.2,
+                                                    );
+                                                }
                                             }
-                                        } else if p.is_dir() {
+                                        } else if ap.is_dir() {
                                             // Navigate into directory.
                                             cmdview_text = format!("{path}/");
                                             cmdview_cursor = cmdview_text.len();
@@ -2253,14 +2350,35 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 "r" => { find_use_regex = !find_use_regex; true }
                                 "w" => { find_whole_word = !find_whole_word; true }
                                 "i" => { find_case_insensitive = !find_case_insensitive; true }
+                                "s" => {
+                                    find_in_selection = !find_in_selection;
+                                    if find_in_selection && find_selection_range.is_none() {
+                                        // Capture current selection if we don't already have one.
+                                        if let Some(doc) = docs.get(active_tab) {
+                                            let a = doc_anchor(&doc.view);
+                                            let c = doc_cursor(&doc.view);
+                                            if a.0 != c.0 {
+                                                let (sl, sc) = if a < c { a } else { c };
+                                                let (el, ec) = if a < c { c } else { a };
+                                                find_selection_range = Some((sl, sc, el, ec));
+                                            } else {
+                                                // Single-line selection; not meaningful for
+                                                // find-in-selection. Disable again.
+                                                find_in_selection = false;
+                                            }
+                                        }
+                                    }
+                                    true
+                                }
                                 _ => false,
                             };
                             if toggled {
                                 if let Some(doc) = docs.get_mut(active_tab) {
                                     let dv = &mut doc.view;
-                                    find_matches = compute_find_matches(
+                                    let sel = if find_in_selection { find_selection_range } else { None };
+                                    find_matches = compute_find_matches_filtered(
                                         dv, &find_query, find_use_regex,
-                                        find_whole_word, find_case_insensitive,
+                                        find_whole_word, find_case_insensitive, sel,
                                     );
                                     find_current = find_match_at_or_after(
                                         &find_matches, find_anchor.0, find_anchor.1,
@@ -2310,9 +2428,10 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 if let Some(doc) = docs.get_mut(active_tab) {
                                     let dv = &mut doc.view;
                                     replace_current_match(dv, &find_query, &replace_query);
-                                    find_matches = compute_find_matches(
+                                    let sel = if find_in_selection { find_selection_range } else { None };
+                                    find_matches = compute_find_matches_filtered(
                                         dv, &find_query, find_use_regex,
-                                        find_whole_word, find_case_insensitive,
+                                        find_whole_word, find_case_insensitive, sel,
                                     );
                                     if !find_matches.is_empty() {
                                         let (cl, cc) = doc_cursor(dv);
@@ -2355,9 +2474,10 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     find_query.pop();
                                     if let Some(doc) = docs.get_mut(active_tab) {
                                         let dv = &mut doc.view;
-                                        find_matches = compute_find_matches(
+                                        let sel = if find_in_selection { find_selection_range } else { None };
+                                        find_matches = compute_find_matches_filtered(
                                             dv, &find_query, find_use_regex,
-                                            find_whole_word, find_case_insensitive,
+                                            find_whole_word, find_case_insensitive, sel,
                                         );
                                         find_current = find_match_at_or_after(
                                             &find_matches, find_anchor.0, find_anchor.1,
@@ -2525,9 +2645,10 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             find_query.push_str(text);
                             if let Some(doc) = docs.get_mut(active_tab) {
                                 let dv = &mut doc.view;
-                                find_matches = compute_find_matches(
+                                let sel = if find_in_selection { find_selection_range } else { None };
+                                find_matches = compute_find_matches_filtered(
                                     dv, &find_query, find_use_regex,
-                                    find_whole_word, find_case_insensitive,
+                                    find_whole_word, find_case_insensitive, sel,
                                 );
                                 find_current = find_match_at_or_after(
                                     &find_matches, find_anchor.0, find_anchor.1,
@@ -4700,10 +4821,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     );
                     let mark = |on: bool| if on { "[x]" } else { "[ ]" };
                     let hint = format!(
-                        "Alt+R Regex {}  Alt+W Word {}  Alt+I Case {}   F3 Next  Shift+F3 Prev  Esc Close",
+                        "Alt+R Regex {}  Alt+W Word {}  Alt+I Case {}  Alt+S Sel {}   F3 Next  Shift+F3 Prev  Esc Close",
                         mark(find_use_regex),
                         mark(find_whole_word),
                         mark(find_case_insensitive),
+                        mark(find_in_selection),
                     );
                     draw_ctx.draw_text(
                         style.font,
@@ -5392,6 +5514,38 @@ fn compute_find_matches(
         Ok(())
     });
     out
+}
+
+/// Like `compute_find_matches` but optionally restricts results to the lines
+/// covered by `selection`. The range is `(start_line, start_col, end_line,
+/// end_col)`, all 1-based.
+#[cfg(feature = "sdl")]
+fn compute_find_matches_filtered(
+    dv: &DocView,
+    query: &str,
+    use_regex: bool,
+    whole_word: bool,
+    case_insensitive: bool,
+    selection: Option<(usize, usize, usize, usize)>,
+) -> Vec<(usize, usize, usize)> {
+    let all = compute_find_matches(dv, query, use_regex, whole_word, case_insensitive);
+    let Some((sl, sc, el, ec)) = selection else {
+        return all;
+    };
+    all.into_iter()
+        .filter(|&(line, col, end_col)| {
+            if line < sl || line > el {
+                return false;
+            }
+            if line == sl && col < sc {
+                return false;
+            }
+            if line == el && end_col > ec {
+                return false;
+            }
+            true
+        })
+        .collect()
 }
 
 /// Index of the first match at or after (line, col). Wraps to 0 if nothing
@@ -6248,8 +6402,69 @@ fn handle_doc_command(
         "doc:unfold-all" => {
             dv.folds.clear();
         }
+        "doc:toggle-bookmark" => {
+            let _ = buffer::with_buffer(buf_id, |b| {
+                let cursor_line = *b.selections.get(2).unwrap_or(&1);
+                if let Some(pos) = dv.bookmarks.iter().position(|&l| l == cursor_line) {
+                    dv.bookmarks.remove(pos);
+                } else {
+                    dv.bookmarks.push(cursor_line);
+                    dv.bookmarks.sort();
+                }
+                Ok(())
+            });
+        }
+        "doc:next-bookmark" => {
+            if !dv.bookmarks.is_empty() {
+                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                    let cursor_line = *b.selections.get(2).unwrap_or(&1);
+                    let target = dv.bookmarks
+                        .iter()
+                        .find(|&&l| l > cursor_line)
+                        .copied()
+                        .unwrap_or(dv.bookmarks[0]);
+                    b.selections = vec![target, 1, target, 1];
+                    Ok(())
+                });
+                scroll_to_cursor(dv);
+            }
+        }
+        "doc:previous-bookmark" => {
+            if !dv.bookmarks.is_empty() {
+                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                    let cursor_line = *b.selections.get(2).unwrap_or(&1);
+                    let target = dv.bookmarks
+                        .iter()
+                        .rev()
+                        .find(|&&l| l < cursor_line)
+                        .copied()
+                        .unwrap_or(*dv.bookmarks.last().unwrap_or(&1));
+                    b.selections = vec![target, 1, target, 1];
+                    Ok(())
+                });
+                scroll_to_cursor(dv);
+            }
+        }
         _ => {}
     }
+}
+
+/// Scroll view so the cursor line is visible.
+#[cfg(feature = "sdl")]
+fn scroll_to_cursor(dv: &mut DocView) {
+    let Some(buf_id) = dv.buffer_id else { return };
+    let _ = buffer::with_buffer(buf_id, |b| {
+        let cursor_line = *b.selections.get(2).unwrap_or(&1);
+        let line_h = 20.0;
+        let cursor_y = (cursor_line as f64 - 1.0) * line_h;
+        let view_h = dv.rect().h;
+        if cursor_y < dv.scroll_y || cursor_y + line_h > dv.scroll_y + view_h {
+            let new_scroll = (cursor_y - view_h / 2.0).max(0.0);
+            dv.scroll_y = new_scroll;
+            dv.target_scroll_y = new_scroll;
+        }
+        Ok(())
+    });
 }
 
 /// Parse a hex color string like "#rrggbb" or "#rrggbbaa" or "rgba(r,g,b,a)" into Color.
