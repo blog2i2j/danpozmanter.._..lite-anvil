@@ -30,18 +30,6 @@ impl NativeKeymap {
         for (stroke, cmds) in DEFAULT_BINDINGS {
             km.add(stroke, cmds);
         }
-        // On macOS, alias ctrl+ bindings to cmd+ (Command key).
-        if cfg!(target_os = "macos") {
-            let ctrl_bindings: Vec<(String, Vec<String>)> = km.map.iter()
-                .filter(|(k, _)| k.starts_with("ctrl+"))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            for (stroke, cmds) in ctrl_bindings {
-                let cmd_stroke = format!("cmd+{}", &stroke[5..]);
-                let cmd_refs: Vec<&str> = cmds.iter().map(String::as_str).collect();
-                km.add(&cmd_stroke, &cmd_refs);
-            }
-        }
         km
     }
 
@@ -516,30 +504,6 @@ mod tests {
         let km = NativeKeymap::with_defaults();
         assert!(km.get_bindings("core:open-recent-file").is_none());
         assert!(km.get_bindings("core:open-recent-folder").is_none());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_alias_loop_creates_cmd_bindings() {
-        // The 1.5.5 approach: every ctrl+ default also gets a parallel cmd+ entry.
-        let km = NativeKeymap::with_defaults();
-        for ctrl_stroke in ["ctrl+s", "ctrl+q", "ctrl+o", "ctrl+shift+r", "ctrl+p"] {
-            let cmd_stroke = format!("cmd+{}", &ctrl_stroke[5..]);
-            assert!(
-                km.map.contains_key(&cmd_stroke),
-                "expected {cmd_stroke} alias for {ctrl_stroke}",
-            );
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_alias_preserves_command_targets() {
-        // The cmd+ alias must point at the same commands as the ctrl+ original.
-        let km = NativeKeymap::with_defaults();
-        let ctrl_save = km.map.get("ctrl+s").expect("ctrl+s missing");
-        let cmd_save = km.map.get("cmd+s").expect("cmd+s missing");
-        assert_eq!(ctrl_save, cmd_save);
     }
 
     #[test]

@@ -1530,7 +1530,13 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         continue;
                     }
                     cursor_blink_reset = Instant::now();
-                    let mods = *modifiers;
+                    let mut mods = *modifiers;
+                    // On macOS, optionally fold Cmd into Ctrl so Cmd+S acts
+                    // like Ctrl+S. See NativeConfig::mac_command_as_ctrl.
+                    if cfg!(target_os = "macos") && config.mac_command_as_ctrl && mods.gui {
+                        mods.ctrl = true;
+                        mods.gui = false;
+                    }
 
                     // Context menu intercepts keys when visible.
                     if context_menu.visible {

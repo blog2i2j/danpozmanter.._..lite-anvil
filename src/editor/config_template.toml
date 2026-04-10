@@ -15,6 +15,10 @@
 # blink_period = 0.8
 # disable_blink = false
 
+# macOS only: fold Command into Control so Cmd+S acts like Ctrl+S.
+# Default false -- on Mac you press Ctrl+S just like on Linux/Windows.
+# mac_command_as_ctrl = false
+
 # [lsp]
 # load_on_startup = true
 # semantic_highlighting = true

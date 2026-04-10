@@ -1,5 +1,11 @@
 # Change Log
 
+## [2.2.1] - 2026-04-09 — Mac Ctrl/Cmd behavior reverted, opt-in via config.
+
+* Reverted the macOS Ctrl→Cmd alias that shipped in 2.2.0. On Mac, the default shortcuts are now the same as Linux/Windows — press `Ctrl+S` to save, not `Cmd+S`.
+* New config option `mac_command_as_ctrl` (default `false`, top-level in `config.toml`). When enabled on macOS, the Command key folds into Control so `Cmd+S` acts like `Ctrl+S`, matching standard Mac conventions. No-op on other platforms.
+* Removed the now-dead `ctrl+X → cmd+X` binding duplication from `NativeKeymap::with_defaults` and the two `macos_alias_*` tests that exercised it.
+
 ## [2.2.0] - 2026-04-09 — Enhanced Find/Replace, Command Palette fixes, comment fixes.
 
 * Find/Replace bar now appears at the top of the editor (just below the tabs and breadcrumb), matching the file picker, command palette, and project search. Previously it sat in the lower-left, splitting the user's attention between two corners of the window.
