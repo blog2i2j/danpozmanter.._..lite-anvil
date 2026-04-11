@@ -1841,7 +1841,7 @@ pub fn run(
                     }
                 }
                 "core:open-file" | "core:open-file-from-project" => {
-                    if subsystems.has_picker() {
+                    if subsystems.has_picker() || single_file_mode {
                         cmdview_active = true;
                         cmdview_mode = CmdViewMode::OpenFile;
                         let abs_root = std::path::absolute(&project_root)
@@ -2635,7 +2635,7 @@ pub fn run(
                     }
 
                     // Command view (file/folder open) intercepts keys.
-                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs) {
+                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile) {
                         /// Expand ~ and resolve relative paths to absolute.
                         fn expand_path(text: &str, project_root: &str) -> String {
                             if let Some(rest) = text.strip_prefix('~') {
@@ -2752,6 +2752,12 @@ pub fn run(
                                         let ap = std::path::Path::new(&actual);
                                         if ap.is_file() {
                                             cmdview_active = false;
+                                            if single_file_mode {
+                                                // Replace current doc.
+                                                for d in &docs { autoreload.unwatch(&d.path); }
+                                                docs.clear();
+                                                active_tab = 0;
+                                            }
                                             if open_file_into(&actual, &mut docs) {
                                                 active_tab = docs.len() - 1;
                                                 autoreload.watch(&actual);
@@ -3851,7 +3857,7 @@ pub fn run(
                         redraw = true;
                         continue;
                     }
-                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs) {
+                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile) {
                         let prev_text = cmdview_text.clone();
                         // Insert at the caret rather than appending so left/right/home/end
                         // editing is preserved while typing.

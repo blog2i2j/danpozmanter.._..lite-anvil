@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build SDL3 without OpenGL/Vulkan/GPU support for Nano-Anvil.
+# Build SDL3 without OpenGL/Vulkan/GPU support.
 #
 # This produces a lightweight SDL3 (~3.4MB) that uses pure software
 # rendering via X11 shared-memory surfaces, avoiding the GPU driver

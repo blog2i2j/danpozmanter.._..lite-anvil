@@ -1,5 +1,11 @@
 # Change Log
 
+## [2.7.0] - 2026-04-11 -- Software rendering for all platforms, Nano-Anvil Open file.
+
+* Both Lite-Anvil and Nano-Anvil now use software-only SDL3 (no OpenGL, Vulkan, or GPU drivers loaded) on all platforms. Eliminates ~70MB of GPU driver overhead on Linux/NVIDIA, and reduces memory on macOS and Windows.
+* Nano-Anvil: Ctrl+O open file restored.
+* CI builds SDL3 from source with `-DSDL_OPENGL=OFF -DSDL_VULKAN=OFF -DSDL_GPU=OFF -DSDL_RENDER=OFF` on Linux, macOS, and Windows.
+
 ## [2.6.4] - 2026-04-11 -- Fix render loop memory leak.
 
 * Fixed infinite render loop that boosted memory usage and CPU.

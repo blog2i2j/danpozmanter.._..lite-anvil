@@ -325,6 +325,7 @@ Nano-Anvil is designed for lightweight, single-file editing:
 
 | Key | Action |
 |-----|--------|
+| `Ctrl+O` | Open file |
 | `Ctrl+S` | Save (prompts for path if untitled) |
 | `Ctrl+Shift+S` | Save As |
 | `Ctrl+Q` | Quit |

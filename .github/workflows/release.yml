@@ -37,18 +37,13 @@ jobs:
             libegl1-mesa-dev libgles2-mesa-dev \
             libwayland-dev libxkbcommon-dev wayland-protocols
           git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
-          cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -G Ninja
-          cmake --build SDL/build
-          sudo cmake --install SDL/build
-
-      - name: Build SDL3 (no-GL for Nano-Anvil)
-        run: |
-          cmake -S SDL -B SDL/build-nogl -DCMAKE_BUILD_TYPE=Release -G Ninja \
+          cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -G Ninja \
             -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF \
             -DSDL_GPU=OFF -DSDL_RENDER=OFF -DSDL_X11=ON -DSDL_WAYLAND=OFF
-          cmake --build SDL/build-nogl
+          cmake --build SDL/build
+          sudo cmake --install SDL/build
           mkdir -p lib/sdl3-nogl
-          cp -P SDL/build-nogl/libSDL3.so* lib/sdl3-nogl/
+          cp -P SDL/build/libSDL3.so* lib/sdl3-nogl/
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -105,14 +100,14 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-x64-windows-sdl3-freetype-pcre2-v1
+          key: vcpkg-x64-windows-freetype-pcre2-v2
 
       - name: Install system dependencies
         run: |
           choco install pkgconfiglite -y
           $maxRetries = 3
           for ($i = 1; $i -le $maxRetries; $i++) {
-            vcpkg install sdl3:x64-windows freetype:x64-windows pcre2:x64-windows
+            vcpkg install freetype:x64-windows pcre2:x64-windows
             if ($LASTEXITCODE -eq 0) { break }
             if ($i -lt $maxRetries) {
               Write-Host "vcpkg install attempt $i failed, retrying in 15s..."
@@ -123,6 +118,16 @@ jobs:
           }
           echo "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "PKG_CONFIG_PATH=C:\vcpkg\installed\x64-windows\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          # Build SDL3 from source without GPU/GL support.
+          git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
+          cmake -S SDL -B SDL\build -DCMAKE_BUILD_TYPE=Release `
+            -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF `
+            -DSDL_GPU=OFF -DSDL_RENDER=OFF `
+            -DCMAKE_INSTALL_PREFIX=C:\sdl3-nogl
+          cmake --build SDL\build --config Release
+          cmake --install SDL\build --config Release
+          echo "PKG_CONFIG_PATH=C:\sdl3-nogl\lib\pkgconfig;$env:PKG_CONFIG_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -181,6 +186,8 @@ jobs:
           git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
           cmake -S SDL -B SDL/build $COMMON \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON \
+            -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF \
+            -DSDL_GPU=OFF -DSDL_RENDER=OFF \
             -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF \
             -DSDL_CAMERA=OFF
           cmake --build SDL/build
@@ -431,7 +438,16 @@ jobs:
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
       - name: Install system dependencies
-        run: brew install sdl3 freetype pcre2
+        run: |
+          brew install freetype pcre2 cmake ninja
+          git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
+          cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -G Ninja \
+            -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF \
+            -DSDL_GPU=OFF -DSDL_RENDER=OFF \
+            -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF \
+            -DSDL_CAMERA=OFF
+          cmake --build SDL/build
+          sudo cmake --install SDL/build
 
       - uses: dtolnay/rust-toolchain@stable
         with:
