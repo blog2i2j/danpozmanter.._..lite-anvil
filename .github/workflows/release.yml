@@ -365,6 +365,10 @@ jobs:
             rm -f "$processed_list" "$queued_list"
           }
 
+          # Ensure RPATHs for .app bundle layout.
+          install_name_tool -add_rpath @executable_path/../Frameworks target/x86_64-apple-darwin/release/lite-anvil 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path target/x86_64-apple-darwin/release/lite-anvil 2>/dev/null || true
+
           rm -rf LiteAnvil.app
           mkdir -p LiteAnvil.app/Contents/MacOS LiteAnvil.app/Contents/Frameworks
           cp target/x86_64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
@@ -374,6 +378,8 @@ jobs:
           otool -L LiteAnvil.app/Contents/MacOS/lite-anvil
 
           # Create NanoAnvil.app bundle
+          install_name_tool -add_rpath @executable_path/../Frameworks target/x86_64-apple-darwin/release/nano-anvil 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path target/x86_64-apple-darwin/release/nano-anvil 2>/dev/null || true
           rm -rf NanoAnvil.app
           mkdir -p NanoAnvil.app/Contents/MacOS NanoAnvil.app/Contents/Frameworks
           cp target/x86_64-apple-darwin/release/nano-anvil NanoAnvil.app/Contents/MacOS/
@@ -413,7 +419,8 @@ jobs:
           codesign --force --deep --sign - --timestamp=none NanoAnvil.app
           otool -L NanoAnvil.app/Contents/MacOS/nano-anvil
 
-          zip -r "lite-anvil-${APP_VERSION}-macos-x86_64.zip" LiteAnvil.app NanoAnvil.app
+          cp scripts/install-mac.sh .
+          zip -r "lite-anvil-${APP_VERSION}-macos-x86_64.zip" LiteAnvil.app NanoAnvil.app install-mac.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -595,6 +602,10 @@ jobs:
             rm -f "$processed_list" "$queued_list"
           }
 
+          # Ensure RPATHs for .app bundle layout.
+          install_name_tool -add_rpath @executable_path/../Frameworks target/aarch64-apple-darwin/release/lite-anvil 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path target/aarch64-apple-darwin/release/lite-anvil 2>/dev/null || true
+
           rm -rf LiteAnvil.app
           mkdir -p LiteAnvil.app/Contents/MacOS LiteAnvil.app/Contents/Frameworks
           cp target/aarch64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
@@ -604,6 +615,8 @@ jobs:
           otool -L LiteAnvil.app/Contents/MacOS/lite-anvil
 
           # Create NanoAnvil.app bundle
+          install_name_tool -add_rpath @executable_path/../Frameworks target/aarch64-apple-darwin/release/nano-anvil 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path target/aarch64-apple-darwin/release/nano-anvil 2>/dev/null || true
           rm -rf NanoAnvil.app
           mkdir -p NanoAnvil.app/Contents/MacOS NanoAnvil.app/Contents/Frameworks
           cp target/aarch64-apple-darwin/release/nano-anvil NanoAnvil.app/Contents/MacOS/
@@ -643,7 +656,8 @@ jobs:
           codesign --force --deep --sign - --timestamp=none NanoAnvil.app
           otool -L NanoAnvil.app/Contents/MacOS/nano-anvil
 
-          zip -r "lite-anvil-${APP_VERSION}-macos-aarch64.zip" LiteAnvil.app NanoAnvil.app
+          cp scripts/install-mac.sh .
+          zip -r "lite-anvil-${APP_VERSION}-macos-aarch64.zip" LiteAnvil.app NanoAnvil.app install-mac.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

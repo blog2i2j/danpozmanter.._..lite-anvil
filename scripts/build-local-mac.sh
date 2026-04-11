@@ -244,6 +244,15 @@ cargo build --release --workspace --target "$RUST_TARGET"
 BINARY="target/$RUST_TARGET/release/lite-anvil"
 [ -f "$BINARY" ] || die "binary not found at $BINARY"
 
+# Ensure binaries have @executable_path RPATHs for .app bundle layout.
+# This is necessary because cargo's build.rs RPATH may not survive
+# across cached builds.
+for bin in "$BINARY" "target/$RUST_TARGET/release/nano-anvil"; do
+    [ -f "$bin" ] || continue
+    install_name_tool -add_rpath @executable_path/../Frameworks "$bin" 2>/dev/null || true
+    install_name_tool -add_rpath @executable_path "$bin" 2>/dev/null || true
+done
+
 mkdir -p "$DIST_DIR"
 rm -rf "$APP" "$ARCHIVE"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
@@ -329,7 +338,8 @@ fi
 
 sign_macos_app "$APP"
 
-(cd "$DIST_DIR" && zip -qry "$(basename "$ARCHIVE")" LiteAnvil.app NanoAnvil.app)
+cp "$ROOT_DIR/scripts/install-mac.sh" "$DIST_DIR/install-mac.sh"
+(cd "$DIST_DIR" && zip -qry "$(basename "$ARCHIVE")" LiteAnvil.app NanoAnvil.app install-mac.sh)
 
 echo "Built archive: $ARCHIVE"
 echo "App bundles:   $APP, $NANO_APP"

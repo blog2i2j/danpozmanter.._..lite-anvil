@@ -1,5 +1,10 @@
 # Change Log
 
+## [2.7.2] - 2026-04-11 -- macOS install script, RPATH fix.
+
+* macOS release zips now include `install-mac.sh` which copies both LiteAnvil.app and NanoAnvil.app to /Applications, clears quarantine, and ad-hoc codesigns. No sudo required.
+* Fixed macOS "Library not loaded: @rpath/libSDL3.0.dylib" by adding `@executable_path/../Frameworks` RPATH via `install_name_tool` in the build scripts, bypassing cargo build cache issues.
+
 ## [2.7.1] - 2026-04-11 -- macOS launch fix.
 
 * Fixed macOS launch crash ("no LC_RPATH's found").
