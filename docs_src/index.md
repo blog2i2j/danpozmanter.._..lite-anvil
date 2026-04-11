@@ -104,6 +104,14 @@ Matching brackets colored by nesting depth (gold, pink, blue) like VS Code.
 
 <div class="feature-card" markdown>
 
+### Find & Replace in Files
+
+Find and Replace across files in a project folder.
+
+</div>
+
+<div class="feature-card" markdown>
+
 ### Nano-Anvil
 
 A minimal single-file editor with software rendering. No GPU driver overhead -- ~28MB RAM on Linux. No sidebar, terminal, LSP, git, or tabs.
