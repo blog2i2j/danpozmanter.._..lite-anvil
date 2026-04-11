@@ -6,7 +6,7 @@
 
 A fast code editor built in Rust with SDL3.
 
-Lite-Anvil also ships **Nano-Anvil**, a minimal single-file editor for lightweight editing. Nano-Anvil uses software rendering (no GPU driver overhead), starts at ~28MB RAM, and strips away the sidebar, terminal, LSP, git integration, and other heavy features.
+Lite-Anvil also ships with Nano-Anvil, a minimal single-file editor for lightweight editing. Nano-Anvil uses software rendering (no GPU driver overhead), and strips away the sidebar, terminal, LSP, git integration, and other heavy features.
 
 Lite-Anvil is a fork of [Lite XL](https://github.com/lite-xl/lite-xl), rewritten from the ground up in Rust.
 
