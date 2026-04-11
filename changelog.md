@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.7.1] - 2026-04-11 -- macOS launch fix.
+
+* Fixed macOS launch crash ("no LC_RPATH's found").
+
 ## [2.7.0] - 2026-04-11 -- Software rendering for all platforms, Nano-Anvil Open file.
 
 * Both Lite-Anvil and Nano-Anvil now use software-only SDL3 (no OpenGL, Vulkan, or GPU drivers loaded) on all platforms. Eliminates ~70MB of GPU driver overhead on Linux/NVIDIA, and reduces memory on macOS and Windows.
