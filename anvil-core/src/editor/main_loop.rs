@@ -544,6 +544,26 @@ pub fn run(
     let mut docs: Vec<OpenDoc> = Vec::new();
     let mut active_tab: usize = 0;
 
+    /// Files larger than this threshold load on a background thread with a
+    /// progress overlay instead of blocking the UI.
+    const BG_LOAD_THRESHOLD: u64 = 25 * 1024 * 1024; // 25 MB
+
+    /// Check file size against hard limit. Returns Err with a message if the
+    /// file exceeds the limit.
+    fn check_file_size_limit(path: &str, hard_limit_mb: u32) -> Result<u64, String> {
+        let sz = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let limit_bytes = (hard_limit_mb as u64) * 1024 * 1024;
+        if sz > limit_bytes {
+            Err(format!(
+                "File too large: {:.1} MB exceeds hard limit of {} MB (set large_file.hard_limit_mb in config.toml)",
+                sz as f64 / (1024.0 * 1024.0),
+                hard_limit_mb
+            ))
+        } else {
+            Ok(sz)
+        }
+    }
+
     /// Open a file and add it to the docs list.
     fn open_file_into(path: &str, docs: &mut Vec<OpenDoc>) -> bool {
         // Resolve to an absolute path so doc.path round-trips through session
@@ -949,6 +969,44 @@ pub fn run(
     // rendering. Includes the tab index so we write to the correct doc even
     // if the user switched tabs between frames.
     let mut pending_render_cache: Option<(usize, Vec<RenderLine>, i64, f64)> = None;
+
+    // Background file load job. When a large file is being loaded on a
+    // background thread, this holds the progress atomics and the join handle.
+    struct LoadJob {
+        path: String,
+        name: String,
+        bytes_read: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        total_bytes: u64,
+        handle: Option<std::thread::JoinHandle<Result<buffer::BufferState, String>>>,
+    }
+    let mut load_job: Option<LoadJob> = None;
+
+    /// Spawn a background file load. Returns a LoadJob to poll each frame.
+    fn spawn_load(path: &str, total: u64) -> LoadJob {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let bytes_read = std::sync::Arc::new(AtomicU64::new(0));
+        let bytes_read_clone = bytes_read.clone();
+        let path_owned = path.to_string();
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string());
+        let handle = std::thread::spawn(move || {
+            let mut state = buffer::default_buffer_state();
+            buffer::load_file_with_progress(&mut state, &path_owned, |bytes, _total| {
+                bytes_read_clone.store(bytes, Ordering::Relaxed);
+            })
+            .map_err(|e| e.to_string())?;
+            Ok(state)
+        });
+        LoadJob {
+            path: path.to_string(),
+            name,
+            bytes_read,
+            total_bytes: total,
+            handle: Some(handle),
+        }
+    }
 
     // Find bar state.
     let mut find_active = false;
@@ -2797,16 +2855,28 @@ pub fn run(
                                                 docs.clear();
                                                 active_tab = 0;
                                             }
-                                            if open_file_into(&actual, &mut docs) {
-                                                active_tab = docs.len() - 1;
-                                                autoreload.watch(&actual);
-                                                update_recent(&mut recent_files, &actual, 100);
-                                                if let Some(ln) = line {
-                                                    scroll_new_doc_to_line(
-                                                        &mut docs,
-                                                        ln,
-                                                        style.code_font_height * 1.2,
-                                                    );
+                                            match check_file_size_limit(
+                                                &actual,
+                                                config.large_file.hard_limit_mb,
+                                            ) {
+                                                Err(msg) => {
+                                                    info_message = Some((msg, Instant::now()));
+                                                }
+                                                Ok(sz) => {
+                                                    if sz > BG_LOAD_THRESHOLD && load_job.is_none() {
+                                                        load_job = Some(spawn_load(&actual, sz));
+                                                    } else if open_file_into(&actual, &mut docs) {
+                                                        active_tab = docs.len() - 1;
+                                                        autoreload.watch(&actual);
+                                                        update_recent(&mut recent_files, &actual, 100);
+                                                        if let Some(ln) = line {
+                                                            scroll_new_doc_to_line(
+                                                                &mut docs,
+                                                                ln,
+                                                                style.code_font_height * 1.2,
+                                                            );
+                                                        }
+                                                    }
                                                 }
                                             }
                                         } else if ap.is_dir() {
@@ -4801,6 +4871,59 @@ pub fn run(
             }
         }
 
+        // Poll background file load. If the thread is done, swap the buffer in.
+        if let Some(job) = load_job.as_mut() {
+            // Always redraw while a load is active so the progress bar animates.
+            redraw = true;
+            let finished = job
+                .handle
+                .as_ref()
+                .map(|h| h.is_finished())
+                .unwrap_or(true);
+            if finished {
+                let mut j = load_job.take().unwrap();
+                match j.handle.take().unwrap().join() {
+                    Ok(Ok(state)) => {
+                        let (indent_type, indent_size, _score) =
+                            crate::editor::picker::detect_indent(&state.lines, 100, 2);
+                        let initial_change_id = state.change_id;
+                        let buf_id = buffer::insert_buffer(state);
+                        let mut dv = DocView::new();
+                        dv.buffer_id = Some(buf_id);
+                        dv.indent_size = indent_size;
+                        let saved_sig = buffer::with_buffer(buf_id, |b| {
+                            Ok(buffer::content_signature(&b.lines))
+                        })
+                        .unwrap_or(0);
+                        docs.push(OpenDoc {
+                            view: dv,
+                            path: j.path.clone(),
+                            name: j.name.clone(),
+                            saved_change_id: initial_change_id,
+                            saved_signature: saved_sig,
+                            indent_type: indent_type.to_string(),
+                            indent_size,
+                            git_changes: std::collections::HashMap::new(),
+                            cached_render: Vec::new(),
+                            cached_change_id: -1,
+                            cached_scroll_y: -1.0,
+                            cached_hint_count: 0,
+                        });
+                        active_tab = docs.len() - 1;
+                        autoreload.watch(&j.path);
+                        update_recent(&mut recent_files, &j.path, 100);
+                    }
+                    Ok(Err(e)) => {
+                        info_message = Some((format!("Load failed: {e}"), Instant::now()));
+                    }
+                    Err(_) => {
+                        info_message =
+                            Some(("Load thread panicked".to_string(), Instant::now()));
+                    }
+                }
+            }
+        }
+
         // LSP: poll transport and handle responses.
         if subsystems.has_lsp() {
             if let Some(tid) = lsp_state.transport_id {
@@ -6615,6 +6738,78 @@ pub fn run(
                         bar_x + style.padding_x,
                         hint_y + style.padding_y,
                         style.dim.to_array(),
+                    );
+                }
+
+                // Loading overlay for large file background loads.
+                if let Some(job) = load_job.as_ref() {
+                    use crate::editor::view::DrawContext as _;
+                    crate::editor::app_state::clip_init(width, height);
+                    // Dim background.
+                    draw_ctx.draw_rect(0.0, 0.0, width, height, [0, 0, 0, 160]);
+                    // Centered dialog.
+                    let dlg_w = 520.0_f64.min(width - 40.0);
+                    let dlg_h = style.font_height * 3.5 + style.padding_y * 4.0;
+                    let dlg_x = (width - dlg_w) / 2.0;
+                    let dlg_y = (height - dlg_h) / 2.0;
+                    draw_ctx.draw_rect(
+                        dlg_x - 1.0,
+                        dlg_y - 1.0,
+                        dlg_w + 2.0,
+                        dlg_h + 2.0,
+                        style.divider.to_array(),
+                    );
+                    draw_ctx.draw_rect(
+                        dlg_x,
+                        dlg_y,
+                        dlg_w,
+                        dlg_h,
+                        style.background3.to_array(),
+                    );
+                    // Title.
+                    let title = format!("Loading {}", job.name);
+                    draw_ctx.draw_text(
+                        style.font,
+                        &title,
+                        dlg_x + style.padding_x,
+                        dlg_y + style.padding_y,
+                        style.text.to_array(),
+                    );
+                    // Progress numbers.
+                    let bytes = job
+                        .bytes_read
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let pct = if job.total_bytes > 0 {
+                        (bytes as f64 / job.total_bytes as f64).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let fmt_mb = |b: u64| format!("{:.1} MB", b as f64 / (1024.0 * 1024.0));
+                    let status = format!(
+                        "{} / {}  ({:.0}%)",
+                        fmt_mb(bytes),
+                        fmt_mb(job.total_bytes),
+                        pct * 100.0,
+                    );
+                    draw_ctx.draw_text(
+                        style.font,
+                        &status,
+                        dlg_x + style.padding_x,
+                        dlg_y + style.padding_y * 2.0 + style.font_height,
+                        style.dim.to_array(),
+                    );
+                    // Progress bar.
+                    let bar_x = dlg_x + style.padding_x;
+                    let bar_y = dlg_y + dlg_h - style.padding_y - style.font_height / 2.0;
+                    let bar_w = dlg_w - style.padding_x * 2.0;
+                    let bar_h = style.font_height / 2.0;
+                    draw_ctx.draw_rect(bar_x, bar_y, bar_w, bar_h, style.divider.to_array());
+                    draw_ctx.draw_rect(
+                        bar_x,
+                        bar_y,
+                        bar_w * pct,
+                        bar_h,
+                        style.accent.to_array(),
                     );
                 }
 

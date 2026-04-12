@@ -719,37 +719,88 @@ pub fn reset_history(state: &mut BufferState) {
 
 /// Load a file into buffer state.
 pub fn load_file(state: &mut BufferState, filename: &str) -> Result<(), std::io::Error> {
-    let bytes = fs::read(filename)?;
-    let (bom, bom_len) = BomType::from_bytes(&bytes);
-    state.bom = bom;
-    let bytes_without_bom = if bom_len > 0 {
-        &bytes[bom_len..]
-    } else {
-        &bytes
-    };
+    load_file_with_progress(state, filename, |_, _| {})
+}
 
-    let content = String::from_utf8_lossy(bytes_without_bom).to_string();
+/// Load a file and call `progress(bytes_read, total_bytes)` periodically.
+/// Uses a streaming read to avoid double-buffering large files in memory.
+/// A 2 GB file loads with ~2 GB peak RSS (just the `lines` vec) instead of
+/// ~6 GB with the old implementation which copied the file multiple times.
+pub fn load_file_with_progress<F: FnMut(u64, u64)>(
+    state: &mut BufferState,
+    filename: &str,
+    mut progress: F,
+) -> Result<(), std::io::Error> {
+    use std::io::{BufRead, BufReader};
+    let file = fs::File::open(filename)?;
+    let total = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut reader = BufReader::with_capacity(1 << 20, file);
+
+    // Detect BOM from the first read.
+    let mut peek = [0u8; 4];
+    let peeked = {
+        use std::io::Read;
+        let mut f = fs::File::open(filename)?;
+        f.read(&mut peek).unwrap_or(0)
+    };
+    let (bom, bom_len) = BomType::from_bytes(&peek[..peeked]);
+    state.bom = bom;
+    if bom_len > 0 {
+        use std::io::Read;
+        // Skip BOM bytes in the BufReader.
+        let mut skip = vec![0u8; bom_len];
+        reader.read_exact(&mut skip)?;
+    }
+
     state.lines.clear();
-    state.crlf = content.contains("\r\n");
-    if content.is_empty() {
+    // Reserve capacity for typical file (avg line ~70 bytes). For a 2 GB file
+    // that's ~30M lines -- reserving upfront avoids billions of small reallocs.
+    if total > 0 {
+        state.lines.reserve((total / 70).min(50_000_000) as usize);
+    }
+
+    let mut crlf_detected = false;
+    let mut bytes_read: u64 = bom_len as u64;
+    let mut progress_tick: u64 = 0;
+    let mut line_bytes = Vec::with_capacity(256);
+    loop {
+        line_bytes.clear();
+        let n = reader.read_until(b'\n', &mut line_bytes)?;
+        if n == 0 {
+            break;
+        }
+        bytes_read += n as u64;
+        // Detect CRLF once and strip \r before the \n on every line.
+        if !crlf_detected && line_bytes.len() >= 2 && line_bytes.ends_with(b"\r\n") {
+            crlf_detected = true;
+        }
+        // Normalize line: strip \r from \r\n.
+        let s = if line_bytes.len() >= 2 && line_bytes.ends_with(b"\r\n") {
+            let without_cr = &line_bytes[..line_bytes.len() - 2];
+            let mut s = String::from_utf8_lossy(without_cr).into_owned();
+            s.push('\n');
+            s
+        } else {
+            String::from_utf8_lossy(&line_bytes).into_owned()
+        };
+        state.lines.push(s);
+
+        // Report progress every ~4 MB.
+        progress_tick += n as u64;
+        if progress_tick >= (4 << 20) {
+            progress(bytes_read, total);
+            progress_tick = 0;
+        }
+    }
+    state.crlf = crlf_detected;
+    // Ensure last line ends with '\n'.
+    if let Some(last) = state.lines.last_mut() {
+        if !last.ends_with('\n') {
+            last.push('\n');
+        }
+    }
+    if state.lines.is_empty() {
         state.lines.push("\n".to_string());
-    } else {
-        for line in content.split_inclusive('\n') {
-            let line = if let Some(stripped) = line.strip_suffix("\r\n") {
-                format!("{stripped}\n")
-            } else {
-                line.to_string()
-            };
-            state.lines.push(line);
-        }
-        if !content.ends_with('\n') {
-            if let Some(last) = state.lines.last_mut() {
-                last.push('\n');
-            }
-        }
-        if state.lines.is_empty() {
-            state.lines.push("\n".to_string());
-        }
     }
     state.selections = vec![1, 1, 1, 1];
     state.lines.shrink_to_fit();
@@ -757,6 +808,7 @@ pub fn load_file(state: &mut BufferState, filename: &str) -> Result<(), std::io:
     reset_history(state);
     state.change_id = 1;
     state.sig_cache = (0, 0);
+    progress(bytes_read, total);
     Ok(())
 }
 

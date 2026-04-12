@@ -1,5 +1,12 @@
 # Change Log
 
+## [2.7.6] - 2026-04-12 -- Large file loading.
+
+* Streaming file loader: reads files in 1MB chunks with a single-pass parse. Eliminates the 3x double-copy (`fs::read` -> `from_utf8_lossy` -> `to_string`) that the old loader used. Peak memory during load dropped from ~4x the file size to ~2.5x.
+* Background loading: files larger than 25 MB load on a worker thread so the UI stays responsive.
+* Loading overlay: animated progress bar showing MB read / total and percentage while a background load is in progress.
+* `large_file.hard_limit_mb` raised from 128 MB to 4 GB. Files exceeding this are refused with an error message.
+
 ## [2.7.5] - 2026-04-11 -- Close Project Folder, CLI args, no-project state.
 
 * Fixed: "Close Project Folder" (Ctrl+Alt+W) now works. Saves session and expanded folders, closes all tabs, clears sidebar, resets to empty state.

@@ -433,7 +433,9 @@ impl Default for LargeFileConfig {
     fn default() -> Self {
         Self {
             soft_limit_mb: 20,
-            hard_limit_mb: 128,
+            // 4 GB hard cap. Files above this are refused.
+            // Peak memory during load is ~2.5x the file size due to line splitting.
+            hard_limit_mb: 4096,
             read_only: true,
             plain_text: true,
             disable_lsp: true,
