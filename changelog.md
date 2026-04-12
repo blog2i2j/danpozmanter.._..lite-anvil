@@ -1,5 +1,11 @@
 # Change Log
 
+## [2.7.7] - 2026-04-12 -- Simpler/consistent unsaved-changes prompts.
+
+* Quit confirmation is now "X has unsaved changes, quit anyway?" with Yes/No. Y or Enter confirms, N or Esc cancels. When more than one file is modified, the subject becomes "Multiple files".
+* Close-tab confirmation is now "X has unsaved changes, close anyway?" with the same Yes/No semantics. The filename is always shown.
+* Removed the three-button Save / Don't Save / Cancel nag in favor of a straight two-button Yes/No dialog.
+
 ## [2.7.6] - 2026-04-12 -- Large file loading.
 
 * Streaming file loader: reads files in 1MB chunks with a single-pass parse. Eliminates the 3x double-copy (`fs::read` -> `from_utf8_lossy` -> `to_string`) that the old loader used. Peak memory during load dropped from ~4x the file size to ~2.5x.

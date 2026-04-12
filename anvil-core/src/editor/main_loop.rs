@@ -541,6 +541,26 @@ pub fn run(
         .unwrap_or(false)
     }
 
+    /// Builds the "X has unsaved changes, quit anyway?" prompt. If more than
+    /// one modified doc exists, the subject becomes "Multiple files".
+    fn nag_msg_quit(docs: &[OpenDoc]) -> String {
+        let modified: Vec<&OpenDoc> = docs.iter().filter(|d| doc_is_modified(d)).collect();
+        let label = if modified.len() == 1 {
+            let name = &modified[0].name;
+            if name.is_empty() { "untitled".to_string() } else { name.clone() }
+        } else {
+            "Multiple files".to_string()
+        };
+        format!("{label} has unsaved changes, quit anyway?")
+    }
+
+    /// Builds the "X has unsaved changes, close anyway?" prompt for a single
+    /// tab. Always shows the filename, never collapses to "Multiple files".
+    fn nag_msg_close(name: &str) -> String {
+        let label = if name.is_empty() { "untitled" } else { name };
+        format!("{label} has unsaved changes, close anyway?")
+    }
+
     let mut docs: Vec<OpenDoc> = Vec::new();
     let mut active_tab: usize = 0;
 
@@ -1616,7 +1636,7 @@ pub fn run(
                 "core:quit" => {
                     if single_file_mode && docs.iter().any(doc_is_modified) {
                         nag_active = true;
-                        nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                        nag_message = nag_msg_quit(&docs);
                         nag_tab_to_close = None;
                     } else {
                         quit = true;
@@ -1654,8 +1674,7 @@ pub fn run(
                 "root:close" => {
                     if !docs.is_empty() {
                         if doc_is_modified(&docs[active_tab]) {
-                            let fname = &docs[active_tab].name;
-                            nag_message = format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
+                            nag_message = nag_msg_close(&docs[active_tab].name);
                             nag_active = true;
                             nag_tab_to_close = Some(active_tab);
                         } else {
@@ -1675,7 +1694,7 @@ pub fn run(
                     if subsystems.has_sidebar() {
                         if docs.iter().any(doc_is_modified) {
                             nag_active = true;
-                            nag_message = "Unsaved changes. Save all before closing project?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                            nag_message = nag_msg_quit(&docs);
                             nag_tab_to_close = None;
                         } else {
                             save_project_session(userdir_path, &project_root, &docs, active_tab);
@@ -1698,7 +1717,7 @@ pub fn run(
                     if !single_file_mode {
                         if docs.iter().any(doc_is_modified) {
                             nag_active = true;
-                            nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                            nag_message = nag_msg_quit(&docs);
                             nag_tab_to_close = None;
                         } else {
                             for d in &docs { autoreload.unwatch(&d.path); }
@@ -1723,8 +1742,7 @@ pub fn run(
                     if docs.is_empty() {
                         quit = true;
                     } else if doc_is_modified(&docs[active_tab]) {
-                        let fname = &docs[active_tab].name;
-                        nag_message = format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
+                        nag_message = nag_msg_close(&docs[active_tab].name);
                         nag_active = true;
                         nag_tab_to_close = Some(active_tab);
                     } else {
@@ -1971,10 +1989,7 @@ pub fn run(
                                     // Nano-Anvil: replace current doc.
                                     if let Some(doc) = docs.get(active_tab) {
                                         if doc_is_modified(doc) {
-                                            nag_message = format!(
-                                                "Save changes to {}?  [Y]es  [N]o  [Esc]Cancel",
-                                                doc.name
-                                            );
+                                            nag_message = nag_msg_close(&doc.name);
                                             nag_active = true;
                                             nag_tab_to_close = Some(active_tab);
                                         } else {
@@ -2007,7 +2022,7 @@ pub fn run(
                                 if !folder.is_empty() && std::path::Path::new(&folder).is_dir() {
                                     if docs.iter().any(doc_is_modified) {
                                         nag_active = true;
-                                        nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                                        nag_message = nag_msg_quit(&docs);
                                         nag_tab_to_close = None;
                                     } else {
                                         if subsystems.has_sidebar() {
@@ -2500,7 +2515,7 @@ pub fn run(
             if docs.iter().any(doc_is_modified) {
                 nag_active = true;
                 redraw = true;
-                nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                nag_message = nag_msg_quit(&docs);
                 nag_tab_to_close = None;
             } else {
                 quit = true;
@@ -2514,8 +2529,7 @@ pub fn run(
                     if single_file_mode && docs.iter().any(doc_is_modified) {
                         nag_active = true;
                         redraw = true;
-                        nag_message =
-                            "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                        nag_message = nag_msg_quit(&docs);
                         nag_tab_to_close = None;
                     } else {
                         quit = true;
@@ -2893,7 +2907,7 @@ pub fn run(
                                             // Check for unsaved changes before switching.
                                             if docs.iter().any(doc_is_modified) {
                                                 nag_active = true;
-                                                nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                                                nag_message = nag_msg_quit(&docs);
                                                 nag_tab_to_close = None;
                                             } else {
                                                 if subsystems.has_sidebar() {
@@ -2963,7 +2977,7 @@ pub fn run(
                                         } else if p.is_dir() {
                                             if docs.iter().any(doc_is_modified) {
                                                 nag_active = true;
-                                                nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                                                nag_message = nag_msg_quit(&docs);
                                                 nag_tab_to_close = None;
                                             } else {
                                                 if subsystems.has_sidebar() {
@@ -3489,25 +3503,9 @@ pub fn run(
                         cmdview_active = false;
                         palette_active = false;
                         match key.as_str() {
-                            "y" | "Y" => {
+                            "y" | "Y" | "return" | "keypad enter" => {
+                                // Yes: discard unsaved changes and proceed.
                                 if let Some(idx) = nag_tab_to_close {
-                                    // Save then close single tab.
-                                    let has_path =
-                                        docs.get(idx).map(|d| !d.path.is_empty()).unwrap_or(false);
-                                    if !has_path {
-                                        nag_message = "File has no name. Use Save As (Ctrl+Shift+S) first, or press N to discard.".to_string();
-                                        redraw = true;
-                                        continue;
-                                    }
-                                    if let Some(doc) = docs.get(idx) {
-                                        if let Some(buf_id) = doc.view.buffer_id {
-                                            let path = doc.path.clone();
-                                            let _ = buffer::with_buffer(buf_id, |b| {
-                                                buffer::save_file(b, &path, b.crlf)
-                                                    .map_err(|_| buffer::BufferError::UnknownBuffer)
-                                            });
-                                        }
-                                    }
                                     if let Some(d) = docs.get(idx) {
                                         autoreload.unwatch(&d.path);
                                     }
@@ -3518,48 +3516,6 @@ pub fn run(
                                         active_tab = active_tab.saturating_sub(1);
                                     }
                                 } else {
-                                    // Save all modified docs then quit.
-                                    let has_unnamed = docs
-                                        .iter()
-                                        .any(|d| doc_is_modified(d) && d.path.is_empty());
-                                    if has_unnamed {
-                                        nag_message = "Unnamed files cannot be saved. Close them first or use Save As (Ctrl+Shift+S).".to_string();
-                                    } else {
-                                        for doc in &docs {
-                                            if doc_is_modified(doc) {
-                                                if let Some(buf_id) = doc.view.buffer_id {
-                                                    let path = doc.path.clone();
-                                                    if !path.is_empty() {
-                                                        let _ = buffer::with_buffer(buf_id, |b| {
-                                                            buffer::save_file(b, &path, b.crlf)
-                                                                .map_err(|_| buffer::BufferError::UnknownBuffer)
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        quit = true;
-                                    }
-                                }
-                                nag_active = false;
-                                nag_tab_to_close = None;
-                                redraw = true;
-                                continue;
-                            }
-                            "n" | "N" => {
-                                if let Some(idx) = nag_tab_to_close {
-                                    // Close without saving single tab.
-                                    if let Some(d) = docs.get(idx) {
-                                        autoreload.unwatch(&d.path);
-                                    }
-                                    docs.remove(idx);
-                                    if docs.is_empty() {
-                                        active_tab = 0;
-                                    } else if idx <= active_tab {
-                                        active_tab = active_tab.saturating_sub(1);
-                                    }
-                                } else {
-                                    // Quit without saving.
                                     quit = true;
                                 }
                                 nag_active = false;
@@ -3567,7 +3523,8 @@ pub fn run(
                                 redraw = true;
                                 continue;
                             }
-                            "escape" => {
+                            "n" | "N" | "escape" => {
+                                // No / Cancel: leave everything as-is.
                                 nag_active = false;
                                 nag_tab_to_close = None;
                                 redraw = true;
@@ -4235,74 +4192,25 @@ pub fn run(
                         if *y < bar_h {
                             let msg_w = draw_ctx.font_width(style.font, &nag_message);
                             let btn_pad = style.padding_x;
-                            let btn_h = style.font_height + style.padding_y;
-                            let btn_y = style.padding_y * 0.5;
-                            let _ = (btn_h, btn_y);
                             let mut bx = style.padding_x + msg_w + btn_pad * 2.0;
-                            for (i, label) in ["Save", "Don't Save", "Cancel"].iter().enumerate() {
+                            for (i, label) in ["Yes", "No"].iter().enumerate() {
                                 let lw = draw_ctx.font_width(style.font, label) + btn_pad * 2.0;
                                 if *x >= bx && *x <= bx + lw {
-                                    match i {
-                                        0 => {
-                                            // Save
-                                            if let Some(idx) = nag_tab_to_close {
-                                                if let Some(doc) = docs.get(idx) {
-                                                    if let Some(buf_id) = doc.view.buffer_id {
-                                                        let path = doc.path.clone();
-                                                        if !path.is_empty() {
-                                                            let _ = buffer::with_buffer(
-                                                                buf_id,
-                                                                |b| {
-                                                                    buffer::save_file(b, &path, b.crlf)
-                                                                    .map_err(|_| buffer::BufferError::UnknownBuffer)
-                                                                },
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                                if let Some(d) = docs.get(idx) {
-                                                    autoreload.unwatch(&d.path);
-                                                }
-                                                docs.remove(idx);
-                                                if active_tab >= docs.len() && !docs.is_empty() {
-                                                    active_tab = docs.len() - 1;
-                                                }
-                                            } else {
-                                                for doc in &docs {
-                                                    if doc_is_modified(doc) {
-                                                        if let Some(buf_id) = doc.view.buffer_id {
-                                                            let path = doc.path.clone();
-                                                            if !path.is_empty() {
-                                                                let _ = buffer::with_buffer(
-                                                                    buf_id,
-                                                                    |b| {
-                                                                        buffer::save_file(b, &path, b.crlf)
-                                                                        .map_err(|_| buffer::BufferError::UnknownBuffer)
-                                                                    },
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                quit = true;
+                                    if i == 0 {
+                                        // Yes: discard unsaved changes and proceed.
+                                        if let Some(idx) = nag_tab_to_close {
+                                            if let Some(d) = docs.get(idx) {
+                                                autoreload.unwatch(&d.path);
                                             }
-                                        }
-                                        1 => {
-                                            // Don't Save
-                                            if let Some(idx) = nag_tab_to_close {
-                                                if let Some(d) = docs.get(idx) {
-                                                    autoreload.unwatch(&d.path);
-                                                }
-                                                docs.remove(idx);
-                                                if active_tab >= docs.len() && !docs.is_empty() {
-                                                    active_tab = docs.len() - 1;
-                                                }
-                                            } else {
-                                                quit = true;
+                                            docs.remove(idx);
+                                            if active_tab >= docs.len() && !docs.is_empty() {
+                                                active_tab = docs.len() - 1;
                                             }
+                                        } else {
+                                            quit = true;
                                         }
-                                        _ => {} // Cancel - just dismiss
                                     }
+                                    // No (i == 1): just dismiss the nag.
                                     nag_active = false;
                                     nag_tab_to_close = None;
                                     #[allow(unused_assignments)]
@@ -4566,7 +4474,7 @@ pub fn run(
                                     // Close this tab (with nag check).
                                     if doc_is_modified(doc) {
                                         nag_active = true;
-                                        nag_message = format!("Save changes to {}?", doc.name);
+                                        nag_message = nag_msg_close(&doc.name);
                                         nag_tab_to_close = Some(i);
                                     } else {
                                         autoreload.unwatch(&doc.path);
@@ -6837,7 +6745,7 @@ pub fn run(
                     let btn_h = style.font_height + style.padding_y;
                     let btn_pad = style.padding_x;
                     let mut bx = style.padding_x + msg_w + btn_pad * 2.0;
-                    for label in &["Save", "Don't Save", "Cancel"] {
+                    for label in &["Yes", "No"] {
                         let lw = draw_ctx.font_width(style.font, label) + btn_pad * 2.0;
                         draw_ctx.draw_rect(bx, btn_y, lw, btn_h, style.nagbar_text.to_array());
                         draw_ctx.draw_text(
