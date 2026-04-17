@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.8.3] - 2026-04-17 -- Windows CRT bundling.
+
+* Fixed "Code execution cannot proceed because VCRUNTIME140.dll was not found" on clean Windows installs.
+
 ## [2.8.2] - 2026-04-17 -- Line wrap default & fixes, in-place save, Open Recent fix, Nano icon, Windows packaging.
 
 * Line wrapping is now on by default and the preference is persisted across sessions (`Alt+Z` toggles).

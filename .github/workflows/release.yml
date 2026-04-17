@@ -172,6 +172,34 @@ jobs:
               }
           }
 
+          # Bundle the Microsoft Visual C++ redistributable runtime (vcruntime140.dll,
+          # msvcp140.dll, etc.) alongside the exe. Rust itself is now linked with
+          # +crt-static so the editor binaries no longer need these, but the bundled
+          # SDL3 / freetype / pcre2 DLLs still do and Windows otherwise aborts with
+          # "VCRUNTIME140.dll was not found" on a clean install. Microsoft's license
+          # explicitly allows app-local deployment of the MSVC CRT redistributable
+          # files, so copying the entire Microsoft.VC*.CRT folder here is both
+          # legal and forward-compatible (picks up any new DLLs MSVC adds without
+          # us having to revise the allowlist each release).
+          $vcRedistRoots = @(
+              'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT',
+              'C:\Program Files (x86)\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT'
+          )
+          $vcRedistDir = $null
+          foreach ($pattern in $vcRedistRoots) {
+              $match = Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue |
+                       Sort-Object -Property FullName -Descending |
+                       Select-Object -First 1
+              if ($match) { $vcRedistDir = $match.FullName; break }
+          }
+          if (-not $vcRedistDir) {
+              throw "VC++ redistributable directory not found; bundled DLLs would require VCRUNTIME140.dll at runtime."
+          }
+          Write-Host "Bundling VC runtime from $vcRedistDir"
+          Get-ChildItem -Path "$vcRedistDir\*.dll" | ForEach-Object {
+              Copy-Item $_.FullName "$archiveBase\"
+          }
+
           Compress-Archive -Path $archiveBase -DestinationPath "$archiveBase.zip"
 
       - name: Upload artifact
