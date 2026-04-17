@@ -1,3 +1,10 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+// See lite-anvil/src/main.rs for why we detach from the console on
+// release Windows builds.
+
 use anvil_core::editor::subsystems::EditorSubsystems;
 
 fn main() {

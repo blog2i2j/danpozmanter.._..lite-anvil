@@ -352,7 +352,7 @@ impl SyntaxEntry {
 /// Resolves only the metadata fields (name, files, headers, comment,
 /// block_comment) from the graph, skipping the expensive patterns and symbols.
 pub fn load_syntax_index(datadir: &str) -> Vec<SyntaxEntry> {
-    let syntax_dir = format!("{datadir}/assets/syntax");
+    let syntax_dir = std::path::Path::new(datadir).join("assets").join("syntax");
     let entries = match std::fs::read_dir(&syntax_dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
@@ -542,7 +542,7 @@ pub fn match_syntax_entry<'a>(
 
 /// Load all syntax definitions from JSON files in `{datadir}/assets/syntax/`.
 pub fn load_syntax_assets(datadir: &str) -> Vec<SyntaxDefinition> {
-    let syntax_dir = format!("{datadir}/assets/syntax");
+    let syntax_dir = std::path::Path::new(datadir).join("assets").join("syntax");
     let entries = match std::fs::read_dir(&syntax_dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),

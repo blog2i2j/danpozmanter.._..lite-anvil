@@ -43,7 +43,7 @@ use crate::editor::view::{UpdateContext, View};
 /// Append a timestamped message to the log file in the user directory.
 #[cfg(feature = "sdl")]
 fn log_to_file(userdir: &str, msg: &str) {
-    let path = format!("{userdir}/lite-anvil.log");
+    let path = Path::new(userdir).join("lite-anvil.log");
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -202,7 +202,7 @@ struct FileIcon {
 
 /// Load file-extension to icon mapping from the JSON config.
 fn load_file_icons(datadir: &str) -> std::collections::HashMap<String, FileIcon> {
-    let path = format!("{datadir}/assets/file_icons.json");
+    let path = Path::new(datadir).join("assets").join("file_icons.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
         return std::collections::HashMap::new();
     };
@@ -432,7 +432,12 @@ pub fn run(
 
     // Load theme colors from JSON.
     let theme_name = &config.theme;
-    let theme_path = format!("{datadir}/assets/themes/{theme_name}.json");
+    let theme_path = Path::new(datadir)
+        .join("assets")
+        .join("themes")
+        .join(format!("{theme_name}.json"))
+        .to_string_lossy()
+        .into_owned();
     if let Ok(palette) = crate::editor::style::load_theme_palette(&theme_path) {
         apply_theme_to_style(&mut style, &palette);
     } else {
@@ -440,7 +445,11 @@ pub fn run(
     }
     // Build list of available themes.
     let available_themes: Vec<String> = {
-        let themes_dir = format!("{datadir}/assets/themes");
+        let themes_dir = Path::new(datadir)
+            .join("assets")
+            .join("themes")
+            .to_string_lossy()
+            .into_owned();
         let mut themes = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&themes_dir) {
             for entry in entries.flatten() {
@@ -1492,6 +1501,18 @@ pub fn run(
         count
     }
 
+    /// Normalise a directory path for display in the command view: strip
+    /// any trailing `/` or `\` and append the platform's native separator.
+    /// Used whenever the picker needs to seed its input with "start
+    /// browsing from here"; keeping the native separator means follow-up
+    /// typing and the suggestions list don't end up visually mixing
+    /// `/` and `\` on Windows.
+    fn dir_with_trailing_sep(path: &str) -> String {
+        let sep = std::path::MAIN_SEPARATOR;
+        let trimmed = path.trim_end_matches(['/', '\\']);
+        format!("{trimmed}{sep}")
+    }
+
     /// Absolute project root, falling back to the user's home directory if
     /// empty. Windows uses `USERPROFILE`; Unix uses `HOME`.
     fn effective_root(project_root: &str) -> String {
@@ -1556,9 +1577,22 @@ pub fn run(
     }
 
     /// List filesystem entries matching a typed path prefix.
+    ///
+    /// On Windows, both `/` and `\` are accepted as separators since the
+    /// initial `cmdview_text` and anything the user types in Explorer use
+    /// backslashes, while URLs / config files use forward slashes. The
+    /// suggestions are rendered with the platform's native separator so
+    /// the display stays consistent.
     fn path_suggest(text: &str, project_root: &str, dirs_only: bool) -> Vec<String> {
+        let sep = std::path::MAIN_SEPARATOR;
+        let home_key = if cfg!(target_os = "windows") {
+            "USERPROFILE"
+        } else {
+            "HOME"
+        };
+
         let expanded = if let Some(rest) = text.strip_prefix('~') {
-            if let Some(home) = std::env::var_os("HOME") {
+            if let Some(home) = std::env::var_os(home_key) {
                 format!("{}{rest}", home.to_string_lossy())
             } else {
                 text.to_string()
@@ -1567,16 +1601,17 @@ pub fn run(
             text.to_string()
         };
 
-        let (dir, prefix) = if let Some(pos) = expanded.rfind('/') {
-            (&expanded[..=pos], &expanded[pos + 1..])
-        } else {
-            (project_root, expanded.as_str())
+        let last_sep = expanded
+            .rfind(|c: char| c == '/' || c == '\\');
+        let (dir, prefix) = match last_sep {
+            Some(pos) => (&expanded[..=pos], &expanded[pos + 1..]),
+            None => (project_root, expanded.as_str()),
         };
 
-        let lookup = if std::path::Path::new(dir).is_absolute() {
-            dir.to_string()
+        let lookup: std::path::PathBuf = if std::path::Path::new(dir).is_absolute() {
+            std::path::PathBuf::from(dir)
         } else {
-            format!("{project_root}/{dir}")
+            std::path::Path::new(project_root).join(dir)
         };
 
         let mut results = Vec::new();
@@ -1587,6 +1622,7 @@ pub fn run(
         let mut entries_sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
         entries_sorted.sort_by_key(|e| e.file_name());
 
+        let dir_has_trailing_sep = dir.ends_with('/') || dir.ends_with('\\');
         for entry in entries_sorted {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with('.') && !prefix.starts_with('.') {
@@ -1599,13 +1635,13 @@ pub fn run(
             if !prefix_lower.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
                 continue;
             }
-            let display = if dir.ends_with('/') || dir.is_empty() {
+            let display = if dir_has_trailing_sep || dir.is_empty() {
                 format!("{dir}{name}")
             } else {
-                format!("{dir}/{name}")
+                format!("{dir}{sep}{name}")
             };
             let display = if is_dir {
-                format!("{display}/")
+                format!("{display}{sep}")
             } else {
                 display
             };
@@ -2011,14 +2047,22 @@ pub fn run(
                     if !available_themes.is_empty() {
                         current_theme_idx = (current_theme_idx + 1) % available_themes.len();
                         let new_theme = &available_themes[current_theme_idx];
-                        let tp = format!("{datadir}/assets/themes/{new_theme}.json");
+                        let tp = Path::new(datadir)
+                            .join("assets")
+                            .join("themes")
+                            .join(format!("{new_theme}.json"))
+                            .to_string_lossy()
+                            .into_owned();
                         if let Ok(palette) = crate::editor::style::load_theme_palette(&tp) {
                             apply_theme_to_style(&mut style, &palette);
                         }
                     }
                 }
                 "core:open-user-settings" => {
-                    let settings_path = format!("{userdir}/config.toml");
+                    let settings_path = Path::new(userdir)
+                        .join("config.toml")
+                        .to_string_lossy()
+                        .into_owned();
                     if !std::path::Path::new(&settings_path).exists() {
                         let _ = std::fs::write(&settings_path, NativeConfig::default_toml_template());
                     }
@@ -2109,7 +2153,7 @@ pub fn run(
                         // Always start from the absolute project root so backspace
                         // navigation can walk up directories cleanly.
                         let abs_root = effective_root(&project_root);
-                        cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
+                        cmdview_text = dir_with_trailing_sep(&abs_root);
                         cmdview_cursor = cmdview_text.len();
                         cmdview_label = "Open Folder:".to_string();
                         cmdview_suggestions = path_suggest(&cmdview_text, &project_root, true);
@@ -2122,13 +2166,13 @@ pub fn run(
                         cmdview_mode = CmdViewMode::OpenFile;
                         let abs_root = effective_root(&project_root);
                         if let Some(doc) = docs.get(active_tab) {
-                            if let Some(pos) = doc.path.rfind('/') {
-                                cmdview_text = format!("{}/", &doc.path[..pos]);
+                            if let Some(pos) = doc.path.rfind(|c: char| c == '/' || c == '\\') {
+                                cmdview_text = dir_with_trailing_sep(&doc.path[..pos]);
                             } else {
-                                cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
+                                cmdview_text = dir_with_trailing_sep(&abs_root);
                             }
                         } else {
-                            cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
+                            cmdview_text = dir_with_trailing_sep(&abs_root);
                         }
                         cmdview_cursor = cmdview_text.len();
                         cmdview_label = "Open File:".to_string();
@@ -2230,7 +2274,7 @@ pub fn run(
                             // doesn't default Save As to `/` when launched
                             // from a desktop entry without a working dir.
                             let abs_root = effective_root(&project_root);
-                            cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
+                            cmdview_text = dir_with_trailing_sep(&abs_root);
                         }
                     } else {
                         cmdview_text = String::new();
@@ -2250,7 +2294,7 @@ pub fn run(
                                 cmdview_active = true;
                                 cmdview_mode = CmdViewMode::SaveAs;
                                 let abs_root = effective_root(&project_root);
-                                cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
+                                cmdview_text = dir_with_trailing_sep(&abs_root);
                                 cmdview_cursor = cmdview_text.len();
                                 cmdview_label = "Save As:".to_string();
                                 cmdview_suggestions =
@@ -2819,17 +2863,26 @@ pub fn run(
                     // Command view (file/folder open) intercepts keys.
                     if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile) {
                         /// Expand ~ and resolve relative paths to absolute.
+                        /// On Windows, treat both `/` and `\` as absolute-path
+                        /// indicators (`C:\...`) and use `USERPROFILE` for `~`.
                         fn expand_path(text: &str, project_root: &str) -> String {
+                            let home_key = if cfg!(target_os = "windows") {
+                                "USERPROFILE"
+                            } else {
+                                "HOME"
+                            };
                             if let Some(rest) = text.strip_prefix('~') {
-                                if let Some(home) = std::env::var_os("HOME") {
+                                if let Some(home) = std::env::var_os(home_key) {
                                     return format!("{}{rest}", home.to_string_lossy());
                                 }
                             }
-                            if text.starts_with('/') {
+                            if std::path::Path::new(text).is_absolute() {
                                 return text.to_string();
                             }
-                            let joined =
-                                format!("{}/{}", project_root.trim_end_matches('/'), text,);
+                            let joined = std::path::Path::new(project_root)
+                                .join(text)
+                                .to_string_lossy()
+                                .into_owned();
                             normalize_path(&joined)
                         }
 
@@ -2853,14 +2906,16 @@ pub fn run(
                                 .unwrap_or(text.len())
                         }
                         /// Jump left to the start of the previous path segment.
+                        /// Accepts both `/` and `\` as separators so Windows
+                        /// paths with backslashes behave the same as Unix
+                        /// forward-slash paths.
                         fn cmdview_word_left(text: &str, cursor: usize) -> usize {
                             if cursor == 0 {
                                 return 0;
                             }
                             let s = &text[..cursor];
-                            // Skip a trailing slash so successive ctrl+left walks segments.
-                            let stripped = s.trim_end_matches('/');
-                            if let Some(idx) = stripped.rfind('/') {
+                            let stripped = s.trim_end_matches(['/', '\\']);
+                            if let Some(idx) = stripped.rfind(|c: char| c == '/' || c == '\\') {
                                 idx + 1
                             } else {
                                 0
@@ -2872,9 +2927,12 @@ pub fn run(
                                 return text.len();
                             }
                             let rest = &text[cursor..];
-                            // Skip the slash directly under the cursor, then find the next.
-                            let skip = if rest.starts_with('/') { 1 } else { 0 };
-                            match rest[skip..].find('/') {
+                            let skip = if rest.starts_with('/') || rest.starts_with('\\') {
+                                1
+                            } else {
+                                0
+                            };
+                            match rest[skip..].find(|c: char| c == '/' || c == '\\') {
                                 Some(idx) => cursor + skip + idx + 1,
                                 None => text.len(),
                             }
@@ -2966,7 +3024,7 @@ pub fn run(
                                             }
                                         } else if ap.is_dir() {
                                             // Navigate into directory.
-                                            cmdview_text = format!("{path}/");
+                                            cmdview_text = dir_with_trailing_sep(&path);
                                             cmdview_cursor = cmdview_text.len();
                                             cmdview_suggestions =
                                                 path_suggest(&cmdview_text, &project_root, false);
@@ -3107,7 +3165,7 @@ pub fn run(
                                         // Save current document to the chosen path.
                                         let save_path = if p.is_dir() {
                                             // User selected a directory -- stay in cmdview.
-                                            cmdview_text = format!("{path}/");
+                                            cmdview_text = dir_with_trailing_sep(&path);
                                             cmdview_cursor = cmdview_text.len();
                                             cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
                                             cmdview_selected = 0;
@@ -4058,8 +4116,12 @@ pub fn run(
                                 style.scrollbar_size *= display_scale;
                                 style.caret_width = (style.caret_width * display_scale).ceil();
                                 style.tab_width *= display_scale;
+                                let tp = Path::new(datadir)
+                                    .join("assets")
+                                    .join("themes")
+                                    .join(format!("{}.json", config.theme));
                                 if let Ok(palette) = crate::editor::style::load_theme_palette(
-                                    &format!("{datadir}/assets/themes/{}.json", config.theme),
+                                    &tp.to_string_lossy(),
                                 ) {
                                     apply_theme_to_style(&mut style, &palette);
                                 }

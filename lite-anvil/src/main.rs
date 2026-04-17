@@ -1,3 +1,12 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+// Detach from the console on release Windows builds so launching
+// lite-anvil.exe from Explorer / a shortcut doesn't flash a black
+// terminal window behind the editor. Debug builds keep the console so
+// `eprintln!` output stays visible when developing.
+
 use anvil_core::editor::subsystems::EditorSubsystems;
 
 fn main() {

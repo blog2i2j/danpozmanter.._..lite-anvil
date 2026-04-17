@@ -1,5 +1,13 @@
 # Change Log
 
+## [2.8.4] - 2026-04-17 -- Windows path & console cleanup, Unicode tokenization.
+
+* Merged PR from cp89cyber: Lua `%a` / `%w` / `%l` / `%u` classes now expand to PCRE2 Unicode property classes (`\p{L}`, `[\w\p{M}]`, `\p{Ll}`, `\p{Lu}`), so syntax tokenizers match accented / combining-mark text (Hungarian, Cyrillic, etc.) instead of stopping at the first non-ASCII char.
+* No more black console window behind the editor on Windows: release builds now use `windows_subsystem = "windows"` for both `lite-anvil.exe` and `nano-anvil.exe`. Debug builds still get a console so `eprintln!` stays visible when developing.
+* Fixed `Theme not found: \\?\C:\Users\...\data/assets/themes/dark_default.json` and the same class of failure for syntax / icon / config / log paths. Two root causes: (1) `std::fs::canonicalize` on Windows returns paths in the `\\?\` extended-length form which rejects forward-slash separators — we now strip that prefix in `runtime.rs`; (2) several hot paths (theme loader, syntax loader, file icons, log, settings, Open File / Save picker) concatenated with `/` via `format!`, mixing separators even after the prefix fix. Those now use `PathBuf::join` so Windows gets `\` throughout and Unix stays unchanged.
+* The Open / Save picker accepts and displays the platform's native separator. `~` now expands via `USERPROFILE` on Windows, `Path::is_absolute` replaces the `starts_with('/')` check, and `Ctrl+Left/Right` walk over both `/` and `\` segments.
+* Windows user-data now lives under `%APPDATA%\lite-anvil` (Microsoft's recommended location) instead of dropping a folder directly at `%USERPROFILE%\lite-anvil`. `LITE_USERDIR` and `XDG_CONFIG_HOME` continue to override.
+
 ## [2.8.3] - 2026-04-17 -- Windows CRT bundling.
 
 * Fixed "Code execution cannot proceed because VCRUNTIME140.dll was not found" on clean Windows installs.

@@ -18,8 +18,14 @@ impl RuntimeContext {
         let exe_file = std::env::current_exe().context("could not resolve executable path")?;
         // Canonicalize so that relative paths from current_exe() (macOS
         // returns whatever argv[0] was) become absolute before we derive
-        // data_dir / user_dir from them.
-        let exe_file = std::fs::canonicalize(&exe_file).unwrap_or(exe_file);
+        // data_dir / user_dir from them. Strip Windows' `\\?\` extended
+        // path prefix afterwards; that form rejects forward-slash
+        // separators, which trips up any code that later does
+        // `format!("{path}/sub")` (theme/syntax loaders did, and the
+        // resulting `\\?\C:\...\data/assets/themes/...` fails to open).
+        let exe_file = std::fs::canonicalize(&exe_file)
+            .map(strip_unc_prefix)
+            .unwrap_or(exe_file);
         let exe_dir = exe_file
             .parent()
             .context("executable has no parent directory")?
@@ -122,7 +128,7 @@ fn find_data_dir(exe_dir: &Path) -> PathBuf {
     exe_dir.join("data")
 }
 
-fn find_user_dir(exe_dir: &Path, path_sep: char) -> PathBuf {
+fn find_user_dir(exe_dir: &Path, _path_sep: char) -> PathBuf {
     let bundled = exe_dir.join("user");
     if bundled.exists() {
         return bundled;
@@ -132,26 +138,47 @@ fn find_user_dir(exe_dir: &Path, path_sep: char) -> PathBuf {
         return PathBuf::from(user_dir);
     }
 
+    // Windows: use %APPDATA% (`C:\Users\<user>\AppData\Roaming`) per
+    // Microsoft's user-data guidance, rather than dropping a folder
+    // directly under the user's profile root.
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return PathBuf::from(appdata).join("lite-anvil");
+        }
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            return PathBuf::from(home)
+                .join("AppData")
+                .join("Roaming")
+                .join("lite-anvil");
+        }
+    }
+
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(xdg).join("lite-anvil");
     }
 
-    if let Some(home) = std::env::var_os(if cfg!(target_os = "windows") {
-        "USERPROFILE"
-    } else {
-        "HOME"
-    }) {
-        let mut path = PathBuf::from(home);
-        if path_sep == '\\' {
-            path.push("lite-anvil");
-        } else {
-            path.push(".config");
-            path.push("lite-anvil");
-        }
-        return path;
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".config").join("lite-anvil");
     }
 
     bundled
+}
+
+/// Strip the Windows `\\?\` extended-length path prefix, if present.
+/// No-op on non-Windows platforms and for paths that do not use the
+/// prefix. Callers use this after `fs::canonicalize` so downstream
+/// string-based path building can keep mixing `/` and `\` without the
+/// kernel rejecting the resulting path.
+fn strip_unc_prefix(p: PathBuf) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let s = p.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped.to_string());
+        }
+    }
+    p
 }
 
 fn platform_name() -> &'static str {
