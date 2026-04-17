@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.9.1] - 2026-04-17 -- Fix macOS ARM release build.
+
+* Fixed `Undefined symbols for architecture arm64: "___isPlatformVersionAtLeast"` in the Mac ARM release build. (2.9.0 issue).
+
 ## [2.9.0] - 2026-04-17 -- Statically-linked C deps, no GPU drivers loaded, big code cleanup.
 
 * Static C deps. SDL3, FreeType, and PCRE2 are now compiled from vendored source and statically linked into `lite-anvil` / `nano-anvil`. No `libSDL3.*` / `libfreetype.*` / `libpcre2-*.*` / `libpng*` / `libbrotli*` / `libbz2.*` / `libz.*` ships with the editor; Linux `ldd` output shrinks from ten libraries to just the libc family. Distro drift (Nix's GPU-enabled SDL3, Homebrew's freetype version, Debian's pcre2-dev) no longer changes the binary's behavior — source builders on NixOS, Arch, Debian, Fedora, macOS, and Windows all get the same editor.
