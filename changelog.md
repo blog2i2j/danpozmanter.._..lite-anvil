@@ -1,5 +1,13 @@
 # Change Log
 
+## [2.8.5] - 2026-04-17 -- Long-path ergonomics in the file picker, breadcrumb, and status bar.
+
+* The Open / Save / Open Recent picker now handles long paths gracefully. The input area horizontally auto-scrolls so the caret is always visible and clips its text to the box (previously long paths bled past the border); `<` / `>` hints appear at the edges when content is scrolled off.
+* Suggestions with paths wider than the picker are ellipsis-truncated on the LEFT (`…Downloads\projects\deep\nest\file.rs`), keeping the filename — the part users are actually trying to pick — on screen.
+* Widened the picker box from 50% to 70% of the window so most common paths fit without scrolling.
+* Breadcrumb above the editor area now drops leading path segments one at a time (prefixed with `… > `) until the tail fits, instead of letting long paths run off the right edge. The filename (final segment) is always visible; when the filename alone is wider than the bar, it's ellipsis-truncated on the LEFT so the extension stays in view.
+* Status-bar filename is capped at one-third of the window width, again with left ellipsis, so a runaway filename can't collide with the cursor-position segment or the Lang / EOL / INS group on the right.
+
 ## [2.8.4] - 2026-04-17 -- Windows path & console cleanup, Unicode tokenization.
 
 * Merged PR from cp89cyber: Lua `%a` / `%w` / `%l` / `%u` classes now expand to PCRE2 Unicode property classes (`\p{L}`, `[\w\p{M}]`, `\p{Ll}`, `\p{Lu}`), so syntax tokenizers match accented / combining-mark text (Hungarian, Cyrillic, etc.) instead of stopping at the first non-ASCII char.

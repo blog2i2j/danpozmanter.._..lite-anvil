@@ -1501,6 +1501,51 @@ pub fn run(
         count
     }
 
+    /// Shrink `text` from the LEFT until it fits inside `max_w` pixels,
+    /// prefixing the result with `…` when truncated. Used for the file
+    /// picker's suggestion list so the filename (the meaningful tail of a
+    /// long path) stays visible on screen instead of the drive prefix.
+    #[cfg(feature = "sdl")]
+    fn truncate_left_to_width(
+        text: &str,
+        max_w: f64,
+        font: u64,
+        ctx: &mut crate::editor::draw_context::NativeDrawContext,
+    ) -> String {
+        use crate::editor::view::DrawContext as _;
+        if max_w <= 0.0 {
+            return String::new();
+        }
+        if ctx.font_width(font, text) <= max_w {
+            return text.to_string();
+        }
+        let ellipsis = "…";
+        let ellipsis_w = ctx.font_width(font, ellipsis);
+        let budget = (max_w - ellipsis_w).max(0.0);
+        // Walk from the right edge inwards, consuming chars until adding
+        // the next one would exceed the budget.
+        let chars: Vec<char> = text.chars().collect();
+        let mut keep_from = chars.len();
+        let mut w = 0.0f64;
+        let mut tmp = [0u8; 4];
+        for ch in chars.iter().rev() {
+            let cw = ctx.font_width(font, ch.encode_utf8(&mut tmp));
+            if w + cw > budget {
+                break;
+            }
+            w += cw;
+            keep_from -= 1;
+        }
+        if keep_from == 0 {
+            // The whole string fits without truncation — unlikely given
+            // the earlier check, but keep the fallback honest.
+            text.to_string()
+        } else {
+            let suffix: String = chars[keep_from..].iter().collect();
+            format!("{ellipsis}{suffix}")
+        }
+    }
+
     /// Normalise a directory path for display in the command view: strip
     /// any trailing `/` or `\` and append the platform's native separator.
     /// Used whenever the picker needs to seed its input with "start
@@ -5906,14 +5951,33 @@ pub fn run(
                 status_view.left_items.clear();
                 status_view.right_items.clear();
                 if let Some(doc) = docs.get(active_tab) {
-                    // Left: filename (with modified indicator).
+                    // Left: filename (with modified indicator). Cap at a
+                    // third of the window so a runaway filename can't
+                    // collide with the cursor-position segment or the
+                    // right-side status items.
                     let modified_label = if doc_is_modified(doc) {
                         format!("*{}", doc.name)
                     } else {
                         doc.name.clone()
                     };
+                    let filename_max_w = (width / 3.0).max(80.0);
+                    let filename_display = {
+                        use crate::editor::view::DrawContext as _;
+                        if draw_ctx.font_width(style.font, &modified_label)
+                            <= filename_max_w
+                        {
+                            modified_label
+                        } else {
+                            truncate_left_to_width(
+                                &modified_label,
+                                filename_max_w,
+                                style.font,
+                                &mut draw_ctx,
+                            )
+                        }
+                    };
                     status_view.left_items.push(StatusItem {
-                        text: modified_label,
+                        text: filename_display,
                         color: None,
                         command: None,
                     });
@@ -6175,33 +6239,111 @@ pub fn run(
                 };
 
                 // Draw breadcrumb bar above the document area.
+                //
+                // Layout rules when the path is wider than the bar:
+                //   * filename (the last segment) is never hidden. If it
+                //     alone doesn't fit, truncate it with a leading `…`
+                //     so the extension stays visible.
+                //   * otherwise keep as many trailing segments as will
+                //     fit, prefix the row with `… > `, and drop the rest
+                //     of the leading segments. This makes the nearest
+                //     ancestors always visible and the drive/`/` root
+                //     the first thing to go.
                 if let Some(doc) = docs.get(active_tab) {
                     use crate::editor::view::DrawContext as _;
                     let bc_y = tab_h;
+                    let bar_w = width - sidebar_w - minimap_w;
                     draw_ctx.draw_rect(
                         sidebar_w,
                         bc_y,
-                        width - sidebar_w - minimap_w,
+                        bar_w,
                         breadcrumb_h,
                         style.background3.to_array(),
                     );
-                    let segments: Vec<&str> =
-                        doc.path.split('/').filter(|s| !s.is_empty()).collect();
-                    let mut bx = sidebar_w + style.padding_x;
-                    let by = bc_y + style.padding_y * 0.25;
-                    for (i, seg) in segments.iter().enumerate() {
-                        let is_last = i == segments.len() - 1;
-                        let color = if is_last {
-                            style.text.to_array()
-                        } else {
-                            style.dim.to_array()
-                        };
-                        draw_ctx.draw_text(style.font, seg, bx, by, color);
-                        bx += draw_ctx.font_width(style.font, seg);
-                        if !is_last {
-                            let arrow = " > ";
-                            draw_ctx.draw_text(style.font, arrow, bx, by, style.dim.to_array());
-                            bx += draw_ctx.font_width(style.font, arrow);
+                    let segments: Vec<&str> = doc
+                        .path
+                        .split(|c: char| c == '/' || c == '\\')
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !segments.is_empty() {
+                        let bx_start = sidebar_w + style.padding_x;
+                        let by = bc_y + style.padding_y * 0.25;
+                        let available = (bar_w - style.padding_x * 2.0).max(0.0);
+                        let arrow = " > ";
+                        let arrow_w = draw_ctx.font_width(style.font, arrow);
+                        let ellipsis_prefix = "… > ";
+                        let ellipsis_prefix_w =
+                            draw_ctx.font_width(style.font, ellipsis_prefix);
+
+                        // Figure out how many trailing segments fit. We
+                        // always keep the last segment, truncating it if
+                        // necessary. Then we walk leftwards, adding
+                        // whole ancestor segments while they fit.
+                        let last = *segments.last().unwrap();
+                        let last_w = draw_ctx.font_width(style.font, last);
+                        let (mut displayed, mut truncated_first) =
+                            if last_w <= available {
+                                (vec![last.to_string()], false)
+                            } else {
+                                // Filename alone overflows — shrink from
+                                // the left with an `…` so the extension
+                                // survives.
+                                let shrunk = truncate_left_to_width(
+                                    last,
+                                    available,
+                                    style.font,
+                                    &mut draw_ctx,
+                                );
+                                (vec![shrunk], false)
+                            };
+                        let mut used_w = draw_ctx.font_width(style.font, &displayed[0]);
+                        let mut first_kept_idx = segments.len() - 1;
+                        for i in (0..segments.len() - 1).rev() {
+                            let seg = segments[i];
+                            let seg_w = draw_ctx.font_width(style.font, seg);
+                            let budget = available
+                                - used_w
+                                - arrow_w
+                                - if i == 0 { 0.0 } else { ellipsis_prefix_w };
+                            if seg_w > budget {
+                                truncated_first = true;
+                                break;
+                            }
+                            used_w += seg_w + arrow_w;
+                            first_kept_idx = i;
+                            displayed.insert(0, seg.to_string());
+                        }
+
+                        let mut bx = bx_start;
+                        if truncated_first && first_kept_idx > 0 {
+                            draw_ctx.draw_text(
+                                style.font,
+                                ellipsis_prefix,
+                                bx,
+                                by,
+                                style.dim.to_array(),
+                            );
+                            bx += ellipsis_prefix_w;
+                        }
+                        for (i, seg) in displayed.iter().enumerate() {
+                            let is_last = i == displayed.len() - 1;
+                            let color = if is_last {
+                                style.text.to_array()
+                            } else {
+                                style.dim.to_array()
+                            };
+                            draw_ctx.draw_text(style.font, seg, bx, by, color);
+                            bx += draw_ctx.font_width(style.font, seg);
+                            if !is_last {
+                                draw_ctx.draw_text(
+                                    style.font,
+                                    arrow,
+                                    bx,
+                                    by,
+                                    style.dim.to_array(),
+                                );
+                                bx += arrow_w;
+                            }
                         }
                     }
                 }
@@ -7851,7 +7993,12 @@ pub fn run(
                 if cmdview_active {
                     crate::editor::app_state::clip_init(width, height);
                     use crate::editor::view::DrawContext as _;
-                    let cv_w = (width * 0.5).max(400.0).min(width - 20.0);
+                    // Widen the picker to 70% of the window so common paths
+                    // fit without scrolling. The input still hard-scrolls
+                    // horizontally for anything longer, and the suggestions
+                    // list ellipsis-truncates on the LEFT so the filename
+                    // (the interesting part of a long path) stays visible.
+                    let cv_w = (width * 0.7).max(500.0).min(width - 20.0);
                     let cv_x = (width - cv_w) / 2.0;
                     let line_h = style.font_height + style.padding_y;
                     let max_visible = 15usize;
@@ -7880,18 +8027,49 @@ pub fn run(
                         input_y,
                         style.accent.to_array(),
                     );
-                    // Render text with a vertical bar caret at cmdview_cursor.
-                    let text_x = cv_x + style.padding_x + label_w + style.padding_x;
+
+                    // Horizontal-scrolling input. `text_origin` is where the
+                    // first character of the input would land if scroll == 0;
+                    // we shift text left (via `text_scroll`) so the caret is
+                    // always a few chars inside the visible area even for
+                    // long paths. A tiny "<" / ">" indicator marks the edge
+                    // when content exists past it so the user can tell
+                    // they're scrolled.
+                    let text_area_x = cv_x + style.padding_x + label_w + style.padding_x;
+                    let text_area_right = cv_x + cv_w - style.padding_x;
+                    let text_area_w = (text_area_right - text_area_x).max(0.0);
                     let cursor_safe = cmdview_cursor.min(cmdview_text.len());
+                    let before_cursor = &cmdview_text[..cursor_safe];
+                    let caret_offset_px =
+                        draw_ctx.font_width(style.font, before_cursor);
+                    let full_text_w = draw_ctx.font_width(style.font, &cmdview_text);
+                    let caret_margin = (style.font_height * 0.5).min(text_area_w * 0.25);
+                    let mut text_scroll = if full_text_w <= text_area_w {
+                        0.0
+                    } else if caret_offset_px > text_area_w - caret_margin {
+                        caret_offset_px - (text_area_w - caret_margin)
+                    } else {
+                        0.0
+                    };
+                    // Guarantee we don't scroll so far that we reveal blank
+                    // space past the end of the text.
+                    let max_scroll = (full_text_w - text_area_w).max(0.0);
+                    if text_scroll > max_scroll {
+                        text_scroll = max_scroll;
+                    }
+                    let text_origin = text_area_x - text_scroll;
+
+                    // Clip text to the input area so long paths can't bleed
+                    // over the label, the box border, or the scrollbar.
+                    draw_ctx.set_clip_rect(text_area_x, input_y, text_area_w, style.font_height);
                     draw_ctx.draw_text(
                         style.font,
                         &cmdview_text,
-                        text_x,
+                        text_origin,
                         input_y,
                         style.text.to_array(),
                     );
-                    let before_cursor = &cmdview_text[..cursor_safe];
-                    let caret_x = text_x + draw_ctx.font_width(style.font, before_cursor);
+                    let caret_x = text_origin + caret_offset_px;
                     draw_ctx.draw_rect(
                         caret_x,
                         input_y,
@@ -7899,6 +8077,25 @@ pub fn run(
                         style.font_height,
                         style.caret.to_array(),
                     );
+                    draw_ctx.set_clip_rect(0.0, 0.0, width, height);
+                    if text_scroll > 0.5 {
+                        draw_ctx.draw_text(
+                            style.font,
+                            "<",
+                            text_area_x - draw_ctx.font_width(style.font, "<"),
+                            input_y,
+                            style.dim.to_array(),
+                        );
+                    }
+                    if full_text_w - text_scroll > text_area_w + 0.5 {
+                        draw_ctx.draw_text(
+                            style.font,
+                            ">",
+                            text_area_right,
+                            input_y,
+                            style.dim.to_array(),
+                        );
+                    }
 
                     // Divider below input.
                     draw_ctx.draw_rect(
@@ -7916,7 +8113,11 @@ pub fn run(
                         0
                     };
 
-                    // Suggestions list.
+                    // Suggestions list. Long paths get ellipsis-truncated on
+                    // the LEFT so the filename stays visible — that's
+                    // typically what the user is trying to pick.
+                    let suggestion_area_x = cv_x + style.padding_x;
+                    let suggestion_area_w = (cv_w - style.padding_x * 2.0).max(0.0);
                     for (i, suggestion) in cmdview_suggestions
                         .iter()
                         .enumerate()
@@ -7929,16 +8130,22 @@ pub fn run(
                         if i == cmdview_selected {
                             draw_ctx.draw_rect(cv_x, ry, cv_w, line_h, style.selection.to_array());
                         }
-                        let is_dir = suggestion.ends_with('/');
+                        let is_dir = suggestion.ends_with('/') || suggestion.ends_with('\\');
                         let color = if i == cmdview_selected || is_dir {
                             style.accent.to_array()
                         } else {
                             style.text.to_array()
                         };
+                        let display_text = truncate_left_to_width(
+                            suggestion,
+                            suggestion_area_w,
+                            style.font,
+                            &mut draw_ctx,
+                        );
                         draw_ctx.draw_text(
                             style.font,
-                            suggestion,
-                            cv_x + style.padding_x,
+                            &display_text,
+                            suggestion_area_x,
                             ry + style.padding_y / 2.0,
                             color,
                         );
