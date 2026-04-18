@@ -133,46 +133,39 @@ pub fn set_app_metadata(name: &str, identifier: &str) {
 /// Initialise SDL3 video subsystem. Must be called once on the main thread before
 /// the editor starts.
 pub fn init() -> Result<()> {
-    // Linux only: nudge SDL toward a no-GPU presentation path. Our
-    // static SDL3 build still has OpenGL / Vulkan / Wayland compiled in
-    // because sdl3-sys 0.6 doesn't expose Cargo features to disable
-    // them at CMake time; these hints steer it away from them at
-    // runtime so the editor behaves the same on a Nix / Arch / Fedora
-    // source build as on our old hand-crafted "no-GL" tarballs.
+    // Linux only: default to the no-GPU presentation path. Each hint
+    // is only applied if the user hasn't already set the matching SDL
+    // environment variable, which is the escape hatch for source
+    // builders whose SDL3 doesn't match our assumptions — e.g. a
+    // Wayland-only host with an X11-only SDL build needs
+    // `SDL_VIDEO_DRIVER=wayland` (after rebuilding SDL with the
+    // Wayland backend), and anyone who prefers the OpenGL-backed
+    // accelerated renderer can set `SDL_FRAMEBUFFER_ACCELERATION=1`.
     //
-    //  * FRAMEBUFFER_ACCELERATION=0 — by default on Linux,
-    //    `SDL_GetWindowSurface` silently spins up an SDL_Renderer
-    //    (OpenGL) to present via a texture, which dlopens libGL +
-    //    libGLX_nvidia + libnvidia-glcore + friends and balloons RSS
-    //    from ~18 MB to ~70 MB. Setting this hint tells SDL to use
-    //    the plain X11-SHM / Wayland software-framebuffer path.
-    //    Not set on macOS: SDL3's Cocoa unaccelerated framebuffer
-    //    path presents a blank NSView on recent macOS versions, so
-    //    we let SDL pick the Metal-backed renderer path (same
-    //    behaviour as 1.5.5 / pre-2.9). Metal/D3D don't carry the
+    //  * FRAMEBUFFER_ACCELERATION=0 — keeps `SDL_GetWindowSurface`
+    //    on the plain software-framebuffer path (X11-SHM / wl_shm)
+    //    instead of silently spinning up an OpenGL SDL_Renderer that
+    //    dlopens libGL + libGLX_nvidia + libnvidia-glcore and
+    //    balloons RSS from ~18 MB to ~70 MB. Not set on macOS: SDL3's
+    //    Cocoa unaccelerated framebuffer path presents a blank
+    //    NSView on recent macOS versions; Metal/D3D don't carry the
     //    libGL bloat problem that motivated the hint.
-    //  * RENDER_DRIVER=software — belt-and-braces: if anything in
-    //    the stack does spin up SDL_Renderer on Linux, force the CPU
-    //    backend. Not set on macOS / Windows for the same reason.
-    //  * VIDEO_DRIVER=x11,wayland — Linux-only. Pins SDL to X11
-    //    (which can present via MIT-SHM with no GL) and falls back
-    //    to Wayland if X11 is absent. Setting this on macOS or
-    //    Windows causes `SDL_Init` to error with "x11,wayland not
-    //    available" because neither driver exists there.
+    //  * RENDER_DRIVER=software — belt-and-braces for the same goal.
+    //  * VIDEO_DRIVER=x11,wayland — X11 first (presents via MIT-SHM
+    //    with no GL), falling back to Wayland if X11 is absent.
+    //    Setting this on macOS / Windows fails SDL_Init because
+    //    neither driver exists there.
     #[cfg(target_os = "linux")]
     unsafe {
-        SDL_SetHint(
-            c"SDL_FRAMEBUFFER_ACCELERATION".as_ptr(),
-            c"0".as_ptr(),
-        );
-        SDL_SetHint(
-            c"SDL_RENDER_DRIVER".as_ptr(),
-            c"software".as_ptr(),
-        );
-        SDL_SetHint(
-            c"SDL_VIDEO_DRIVER".as_ptr(),
-            c"x11,wayland".as_ptr(),
-        );
+        for (name, default) in [
+            (c"SDL_FRAMEBUFFER_ACCELERATION", c"0"),
+            (c"SDL_RENDER_DRIVER", c"software"),
+            (c"SDL_VIDEO_DRIVER", c"x11,wayland"),
+        ] {
+            if std::env::var_os(name.to_str().unwrap_or("")).is_none() {
+                SDL_SetHint(name.as_ptr(), default.as_ptr());
+            }
+        }
     }
 
     APP_NAME.with(|name| {

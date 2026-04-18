@@ -30,6 +30,37 @@ libxrandr-dev libxkbcommon-dev` (Ubuntu) — or add
 `wayland-protocols libwayland-dev` if you want Wayland available as a
 fallback.
 
+### Wayland-only hosts
+
+The editor defaults to X11 + software framebuffer (via `SDL_VIDEO_DRIVER=x11,wayland`,
+`SDL_FRAMEBUFFER_ACCELERATION=0`, `SDL_RENDER_DRIVER=software`) to keep
+OpenGL / libGL out of the process on NVIDIA-heavy setups. On a host
+with no X server and no Xwayland, launch will fail with
+`SDL3 init failed: x11 not available`.
+
+Any of our defaults can be overridden by setting the matching SDL
+environment variable before launch — the editor only applies its
+default when the env var is unset. So on a Wayland-only machine:
+
+```bash
+# One-shot.
+SDL_VIDEO_DRIVER=wayland lite-anvil
+
+# Or in your shell profile.
+export SDL_VIDEO_DRIVER=wayland
+```
+
+This requires SDL3 itself to have been built with the Wayland backend
+(`wayland-protocols libwayland-dev libxkbcommon-dev` at SDL build
+time — sdl3-sys picks them up automatically when they're visible to
+`pkg-config`). If your `sdl3-sys` cache predates installing those
+packages, force a rebuild with `cargo clean -p sdl3-sys && cargo build
+--release`.
+
+To go all the way back to SDL's accelerated OpenGL renderer (useful
+for comparing performance or sidestepping the whole software path on
+GPU-only hosts), export `SDL_FRAMEBUFFER_ACCELERATION=1`.
+
 On **Windows**, the MSVC toolchain (Visual Studio Build Tools) ships
 cmake and a C/C++ compiler; nothing else to install.
 

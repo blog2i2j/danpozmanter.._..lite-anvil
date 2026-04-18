@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.9.8] - 2026-04-18 -- Linux: SDL hints now respect env-var overrides (Wayland-only fix).
+
+* Linux: `window::init` defaults `SDL_VIDEO_DRIVER=x11,wayland`, `SDL_FRAMEBUFFER_ACCELERATION=0`, and `SDL_RENDER_DRIVER=software`, but now applies each hint *only* when the matching SDL environment variable is unset. Wayland-only hosts whose SDL3 was built without the X11 backend (previously stuck on `SDL3 init failed: x11 not available`) can override with `SDL_VIDEO_DRIVER=wayland`; users who prefer the OpenGL-backed renderer can set `SDL_FRAMEBUFFER_ACCELERATION=1`. CI-built binaries (SDL3 compiled with both backends) are unchanged. Documented the escape hatches in `BUILDING.md`.
+
 ## [2.9.7] - 2026-04-18 -- Nano-Anvil font-loading fix; sidebar rescan on save-as.
 
 * Fixed `FT_New_Face failed (data/fonts/Lilex-Regular.ttf): error 1` on nano-anvil.
