@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.9.5] - 2026-04-17 -- CI fix: install cargo-deb / cargo-generate-rpm from source.
+
+* Release CI: prebuilt `cargo-deb` Switched the install step to `cargo install --locked cargo-deb cargo-generate-rpm` to target the right glibc.
+
 ## [2.9.4] - 2026-04-17 -- Packaging overhaul: Add AppImage + .deb + .rpm on Linux, switch to .dmg on macOS and Inno Setup installer on Windows.
 
 * Linux: release now publishes `.AppImage`, `.deb`, and `.rpm` alongside the existing `.tar.gz`. `.deb` / `.rpm` drop into `/usr/bin` + `/usr/share/{lite,nano}-anvil/data/` and register a `.desktop` entry + 256×256 hicolor icon. AppImage is self-contained and runs on any distro (glibc 2.35+). Built via `cargo-deb`, `cargo-generate-rpm`, and `appimagetool` respectively.

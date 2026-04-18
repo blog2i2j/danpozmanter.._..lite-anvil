@@ -73,9 +73,7 @@ jobs:
           tar -czf "${ARCHIVE_BASE}.tar.gz" "$ARCHIVE_BASE"
 
       - name: Install packaging tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deb,cargo-generate-rpm
+        run: cargo install --locked cargo-deb cargo-generate-rpm
 
       - name: Build .deb packages
         run: |
