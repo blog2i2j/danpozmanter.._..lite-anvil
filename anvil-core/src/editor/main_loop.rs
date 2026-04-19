@@ -252,10 +252,24 @@ fn parse_hex_color(s: &str) -> Option<[u8; 4]> {
 }
 
 /// File watcher state for autoreload on external changes.
+///
+/// We watch each file's *parent directory* (not the file inode) and
+/// filter events by filename. This is the standard robust pattern for
+/// inotify-backed watchers: an external editor saving via write-to-temp
+/// + atomic rename replaces the file's inode, which silently breaks a
+/// file-inode watch — only the first save fires and all subsequent
+/// ones miss. Watching the directory sidesteps that entirely.
 pub(crate) struct AutoreloadState {
     watcher: Option<notify::RecommendedWatcher>,
     rx: Option<Receiver<notify::Result<Event>>>,
-    watched_paths: HashSet<String>,
+    /// Watched file paths mapped to the directory registered with
+    /// notify. Used to filter events and to look up which dir to
+    /// decrement in `unwatch`.
+    watched_files: HashMap<String, PathBuf>,
+    /// Reference count per watched directory so the last file in a
+    /// directory unwatches it, but shared dirs stay watched while any
+    /// of their files are open.
+    watched_dirs: HashMap<PathBuf, usize>,
 }
 
 impl AutoreloadState {
@@ -268,29 +282,46 @@ impl AutoreloadState {
         Self {
             watcher,
             rx: Some(rx),
-            watched_paths: HashSet::new(),
+            watched_files: HashMap::new(),
+            watched_dirs: HashMap::new(),
         }
     }
 
     /// Start watching a file path for external changes.
     pub(crate) fn watch(&mut self, path: &str) {
-        if self.watched_paths.contains(path) {
+        if self.watched_files.contains_key(path) {
             return;
         }
-        if let Some(ref mut w) = self.watcher {
-            if w.watch(Path::new(path), RecursiveMode::NonRecursive)
-                .is_ok()
-            {
-                self.watched_paths.insert(path.to_string());
+        let file_path = PathBuf::from(path);
+        let dir = match file_path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+            _ => return,
+        };
+        let count = self.watched_dirs.entry(dir.clone()).or_insert(0);
+        if *count == 0 {
+            if let Some(ref mut w) = self.watcher {
+                if w.watch(&dir, RecursiveMode::NonRecursive).is_err() {
+                    self.watched_dirs.remove(&dir);
+                    return;
+                }
             }
         }
+        *self.watched_dirs.get_mut(&dir).expect("just inserted") += 1;
+        self.watched_files.insert(path.to_string(), dir);
     }
 
     /// Stop watching a file path.
     pub(crate) fn unwatch(&mut self, path: &str) {
-        if self.watched_paths.remove(path) {
-            if let Some(ref mut w) = self.watcher {
-                let _ = w.unwatch(Path::new(path));
+        let Some(dir) = self.watched_files.remove(path) else {
+            return;
+        };
+        if let Some(count) = self.watched_dirs.get_mut(&dir) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.watched_dirs.remove(&dir);
+                if let Some(ref mut w) = self.watcher {
+                    let _ = w.unwatch(&dir);
+                }
             }
         }
     }
@@ -302,9 +333,17 @@ impl AutoreloadState {
             while let Ok(event) = rx.try_recv() {
                 if let Ok(ev) = event {
                     use notify::EventKind;
-                    if matches!(ev.kind, EventKind::Modify(_)) {
-                        for p in &ev.paths {
-                            if let Some(s) = p.to_str() {
+                    // Creates count too: an atomic save rename replaces
+                    // the target with a fresh inode, which arrives as a
+                    // Create event on the dir watcher.
+                    let is_interesting =
+                        matches!(ev.kind, EventKind::Modify(_) | EventKind::Create(_));
+                    if !is_interesting {
+                        continue;
+                    }
+                    for p in &ev.paths {
+                        if let Some(s) = p.to_str() {
+                            if self.watched_files.contains_key(s) {
                                 changed.push(s.to_string());
                             }
                         }
@@ -831,6 +870,10 @@ pub fn run(
         }
     }
     let mut nag = Nag::None;
+    // Set by the KeyDown-side nag handlers so the immediately-following
+    // SDL_TEXTINPUT event (which fires on every printable keystroke,
+    // including Y / N) doesn't leak into the active document.
+    let mut eat_next_text_input: bool = false;
     let mut info_message: Option<(String, Instant)> = font_warning.map(|msg| (msg, Instant::now()));
 
     // Command palette state.
@@ -2412,6 +2455,7 @@ pub fn run(
                         let parent_str = parent_str.clone();
                         let tab = *doc_tab;
                         let is_save_as = *from_save_as;
+                        eat_next_text_input = true;
                         match key.as_str() {
                             "y" | "Y" | "return" | "keypad enter" => {
                                 let parent = std::path::Path::new(&save_path)
@@ -2505,6 +2549,7 @@ pub fn run(
                         let tab_to_close = *tab_to_close;
                         cmdview_active = false;
                         palette_active = false;
+                        eat_next_text_input = true;
                         match key.as_str() {
                             "y" | "Y" | "return" | "keypad enter" => {
                                 // Yes: discard unsaved changes and proceed.
@@ -2541,6 +2586,10 @@ pub fn run(
                     // Reload nag intercepts keys when active.
                     if let Nag::ReloadFromDisk { path } = &nag {
                         let rpath = path.clone();
+                        // Every arm here resolves the keystroke, so swallow
+                        // the follow-on TextInput regardless of which arm
+                        // matches.
+                        eat_next_text_input = true;
                         match key.as_str() {
                             "y" | "Y" => {
                                 // Reload from disk.
@@ -2550,14 +2599,21 @@ pub fn run(
                                             let mut buf_state = buffer::default_buffer_state();
                                             if buffer::load_file(&mut buf_state, &rpath).is_ok() {
                                                 b.lines = buf_state.lines;
-                                                b.change_id = buf_state.change_id;
+                                                // See autoreload path: bump change_id past
+                                                // its current value so the render cache
+                                                // doesn't hit on the stale lines.
+                                                b.change_id =
+                                                    b.change_id.wrapping_add(1).max(1);
                                             }
                                             Ok(())
                                         });
-                                        if let Ok(cid) =
-                                            buffer::with_buffer(buf_id, |b| Ok(b.change_id))
-                                        {
+                                        doc.cached_change_id = -1;
+                                        doc.cached_render.clear();
+                                        if let Ok((cid, sig)) = buffer::with_buffer(buf_id, |b| {
+                                            Ok((b.change_id, buffer::content_signature(&b.lines)))
+                                        }) {
                                             doc.saved_change_id = cid;
+                                            doc.saved_signature = sig;
                                         }
                                     }
                                 }
@@ -2923,8 +2979,25 @@ pub fn run(
                     }
                     redraw = true;
                 }
-                EditorEvent::TextInput(text) => {
+                    EditorEvent::TextInput(text) => {
                     cursor_blink_reset = Instant::now();
+                    // The KeyDown handler already consumed this key
+                    // (e.g. Y / N resolving a nag); drop the paired
+                    // TextInput so it can't land in the document.
+                    if eat_next_text_input {
+                        eat_next_text_input = false;
+                        redraw = true;
+                        continue;
+                    }
+                    // Block text input while *any* nag is active —
+                    // characters typed before the user presses Y / N
+                    // must not leak into the doc.
+                    if !matches!(nag, Nag::None) {
+                        cmdview_active = false;
+                        palette_active = false;
+                        redraw = true;
+                        continue;
+                    }
                     // Forward text to terminal when focused.
                     if subsystems.has_terminal() && terminal.visible && terminal.focused {
                         if let Some(inst) = terminal.active_terminal() {
@@ -4601,7 +4674,7 @@ pub fn run(
                 let canonical = std::fs::canonicalize(changed)
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| changed.clone());
-                for doc in &docs {
+                for doc in docs.iter_mut() {
                     let doc_canon = std::fs::canonicalize(&doc.path)
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|_| doc.path.clone());
@@ -4614,10 +4687,33 @@ pub fn run(
                                 let mut buf_state = buffer::default_buffer_state();
                                 if buffer::load_file(&mut buf_state, &path).is_ok() {
                                     b.lines = buf_state.lines;
-                                    b.change_id = buf_state.change_id;
+                                    // `default_buffer_state()` resets
+                                    // change_id to 1; copying it back
+                                    // means a just-opened buffer (also
+                                    // at change_id 1) sees no change
+                                    // and the doc-view render cache
+                                    // hits on the stale lines.  Bump
+                                    // past the current value so every
+                                    // downstream cache invalidates.
+                                    b.change_id = b.change_id.wrapping_add(1).max(1);
                                 }
                                 Ok(())
                             });
+                            // Force the render cache to rebuild on the
+                            // next frame rather than waiting for the
+                            // change_id comparison to catch the bump
+                            // (cheap, and removes any reliance on it).
+                            doc.cached_change_id = -1;
+                            doc.cached_render.clear();
+                            // Keep the "saved" markers aligned with
+                            // what we just wrote so the next external
+                            // change doesn't misfire the Reload prompt.
+                            if let Ok((cid, sig)) = buffer::with_buffer(buf_id, |b| {
+                                Ok((b.change_id, buffer::content_signature(&b.lines)))
+                            }) {
+                                doc.saved_change_id = cid;
+                                doc.saved_signature = sig;
+                            }
                         }
                         redraw = true;
                         break;

@@ -1,5 +1,11 @@
 # Change Log
 
+## [2.9.10] - 2026-04-19 -- Autoreload survives atomic saves; modal Reload-from-disk prompt; markdown preview strikes through checked tasks.
+
+* Fixed autoreload catching only the first external change. The file watcher was attached to the **file inode** (`notify::RecursiveMode::NonRecursive` on a file path). Editors that save via write-to-temp + atomic rename replace the file's inode on every save; the inotify watch stayed bound to the old, now-unlinked inode, so every save after the first went unnoticed. Watcher now binds to the file's **parent directory** and filters events by filename, with refcounting so multiple open files in the same directory share one watch and the last one tears it down.
+* Fixed Reload-from-disk prompt: (a) keyboard is now modal — characters typed while the prompt is up, including the Y / N themselves, no longer leak through `SDL_TEXTINPUT` into the document; (b) Y actually reloads now (was previously letting the paired `TextInput("y")` insert a `y` into the buffer right after); (c) the clean-buffer auto-reload path now updates `saved_change_id` + `saved_signature`, so a file that silently auto-reloads on external change doesn't then mis-read as modified on the *next* external change and bounce the user to the nag prompt; (d) the reload now actually shows the new text in the editor — `buffer::load_file` writes into a fresh `default_buffer_state()` whose `change_id` is `1`, and for a just-opened buffer (also `change_id = 1`) the render cache considered that a no-op. Bumped `b.change_id` on reload and explicitly invalidate `doc.cached_render` so the next frame rebuilds.
+* Markdown preview: list items with checked task boxes (`- [x] ...`) now render the text with a 1px horizontal strikethrough in the dim color, matching the standard TODO-list convention. `~~~foo~~~` spans also get a proper line now (previously just dimmed).
+
 ## [2.9.9] - 2026-04-19 -- Nano-Anvil Open Recent; command palette "Open File" ranking.
 
 * Nano-Anvil: `core:open-recent` is now available (ctrl+shift+r / command palette), listing only recent **files**. The project-folder list is skipped in single-file mode since Nano-Anvil has no concept of a project folder.

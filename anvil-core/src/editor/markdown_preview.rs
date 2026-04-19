@@ -364,6 +364,7 @@ fn draw_inlines(
     forced_color: Option<[u8; 4]>,
     style: &StyleContext,
     link_regions: &mut Vec<LinkRegion>,
+    strike_through: bool,
 ) -> f64 {
     if spans.is_empty() || max_x <= x0 {
         return y0;
@@ -419,6 +420,13 @@ fn draw_inlines(
                 ctx.draw_rect(wx0 - 2.0, y, ww + 4.0, base_lh, bg);
             }
             x = ctx.draw_text(font, word, wx0, y, col);
+            if strike_through || span.strikethrough {
+                // 1px horizontal line through the word at its visual
+                // midline. `base_lh * 0.55` lands near the x-height
+                // center for the body fonts we ship.
+                let mid_y = (y + base_lh * 0.55).floor();
+                ctx.draw_rect(wx0, mid_y, (x - wx0).max(1.0), 1.0, col);
+            }
             if let Some(href) = &span.href {
                 link_regions.push(LinkRegion {
                     x1: wx0,
@@ -474,6 +482,7 @@ fn draw_block(
                 Some(color),
                 style,
                 link_regions,
+                false,
             );
             if *level <= 2 {
                 // Bottom rule inside the slot `HEADING_RULE_GAP` reserved.
@@ -500,6 +509,7 @@ fn draw_block(
                 None,
                 style,
                 link_regions,
+                false,
             );
         }
         Block::Code { text, .. } => {
@@ -652,6 +662,15 @@ fn draw_list(
         }
 
         let ih = inlines_height(ctx, &item.spans, max_x - content_x, body, lh, style);
+        // Checked task items render with a dim color + a horizontal
+        // strikethrough through each word, matching the visual TODO
+        // convention ("[x] done" = crossed out).
+        let item_checked = item.task == Some(true);
+        let item_color = if item_checked {
+            Some(dim_color)
+        } else {
+            None
+        };
         draw_inlines(
             ctx,
             &item.spans,
@@ -660,9 +679,10 @@ fn draw_list(
             max_x,
             body,
             lh,
-            None,
+            item_color,
             style,
             link_regions,
+            item_checked,
         );
         cur_y += ih.max(lh);
         first = false;
@@ -801,6 +821,7 @@ fn draw_table_row(
                 forced_color,
                 style,
                 link_regions,
+                false,
             );
         }
     }
