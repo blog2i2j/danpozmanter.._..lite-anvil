@@ -635,17 +635,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#test-runner" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Test Runner
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1320,91 +1309,6 @@
 <p>XML highlighting also covers <code>.csproj</code>, <code>.fsproj</code>, <code>.vbproj</code>, <code>.vcxproj</code>, <code>.sln</code>, <code>.props</code>, <code>.targets</code>, <code>.nuspec</code>, <code>.pom</code>, <code>.svg</code>, <code>.plist</code>, <code>.xaml</code>.</p>
 <p>Groovy highlighting covers <code>.gradle</code> files. Kotlin highlighting covers <code>.gradle.kts</code> files (via <code>.kts</code> extension).</p>
 <p>Toggle line comments (<code>Ctrl+/</code>) automatically picks the correct marker for the active language -- <code>//</code> for Rust/C/JS, <code>#</code> for Python/Bash/TOML, <code>--</code> for Lua/SQL/Haskell, <code>;</code> for Assembly/Lisp/INI, <code>%</code> for Erlang, and block-comment wrapping (<code>&lt;!-- --&gt;</code> for HTML/Markdown/XML/Vue, <code>/* */</code> for CSS, <code>(* *)</code> for OCaml) for languages without a line-comment form.</p>
-<h2 id="test-runner">Test Runner<a class="headerlink" href="#test-runner" title="Permanent link">&para;</a></h2>
-<p>The test runner auto-detects your project's framework and runs tests in a terminal pane.</p>
-<table>
-<thead>
-<tr>
-<th>Language</th>
-<th>Detection</th>
-<th>Tool</th>
-<th>Run All</th>
-<th>Run File</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Rust</td>
-<td><code>Cargo.toml</code></td>
-<td>cargo</td>
-<td><code>cargo test</code></td>
-<td><code>cargo test &lt;module&gt;</code></td>
-</tr>
-<tr>
-<td>JavaScript / TypeScript</td>
-<td><code>package.json</code></td>
-<td>vitest, jest, or npm</td>
-<td><code>npx vitest run</code> / <code>npx jest</code> / <code>npm test</code></td>
-<td><code>&lt;runner&gt; &lt;file&gt;</code></td>
-</tr>
-<tr>
-<td>Python</td>
-<td><code>pytest.ini</code>, <code>conftest.py</code>, <code>pyproject.toml</code></td>
-<td>pytest or unittest</td>
-<td><code>python -m pytest -v</code></td>
-<td><code>pytest &lt;file&gt;</code></td>
-</tr>
-<tr>
-<td>Go</td>
-<td><code>go.mod</code></td>
-<td>go test</td>
-<td><code>go test ./...</code></td>
-<td><code>go test -v ./&lt;dir&gt;</code></td>
-</tr>
-<tr>
-<td>C# / F#</td>
-<td><code>.sln</code>, <code>.csproj</code>, <code>.fsproj</code></td>
-<td>dotnet test</td>
-<td><code>dotnet test</code></td>
-<td><code>dotnet test --filter &lt;class&gt;</code></td>
-</tr>
-<tr>
-<td>Java / Kotlin / Scala</td>
-<td><code>build.gradle[.kts]</code></td>
-<td>Gradle</td>
-<td><code>./gradlew test</code></td>
-<td><code>./gradlew test --tests "*Class*"</code></td>
-</tr>
-<tr>
-<td>Java / Kotlin / Scala</td>
-<td><code>pom.xml</code></td>
-<td>Maven</td>
-<td><code>mvn test</code></td>
-<td><code>mvn test -Dtest="Class"</code></td>
-</tr>
-<tr>
-<td>Scala</td>
-<td><code>build.sbt</code></td>
-<td>sbt</td>
-<td><code>sbt test</code></td>
-<td><code>sbt "testOnly *Class*"</code></td>
-</tr>
-<tr>
-<td>PHP</td>
-<td><code>phpunit.xml[.dist]</code></td>
-<td>PHPUnit</td>
-<td><code>./vendor/bin/phpunit</code></td>
-<td><code>phpunit &lt;file&gt;</code></td>
-</tr>
-<tr>
-<td>Any</td>
-<td><code>Makefile</code></td>
-<td>make</td>
-<td><code>make test</code></td>
-<td>--</td>
-</tr>
-</tbody>
-</table>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <p>Lite Anvil is configured via a TOML file. Open it from the sidebar settings icon or via the command palette: <strong>Open User Settings</strong>.</p>
 <h3 id="config-location">Config location<a class="headerlink" href="#config-location" title="Permanent link">&para;</a></h3>

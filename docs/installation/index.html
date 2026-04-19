@@ -645,27 +645,31 @@
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
 <h2 id="prebuilt-binaries">Prebuilt Binaries<a class="headerlink" href="#prebuilt-binaries" title="Permanent link">&para;</a></h2>
 <p>Download the latest release for your platform from <a href="https://github.com/danpozmanter/lite-anvil/releases">GitHub Releases</a>.</p>
-<p>Release archives contain both the <code>lite-anvil</code> (full editor) and <code>nano-anvil</code> (minimal single-file editor) binaries. Install whichever you need, or both.</p>
+<p>Release archives contain three binaries: <code>lite-anvil</code> (full editor), <code>nano-anvil</code> (minimal single-file editor), and <code>note-anvil</code> (markdown note-taking app). Install whichever you need, or all three.</p>
 <h3 id="linux">Linux<a class="headerlink" href="#linux" title="Permanent link">&para;</a></h3>
-<p>Extract the archive, copy the binary and data directory:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cp<span class="w"> </span>lite-anvil<span class="w"> </span>~/.local/bin/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cp<span class="w"> </span>-r<span class="w"> </span>data<span class="w"> </span>~/.local/share/lite-anvil/
-</code></pre></div>
-<p>Optional -- register for "Open With" on supported file types:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cp<span class="w"> </span>resources/linux/com.lite_anvil.LiteAnvil.desktop<span class="w"> </span>~/.local/share/applications/
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cp<span class="w"> </span>resources/icons/lite-anvil.png<span class="w"> </span>~/.local/share/icons/hicolor/128x128/apps/
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>update-desktop-database<span class="w"> </span>~/.local/share/applications/
-</code></pre></div>
+<p>Pick whichever format matches your distro:</p>
+<p>The <code>.deb</code> and <code>.rpm</code> install <code>lite-anvil</code>, <code>nano-anvil</code>, and <code>note-anvil</code> together.</p>
+<ul>
+<li><strong>Debian / Ubuntu</strong>: download <code>lite-anvil_*.deb</code> and install with:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>./lite-anvil_*_amd64.deb
+</code></pre></div></li>
+<li><strong>Fedora / RHEL / openSUSE</strong>: download <code>lite-anvil-*.rpm</code> and install with:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>dnf<span class="w"> </span>install<span class="w"> </span>./lite-anvil-*.x86_64.rpm
+</code></pre></div></li>
+<li><strong>Anywhere else (Arch, NixOS, Gentoo, ...)</strong>: download <code>lite-anvil-*-x86_64.AppImage</code>, make it executable, and run it:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>chmod<span class="w"> </span>+x<span class="w"> </span>lite-anvil-*-x86_64.AppImage
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>./lite-anvil-*-x86_64.AppImage
+</code></pre></div></li>
+<li><strong>Manual / portable</strong>: extract <code>lite-anvil-*-linux-x86_64.tar.gz</code> and copy the binary + <code>data/</code> directory to wherever you like. Desktop entry + icon are included in <code>resources/linux/</code> and <code>resources/icons/</code>.</li>
+</ul>
 <h3 id="macos">macOS<a class="headerlink" href="#macos" title="Permanent link">&para;</a></h3>
-<p>Extract the zip and run the included install script:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>./install-mac.sh
+<p>Download <code>lite-anvil-*-macos-{x86_64,aarch64}.zip</code> for your architecture, extract it, and from a Terminal in the extracted folder run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>bash<span class="w"> </span>install-mac.sh
 </code></pre></div>
-<p>This copies LiteAnvil.app and NanoAnvil.app to <code>/Applications</code>, clears quarantine, and codesigns both.</p>
+<p>This copies <code>LiteAnvil.app</code>, <code>NanoAnvil.app</code>, and <code>NoteAnvil.app</code> to <code>/Applications</code>, clears the download quarantine bit, and creates <code>lite-anvil</code> / <code>nano-anvil</code> / <code>note-anvil</code> CLI symlinks in <code>/usr/local/bin</code> and <code>/opt/homebrew/bin</code>.</p>
+<p>Running the script via <code>bash</code> is what lets the quarantine clear actually take effect — macOS Sequoia's Gatekeeper no longer honors the right-click → <em>Open</em> bypass for unsigned apps, so a double-click install would fail.</p>
 <h3 id="windows">Windows<a class="headerlink" href="#windows" title="Permanent link">&para;</a></h3>
-<p>Extract the archive. Copy <code>lite-anvil.exe</code> and the <code>data/</code> directory wherever you like.</p>
-<p>Optional -- register file associations:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="o">-File</span> <span class="n">resources</span><span class="p">\</span><span class="n">windows</span><span class="p">\</span><span class="nb">install-file</span><span class="n">-associations</span><span class="p">.</span><span class="n">ps1</span>
-</code></pre></div>
+<p>Download <code>LiteAnvil-*-x86_64-setup.exe</code> and run it. The installer bundles <code>lite-anvil.exe</code>, <code>nano-anvil.exe</code>, and <code>note-anvil.exe</code>, creates Start Menu shortcuts, and offers optional file-association and <em>Add to PATH</em> tasks. A SmartScreen warning appears the first time (the build is unsigned) — click <em>More info</em> → <em>Run anyway</em>.</p>
 <h2 id="building-from-source">Building from Source<a class="headerlink" href="#building-from-source" title="Permanent link">&para;</a></h2>
 <h3 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h3>
 <ul>

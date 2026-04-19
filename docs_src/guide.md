@@ -196,23 +196,6 @@ Groovy highlighting covers `.gradle` files. Kotlin highlighting covers `.gradle.
 
 Toggle line comments (`Ctrl+/`) automatically picks the correct marker for the active language -- `//` for Rust/C/JS, `#` for Python/Bash/TOML, `--` for Lua/SQL/Haskell, `;` for Assembly/Lisp/INI, `%` for Erlang, and block-comment wrapping (`<!-- -->` for HTML/Markdown/XML/Vue, `/* */` for CSS, `(* *)` for OCaml) for languages without a line-comment form.
 
-## Test Runner
-
-The test runner auto-detects your project's framework and runs tests in a terminal pane.
-
-| Language | Detection | Tool | Run All | Run File |
-|----------|-----------|------|---------|----------|
-| Rust | `Cargo.toml` | cargo | `cargo test` | `cargo test <module>` |
-| JavaScript / TypeScript | `package.json` | vitest, jest, or npm | `npx vitest run` / `npx jest` / `npm test` | `<runner> <file>` |
-| Python | `pytest.ini`, `conftest.py`, `pyproject.toml` | pytest or unittest | `python -m pytest -v` | `pytest <file>` |
-| Go | `go.mod` | go test | `go test ./...` | `go test -v ./<dir>` |
-| C# / F# | `.sln`, `.csproj`, `.fsproj` | dotnet test | `dotnet test` | `dotnet test --filter <class>` |
-| Java / Kotlin / Scala | `build.gradle[.kts]` | Gradle | `./gradlew test` | `./gradlew test --tests "*Class*"` |
-| Java / Kotlin / Scala | `pom.xml` | Maven | `mvn test` | `mvn test -Dtest="Class"` |
-| Scala | `build.sbt` | sbt | `sbt test` | `sbt "testOnly *Class*"` |
-| PHP | `phpunit.xml[.dist]` | PHPUnit | `./vendor/bin/phpunit` | `phpunit <file>` |
-| Any | `Makefile` | make | `make test` | -- |
-
 ## Configuration
 
 Lite Anvil is configured via a TOML file. Open it from the sidebar settings icon or via the command palette: **Open User Settings**.

@@ -112,9 +112,37 @@ Find and Replace across files in a project folder.
 
 <div class="feature-card" markdown>
 
+### Markdown Preview
+
+Side-by-side rendered preview with task-list checkboxes (struck through when checked), code blocks, and the rest of CommonMark.
+
+</div>
+
+<div class="feature-card" markdown>
+
+### Auto-Reload on Disk Changes
+
+External edits are picked up automatically, even across atomic save-by-rename patterns. If the buffer is dirty, a modal Reload-from-disk prompt asks before overwriting your changes.
+
+</div>
+
+<div class="feature-card" markdown>
+
+<img src="assets/nano-anvil.png" alt="Nano Anvil icon" class="feature-icon">
+
 ### Nano Anvil
 
 A minimal single-file editor with software rendering. No GPU driver overhead -- ~28MB RAM on Linux. No sidebar, terminal, LSP, git, or tabs.
+
+</div>
+
+<div class="feature-card" markdown>
+
+<img src="assets/note-anvil.png" alt="Note Anvil icon" class="feature-icon">
+
+### Note Anvil
+
+A markdown note-taking app with a side-by-side preview. Same software-rendering footprint as Nano Anvil, tuned for quick capture and Zettelkasten-style notes.
 
 </div>
 
@@ -122,7 +150,7 @@ A minimal single-file editor with software rendering. No GPU driver overhead -- 
 
 Lite Anvil is a fork of [Lite XL](https://github.com/lite-xl/lite-xl), rewritten from the ground up in Rust.
 
-Lite Anvil also ships Nano Anvil, a minimal single-file editor that uses software rendering (no GPU drivers). See the [Installation](installation.md) page for details on both binaries.
+Lite Anvil also ships **Nano Anvil**, a minimal single-file editor that uses software rendering (no GPU drivers), and **Note Anvil**, a markdown note-taking app with live preview. See the [Installation](installation.md) page for details on all three binaries.
 
 | | |
 |---|---|

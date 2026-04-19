@@ -15,7 +15,7 @@ Release archives contain three binaries: `lite-anvil` (full editor), `nano-anvil
 
 Pick whichever format matches your distro:
 
-The `.deb` and `.rpm` install both `lite-anvil` and `nano-anvil` together.
+The `.deb` and `.rpm` install `lite-anvil`, `nano-anvil`, and `note-anvil` together.
 
 - **Debian / Ubuntu**: download `lite-anvil_*.deb` and install with:
   ```bash
@@ -40,13 +40,13 @@ Download `lite-anvil-*-macos-{x86_64,aarch64}.zip` for your architecture, extrac
 bash install-mac.sh
 ```
 
-This copies `LiteAnvil.app` + `NanoAnvil.app` to `/Applications`, clears the download quarantine bit, and creates `lite-anvil` / `nano-anvil` CLI symlinks in `/usr/local/bin` and `/opt/homebrew/bin`.
+This copies `LiteAnvil.app`, `NanoAnvil.app`, and `NoteAnvil.app` to `/Applications`, clears the download quarantine bit, and creates `lite-anvil` / `nano-anvil` / `note-anvil` CLI symlinks in `/usr/local/bin` and `/opt/homebrew/bin`.
 
 Running the script via `bash` is what lets the quarantine clear actually take effect — macOS Sequoia's Gatekeeper no longer honors the right-click → *Open* bypass for unsigned apps, so a double-click install would fail.
 
 ### Windows
 
-Download `LiteAnvil-*-x86_64-setup.exe` and run it. The installer bundles both `lite-anvil.exe` and `nano-anvil.exe`, creates Start Menu shortcuts, and offers optional file-association and *Add to PATH* tasks. A SmartScreen warning appears the first time (the build is unsigned) — click *More info* → *Run anyway*.
+Download `LiteAnvil-*-x86_64-setup.exe` and run it. The installer bundles `lite-anvil.exe`, `nano-anvil.exe`, and `note-anvil.exe`, creates Start Menu shortcuts, and offers optional file-association and *Add to PATH* tasks. A SmartScreen warning appears the first time (the build is unsigned) — click *More info* → *Run anyway*.
 
 ## Building from Source
 
