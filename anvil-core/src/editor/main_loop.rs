@@ -1321,6 +1321,12 @@ pub fn run(
 
     // Context menu state.
     let mut context_menu = ContextMenu::new();
+    // Sidebar entry targeted by the current context menu (path, is_dir).
+    // Set when right-clicking a sidebar row; consumed by the rename flow.
+    let mut sidebar_menu_target: Option<(String, bool)> = None;
+    // Path being renamed (source). Read by the CmdViewMode::Rename
+    // confirm handler to `fs::rename` the file.
+    let mut rename_source: String = String::new();
 
     // LSP completion, hover, and go-to-definition state.
     let mut completion = CompletionState::new();
@@ -1705,7 +1711,7 @@ pub fn run(
                     }
 
                     // Command view (file/folder open) intercepts keys.
-                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile || cmdview_mode == CmdViewMode::OpenRecent) {
+                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile || cmdview_mode == CmdViewMode::OpenRecent || cmdview_mode == CmdViewMode::Rename) {
                         /// Expand ~ and resolve relative paths to absolute.
                         /// On Windows, treat both `/` and `\` as absolute-path
                         /// indicators (`C:\...`) and use `USERPROFILE` for `~`.
@@ -2076,6 +2082,67 @@ pub fn run(
                                             );
                                         }
                                         cmdview_active = false;
+                                    }
+                                    CmdViewMode::Rename => {
+                                        let src = std::mem::take(&mut rename_source);
+                                        let dst = path.clone();
+                                        cmdview_active = false;
+                                        if src.is_empty() || src == dst {
+                                            // nothing to do
+                                        } else if std::path::Path::new(&dst).exists() {
+                                            info_message = Some((
+                                                format!("Target exists: {dst}"),
+                                                Instant::now(),
+                                            ));
+                                        } else {
+                                            if let Some(parent) =
+                                                std::path::Path::new(&dst).parent()
+                                            {
+                                                let _ = std::fs::create_dir_all(parent);
+                                            }
+                                            match std::fs::rename(&src, &dst) {
+                                                Ok(()) => {
+                                                    for d in docs.iter_mut() {
+                                                        if d.path == src {
+                                                            autoreload.unwatch(&src);
+                                                            d.path = dst.clone();
+                                                            d.name = std::path::Path::new(&dst)
+                                                                .file_name()
+                                                                .map(|n| {
+                                                                    n.to_string_lossy().to_string()
+                                                                })
+                                                                .unwrap_or_else(|| dst.clone());
+                                                            autoreload.watch(&dst);
+                                                        }
+                                                    }
+                                                    if subsystems.has_sidebar()
+                                                        && !project_root.is_empty()
+                                                    {
+                                                        sidebar_entries = scan_for_sidebar(
+                                                            subsystems.has_notes_mode(),
+                                                            &project_root,
+                                                            sidebar_show_hidden,
+                                                        );
+                                                        restore_expanded_folders(
+                                                            &mut sidebar_entries,
+                                                            userdir_path,
+                                                            sidebar_show_hidden,
+                                                            &project_session_key(&project_root),
+                                                        );
+                                                    }
+                                                    info_message = Some((
+                                                        format!("Renamed to {dst}"),
+                                                        Instant::now(),
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    info_message = Some((
+                                                        format!("Rename failed: {e}"),
+                                                        Instant::now(),
+                                                    ));
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3200,7 +3267,7 @@ pub fn run(
                         redraw = true;
                         continue;
                     }
-                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile || cmdview_mode == CmdViewMode::OpenRecent) {
+                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile || cmdview_mode == CmdViewMode::OpenRecent || cmdview_mode == CmdViewMode::Rename) {
                         let prev_text = cmdview_text.clone();
                         // Insert at the caret rather than appending so left/right/home/end
                         // editing is preserved while typing.
@@ -3248,6 +3315,7 @@ pub fn run(
                         // by substring, not prefix.
                         if cmdview_mode != CmdViewMode::SaveAs
                             && cmdview_mode != CmdViewMode::OpenRecent
+                            && cmdview_mode != CmdViewMode::Rename
                             && cmdview_suggestions.len() == 1
                             && cmdview_cursor == cmdview_text.len()
                             && cmdview_text.len() > prev_text.len()
@@ -3549,6 +3617,22 @@ pub fn run(
                                 if let Some(ref cmd) = item.command {
                                     let cmd = cmd.clone();
                                     context_menu.hide();
+                                    if cmd == "sidebar:rename" {
+                                        if let Some((path, _is_dir)) =
+                                            sidebar_menu_target.take()
+                                        {
+                                            rename_source = path.clone();
+                                            cmdview_active = true;
+                                            cmdview_mode = CmdViewMode::Rename;
+                                            cmdview_text = path;
+                                            cmdview_cursor = cmdview_text.len();
+                                            cmdview_label = "Rename:".to_string();
+                                            cmdview_suggestions = Vec::new();
+                                            cmdview_selected = 0;
+                                        }
+                                        redraw = true;
+                                        continue;
+                                    }
                                     if let Some(doc) = docs.get_mut(active_tab) {
                                         let marker =
                                             comment_marker_for_path(&doc.path, &syntax_index);
@@ -3574,6 +3658,53 @@ pub fn run(
                     }
 
                     if *button == MouseButton::Right {
+                        // Right-click on a sidebar entry: show a rename menu
+                        // for that entry rather than the editor context menu.
+                        let sidebar_w_rc = if subsystems.has_sidebar() && sidebar_visible {
+                            sidebar_width
+                        } else {
+                            0.0
+                        };
+                        if subsystems.has_sidebar()
+                            && sidebar_visible
+                            && *x < sidebar_w_rc
+                        {
+                            let entry_h = style.font_height + style.padding_y;
+                            let sidebar_toolbar_h_rc = if subsystems.has_sidebar() {
+                                style.font_height + style.padding_y * 2.0
+                            } else {
+                                0.0
+                            };
+                            let sidebar_dir_header_h = style.font_height + style.padding_y;
+                            let click_idx = ((*y
+                                - sidebar_toolbar_h_rc
+                                - sidebar_dir_header_h
+                                + sidebar_scroll)
+                                / entry_h)
+                                .floor() as i64;
+                            if click_idx >= 0
+                                && (click_idx as usize) < sidebar_entries.len()
+                            {
+                                let entry = &sidebar_entries[click_idx as usize];
+                                // Only offer rename on regular files for now --
+                                // renaming directories is handled by the OS
+                                // recursively but would require more UX care
+                                // (open tab paths, expanded-folder bookkeeping).
+                                if !entry.is_dir {
+                                    sidebar_menu_target =
+                                        Some((entry.path.clone(), entry.is_dir));
+                                    let items = vec![MenuItem {
+                                        text: "Rename".into(),
+                                        info: None,
+                                        command: Some("sidebar:rename".into()),
+                                        separator: false,
+                                    }];
+                                    context_menu.show(*x, *y, items);
+                                    redraw = true;
+                                    continue;
+                                }
+                            }
+                        }
                         let mut items = vec![
                             MenuItem {
                                 text: "Undo".into(),

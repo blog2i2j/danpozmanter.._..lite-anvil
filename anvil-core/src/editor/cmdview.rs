@@ -12,13 +12,15 @@ use crate::editor::storage;
 
 /// Which flavour of picker is currently open. `OpenFile` and `SaveAs`
 /// both show files + dirs; `OpenFolder` filters to dirs only;
-/// `OpenRecent` shows a substring-filtered combined recent list.
+/// `OpenRecent` shows a substring-filtered combined recent list;
+/// `Rename` renames the file stashed in `rename_source`.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum CmdViewMode {
     OpenFile,
     OpenFolder,
     OpenRecent,
     SaveAs,
+    Rename,
 }
 
 /// Shrink `text` from the LEFT until it fits inside `max_w` pixels,

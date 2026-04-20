@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.10.5] - 2026-04-19 -- Right-click rename in sidebar.
+
+* Right-click on a file in the sidebar now shows a Rename context menu item (Note Anvil and Lite Anvil). Selecting it opens the picker pre-filled with the current path; `Enter` moves the file with `fs::rename`, updates any open tab pointing at the old path, and rescans the sidebar.
+
 ## [2.10.4] - 2026-04-19 -- Open Recent includes folders on Lite Anvil.
 
 * Open Recent on Lite Anvil now includes recent folders alongside recent files - regression fix.
