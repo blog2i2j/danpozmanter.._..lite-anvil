@@ -127,13 +127,21 @@ pub(crate) fn refresh_cmdview_suggestions(
     project_root: &str,
     recent_files: &[String],
     recent_projects: &[String],
+    include_projects: bool,
     out: &mut Vec<String>,
 ) {
     let dirs_only = mode == CmdViewMode::OpenFolder;
     if mode == CmdViewMode::OpenRecent {
         let query = text.to_lowercase();
         let mut combined: Vec<String> = Vec::new();
-        for p in recent_files.iter().chain(recent_projects.iter()) {
+        if include_projects {
+            for p in recent_projects {
+                if !combined.contains(p) {
+                    combined.push(p.clone());
+                }
+            }
+        }
+        for p in recent_files {
             if !combined.contains(p) {
                 combined.push(p.clone());
             }
@@ -265,13 +273,14 @@ mod tests {
             "",
             &recent_files,
             &recent_projects,
+            true,
             &mut out,
         );
         assert_eq!(out, vec!["/home/x/foo.rs".to_string()]);
     }
 
     #[test]
-    fn refresh_open_recent_empty_query_returns_all() {
+    fn refresh_open_recent_empty_query_returns_all_with_projects() {
         let mut out = Vec::new();
         let recent_files = vec!["a".to_string(), "b".to_string()];
         let recent_projects = vec!["c".to_string()];
@@ -281,8 +290,28 @@ mod tests {
             "",
             &recent_files,
             &recent_projects,
+            true,
             &mut out,
         );
         assert_eq!(out.len(), 3);
+        // Projects come first.
+        assert_eq!(out[0], "c");
+    }
+
+    #[test]
+    fn refresh_open_recent_hides_projects_when_flag_false() {
+        let mut out = Vec::new();
+        let recent_files = vec!["a".to_string()];
+        let recent_projects = vec!["c".to_string()];
+        refresh_cmdview_suggestions(
+            CmdViewMode::OpenRecent,
+            "",
+            "",
+            &recent_files,
+            &recent_projects,
+            false,
+            &mut out,
+        );
+        assert_eq!(out, vec!["a".to_string()]);
     }
 }

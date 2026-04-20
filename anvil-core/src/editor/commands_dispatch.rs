@@ -446,19 +446,19 @@ match cmd.as_str() {
         cmdview_cursor = 0;
         cmdview_label = "Open Recent:".to_string();
         let mut combined: Vec<String> = Vec::new();
-        for p in &recent_files {
-            if !combined.contains(p) {
-                combined.push(p.clone());
-            }
-        }
-        // Nano-Anvil has no concept of a project folder, so skip the
-        // folder list entirely — it would only ever show blank or
-        // confuse the user with a directory path they can't open.
+        // Folders first so they're visible at the top of the list on
+        // projects with many recent files. Nano-Anvil skips the folder
+        // list entirely -- it has no project concept.
         if !single_file_mode {
             for p in &recent_projects {
                 if !combined.contains(p) {
                     combined.push(p.clone());
                 }
+            }
+        }
+        for p in &recent_files {
+            if !combined.contains(p) {
+                combined.push(p.clone());
             }
         }
         cmdview_suggestions = combined;

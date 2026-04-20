@@ -2139,6 +2139,7 @@ pub fn run(
                                         &project_root,
                                         &recent_files,
                                         &recent_projects,
+                                        !single_file_mode,
                                         &mut cmdview_suggestions,
                                     );
                                     cmdview_selected = 0;
@@ -2162,6 +2163,7 @@ pub fn run(
                                     &project_root,
                                     &recent_files,
                                     &recent_projects,
+                                    !single_file_mode,
                                     &mut cmdview_suggestions,
                                 );
                                 cmdview_selected = 0;
@@ -3208,7 +3210,14 @@ pub fn run(
                         if cmdview_mode == CmdViewMode::OpenRecent {
                             let query = cmdview_text.to_lowercase();
                             let mut combined: Vec<String> = Vec::new();
-                            for p in recent_files.iter().chain(recent_projects.iter()) {
+                            if !single_file_mode {
+                                for p in &recent_projects {
+                                    if !combined.contains(p) {
+                                        combined.push(p.clone());
+                                    }
+                                }
+                            }
+                            for p in &recent_files {
                                 if !combined.contains(p) {
                                     combined.push(p.clone());
                                 }

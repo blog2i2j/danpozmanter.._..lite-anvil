@@ -6,9 +6,15 @@
 
 A fast code editor built in Rust with SDL3.
 
+![Lite Anvil screenshot](docs_src/assets/screenshot.png)
+
 Ships with Nano Anvil, a minimal single-file editor for lightweight editing.
 
+![Nano Anvil screenshot](docs_src/assets/nano_screenshot.png)
+
 Ships with Note Anvil, a minimal markdown note taking and todo list app.
+
+![Note Anvil screenshot](docs_src/assets/notes_screenshot.png)
 
 Lite Anvil is a fork of [Lite XL](https://github.com/lite-xl/lite-xl), rewritten from the ground up in Rust.
 

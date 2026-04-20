@@ -112,7 +112,7 @@ thread_local! {
         );
     static APP_IDENTIFIER: std::cell::RefCell<std::ffi::CString> =
         std::cell::RefCell::new(
-            std::ffi::CString::new("com.lite-anvil.LiteAnvil").expect("static app id"),
+            std::ffi::CString::new("lite-anvil").expect("static app id"),
         );
 }
 

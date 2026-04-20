@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.10.4] - 2026-04-19 -- Open Recent includes folders on Lite Anvil.
+
+* Open Recent on Lite Anvil now includes recent folders alongside recent files - regression fix.
+
 ## [2.10.3] - 2026-04-19 -- Terminal CWD test fix (Windows/macOS).
 
 * Fixed `resolve_cwd_falls_back_to_doc_dir_when_no_project` failing on Windows and macOS: `env::temp_dir()` returns a trailing-separator form there but not on Linux, so string equality broke. Compare by `Path::components()` instead.
