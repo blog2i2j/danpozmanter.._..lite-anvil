@@ -132,7 +132,7 @@ External edits are picked up automatically, even across atomic save-by-rename pa
 
 ### Nano Anvil
 
-A minimal single-file editor with software rendering. No GPU driver overhead -- ~28MB RAM on Linux. No sidebar, terminal, LSP, git, or tabs.
+A minimal single-file editor. No sidebar, terminal, LSP, git, or tabs.
 
 </div>
 
@@ -142,7 +142,7 @@ A minimal single-file editor with software rendering. No GPU driver overhead -- 
 
 ### Note Anvil
 
-A markdown note-taking app with a side-by-side preview. Same software-rendering footprint as Nano Anvil, for notes and todo lists.
+A markdown note-taking app with a side-by-side preview, for notes and todo lists.
 
 </div>
 
@@ -150,7 +150,7 @@ A markdown note-taking app with a side-by-side preview. Same software-rendering 
 
 Lite Anvil is a fork of [Lite XL](https://github.com/lite-xl/lite-xl), rewritten from the ground up in Rust.
 
-Lite Anvil also ships **Nano Anvil**, a minimal single-file editor that uses software rendering (no GPU drivers), and **Note Anvil**, a markdown note-taking app with live preview. See the [Installation](installation.md) page for details on all three binaries.
+Lite Anvil also ships **Nano Anvil**, a minimal single-file editor, and **Note Anvil**, a markdown note-taking app with live preview. See the [Installation](installation.md) page for details on all three binaries.
 
 | | |
 |---|---|

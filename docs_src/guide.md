@@ -297,8 +297,6 @@ Nano Anvil is designed for lightweight, single-file editing:
 
 - Single file at a time (no tabs, no project)
 - No sidebar, terminal, LSP, git integration, bookmarks, or code folding
-- Software rendering (no GPU driver loaded)
-- ~28MB RAM on Linux vs ~100MB for Lite Anvil (on NVIDIA/X11)
 - Syntax highlighting for 50+ languages (shared with Lite Anvil)
 - Find and replace within the current file
 - Full undo/redo (capped at 100 entries)
