@@ -186,7 +186,7 @@ pub(crate) fn path_suggest(text: &str, project_root: &str, dirs_only: bool) -> V
         text.to_string()
     };
 
-    let last_sep = expanded.rfind(|c: char| c == '/' || c == '\\');
+    let last_sep = expanded.rfind(['/', '\\']);
     let (dir, prefix) = match last_sep {
         Some(pos) => (&expanded[..=pos], &expanded[pos + 1..]),
         None => (project_root, expanded.as_str()),

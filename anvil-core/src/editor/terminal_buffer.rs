@@ -144,22 +144,22 @@ impl TerminalBufferInner {
         &self,
         rows: usize,
         scrollback: usize,
-    ) -> Vec<std::borrow::Cow<'_, Vec<Cell>>> {
+    ) -> Vec<std::borrow::Cow<'_, [Cell]>> {
         use std::borrow::Cow;
         let scrollback = scrollback.min(self.history.len());
         let total_hist = self.history.len();
         // Top of the visible window within the concatenated (history ++
         // screen) sequence. `first_idx == total_hist` is the live view.
         let first_idx = total_hist.saturating_sub(scrollback);
-        let mut out: Vec<Cow<'_, Vec<Cell>>> = Vec::with_capacity(rows);
+        let mut out: Vec<Cow<'_, [Cell]>> = Vec::with_capacity(rows);
         for offset in 0..rows {
             let i = first_idx + offset;
             if i < total_hist {
-                out.push(Cow::Borrowed(&self.history[i]));
+                out.push(Cow::Borrowed(self.history[i].as_slice()));
             } else {
                 let scr_idx = i - total_hist;
                 if scr_idx < self.screen.len() {
-                    out.push(Cow::Borrowed(&self.screen[scr_idx]));
+                    out.push(Cow::Borrowed(self.screen[scr_idx].as_slice()));
                 } else {
                     out.push(Cow::Owned(vec![Cell::blank(self.default_fg); self.cols]));
                 }
@@ -867,23 +867,6 @@ impl TerminalBufferInner {
         let _ = self.process_output_and_collect_replies(bytes);
     }
 
-    #[allow(dead_code)] // Used for scrollback rendering
-    fn total_rows(&self) -> usize {
-        self.history.len() + self.rows
-    }
-
-    #[allow(dead_code)] // Used for scrollback rendering
-    fn row_at(&self, index: usize) -> Option<&[Cell]> {
-        if index == 0 {
-            return None;
-        }
-        if index <= self.history.len() {
-            return self.history.get(index - 1).map(Vec::as_slice);
-        }
-        self.screen
-            .get(index - self.history.len() - 1)
-            .map(Vec::as_slice)
-    }
 }
 
 #[cfg(test)]

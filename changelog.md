@@ -1,5 +1,31 @@
 # Change Log
 
+## [2.11.0] - 2026-04-19 -- Notes sidebar search/sort; checkbox polish; Mac memory; test runner restored, uninstall script.
+
+* Note Anvil sidebar: NoteSquirrel-style A-Z / Recent sort (each with asc/desc toggle) and case-insensitive substring search.
+* Markdown checkboxes: extra gutter padding, vertical centering on the glyph midline, lighter interior fill.
+* Skip render pass while window is occluded/minimised; drop renderer + glyph caches on hide, idle (60 s), or macOS `memorystatus_vm_pressure_level` WARN.
+* Syntax grammar cache capped at 8 MRU entries.
+* macOS: lower glyph-cache limit to 512 and skip ASCII prewarm on auxiliary fonts.
+* Test runner (restored from 1.5.5): detects cargo / pytest / unittest / go / jest / vitest / npm / dotnet / sbt / gradle / maven / phpunit / make / rake / rspec / leiningen / clojure-cli / dart / flutter / zig / ctest / meson from project markers. Commands `test:run-all` and `test:run-in-current-file` in the palette and right-click context menu. Inline "Run test" badge above every recognised test function — Rust, Python, Go, JavaScript/TypeScript, C#, F#, Java, Kotlin, Scala, PHP, Ruby, Clojure, Dart, Zig, and C/C++ (GoogleTest, Catch2, Boost.Test). Every run opens a fresh terminal.
+* `install.sh` now writes a spec-compliant `index.theme` at the hicolor root on fresh installs. When a previous `--system` install left anvil PNGs in `/usr/share/icons/hicolor/256x256/apps/` and the dir is writable, also tops up the system copies with the freshly-staged versions so KDE's KIconLoader doesn't fall back to the Breeze text-markdown notebook for apps whose PNG is only user-level. Triggers `kbuildsycoca6` / `kbuildsycoca5` post-install so new `.desktop` files show up immediately.
+* Notes sort mode persists across restarts (`$userdir/session/notes_sort_mode`).
+* Scrollbars redone lite-xl style: thumb length is proportional to content with a minimum size, and click-drag grabs the thumb like a handle.
+* Scrollbars are twice as thick (editor, terminal, and sidebar).
+* Sidebar now has a visible, drag-scrollable scrollbar.
+* Editor scrollbar thumb no longer morphs when scrolling: sized from the full buffer line count, not just the visible rows.
+* Terminal scrollbar is now clickable and draggable again (the viewport click handler was swallowing scrollbar clicks).
+* Ctrl+Shift+A in the terminal selects every visible cell so the viewport can be copied without dragging.
+* Scroll performance on large files: per-line tokenize results are cached per buffer change_id, so scrolling no longer re-runs the regex tokenizer on unchanged lines every frame.
+* Terminal text selection and copy/paste: mouse-drag selects cells (`style.selection` highlight); Ctrl+Shift+C or Ctrl+Insert copies to the system clipboard (trailing spaces on each row trimmed), Ctrl+Shift+V or Shift+Insert pastes. Plain Ctrl+C / Ctrl+V keep forwarding to the shell (SIGINT / literal).
+* Test runner:
+  * `launch_in_terminal` writes `cd '<path>' && clear\n` before the test command so rc-file `cd $HOME` doesn't drop tests into the wrong directory.
+  * Single-test cargo command now passes just `test_name` instead of `module::path::test_name`; Rust tests live in inner `#[cfg(test)] mod tests {...}` blocks, so the full path prefix matched zero tests. Name-only substring match is what actually works.
+  * Badge position fixed: renders on the same row as the `fn` keyword, right-aligned, instead of above the `#[test]` attribute. Swapped the `▶` glyph for plain "Run test" text (the triangle rendered as `.notdef` box in Lilex).
+* `install.sh --system` now cleans up pre-existing user-local `.desktop` / hicolor icon / `~/.local/bin` shadows after installing system-wide, so KDE's user-local XDG precedence doesn't keep a stale copy winning over the freshly-installed system one.
+* New `uninstall.sh` for Linux (user and `--system`), macOS (`.app` bundles + `/usr/local/bin` symlinks + `lsregister` cache refresh), and Windows (points Git Bash users at Settings → Apps).
+* Removed every `#[allow(dead_code)]` attribute and deleted the unused code they were hiding (`RenFont` struct, `parse_antialiasing` / `parse_hinting`, `reset_cache`, `prepare_restart`, `total_rows` / `row_at` on `TerminalBufferInner`, `show_debug` field, `end_line` / `message` fields on `Diagnostic`, `exe_file` / `exe_dir` / `path_sep` on `RuntimeContext`, and the entire `FrameFlags` / quit-signal scaffold in `app_state`).
+
 ## [2.10.5] - 2026-04-19 -- Right-click rename in sidebar.
 
 * Right-click on a file in the sidebar now shows a Rename context menu item (Note Anvil and Lite Anvil). Selecting it opens the picker pre-filled with the current path; `Enter` moves the file with `fs::rename`, updates any open tab pointing at the old path, and rescans the sidebar.

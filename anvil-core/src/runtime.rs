@@ -3,11 +3,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub struct RuntimeContext {
-    exe_file: PathBuf,
-    exe_dir: PathBuf,
     data_dir: PathBuf,
     user_dir: PathBuf,
-    path_sep: char,
     scale: f64,
 }
 
@@ -41,11 +38,8 @@ impl RuntimeContext {
             .unwrap_or(1.0);
 
         Ok(Self {
-            exe_file,
-            exe_dir,
             data_dir,
             user_dir,
-            path_sep,
             scale,
         })
     }

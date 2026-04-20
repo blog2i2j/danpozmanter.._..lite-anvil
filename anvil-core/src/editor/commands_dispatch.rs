@@ -103,6 +103,9 @@ match cmd.as_str() {
             cached_scroll_y: -1.0,
             cached_hint_count: 0,
             dirty_cache: std::cell::Cell::new(None),
+            token_cache: std::cell::RefCell::new(
+                crate::editor::open_doc::TokenCache::default(),
+            ),
             preview: crate::editor::markdown_preview::MarkdownPreviewState::default(),
         });
         active_tab = docs.len() - 1;
@@ -241,6 +244,99 @@ match cmd.as_str() {
             }
             log_to_file(userdir, &format!("New terminal {n} spawned"));
         }
+    }
+}
+"test:run-all" => {
+    if subsystems.has_terminal() {
+        let active_path =
+            docs.get(active_tab).map(|d| d.path.as_str()).unwrap_or("");
+        if let Some(runner) = crate::editor::test_runner::detect_runner_with_fallback(
+            &project_root,
+            active_path,
+        ) {
+            crate::editor::test_runner::launch_in_terminal(
+                &mut terminal,
+                &runner.project_path,
+                &runner.run_all,
+                "Test: All",
+            );
+            terminal.visible = true;
+            terminal.focused = true;
+        } else {
+            info_message = Some((
+                "No test runner detected for this project.".to_string(),
+                Instant::now(),
+            ));
+        }
+    }
+}
+"test:run-in-current-file" => {
+    if subsystems.has_terminal() {
+        let doc_path = docs
+            .get(active_tab)
+            .map(|d| d.path.clone())
+            .unwrap_or_default();
+        if doc_path.is_empty() {
+            info_message = Some((
+                "Save the file first to scope tests to it.".to_string(),
+                Instant::now(),
+            ));
+        } else if let Some(runner) =
+            crate::editor::test_runner::detect_runner_with_fallback(
+                &project_root,
+                &doc_path,
+            )
+        {
+            let cmd = crate::editor::test_runner::file_test_command(
+                &runner, &doc_path,
+            )
+            .unwrap_or_else(|| runner.run_all.clone());
+            let title = doc_path
+                .rsplit('/')
+                .next()
+                .map(|n| format!("Test: {n}"))
+                .unwrap_or_else(|| "Test: file".to_string());
+            crate::editor::test_runner::launch_in_terminal(
+                &mut terminal,
+                &runner.project_path,
+                &cmd,
+                &title,
+            );
+            terminal.visible = true;
+            terminal.focused = true;
+        } else {
+            info_message = Some((
+                "No test runner detected for this project.".to_string(),
+                Instant::now(),
+            ));
+        }
+    }
+}
+"test:run-single" => {
+    if subsystems.has_terminal() {
+        if let Some((ref doc_path, ref test_name)) = pending_single_test {
+            if let Some(runner) =
+                crate::editor::test_runner::detect_runner_with_fallback(
+                    &project_root,
+                    doc_path,
+                )
+            {
+                let cmd = crate::editor::test_runner::single_test_command(
+                    &runner, doc_path, test_name,
+                )
+                .unwrap_or_else(|| runner.run_all.clone());
+                let title = format!("Test: {test_name}");
+                crate::editor::test_runner::launch_in_terminal(
+                    &mut terminal,
+                    &runner.project_path,
+                    &cmd,
+                    &title,
+                );
+                terminal.visible = true;
+                terminal.focused = true;
+            }
+        }
+        pending_single_test = None;
     }
 }
 "core:close-terminal" => {
@@ -485,7 +581,7 @@ match cmd.as_str() {
         cmdview_mode = CmdViewMode::OpenFile;
         let abs_root = effective_root(&project_root);
         if let Some(doc) = docs.get(active_tab) {
-            if let Some(pos) = doc.path.rfind(|c: char| c == '/' || c == '\\') {
+            if let Some(pos) = doc.path.rfind(['/', '\\']) {
                 cmdview_text = dir_with_trailing_sep(&doc.path[..pos]);
             } else {
                 cmdview_text = dir_with_trailing_sep(&abs_root);
@@ -676,15 +772,16 @@ match cmd.as_str() {
                 Ok(())
             });
         }
-        if subsystems.has_lsp() {
-            if lsp_state.transport_id.is_some() && lsp_state.initialized {
-                lsp_state.inlay_hints.clear();
-                let ext = doc.path.rsplit('.').next().unwrap_or("");
-                if !doc.path.is_empty() && ext_to_lsp_filetype(ext).is_some() {
-                    lsp_state.last_change = Some(Instant::now());
-                    lsp_state.pending_change_uri = Some(path_to_uri(&doc.path));
-                    lsp_state.pending_change_version += 1;
-                }
+        if subsystems.has_lsp()
+            && lsp_state.transport_id.is_some()
+            && lsp_state.initialized
+        {
+            lsp_state.inlay_hints.clear();
+            let ext = doc.path.rsplit('.').next().unwrap_or("");
+            if !doc.path.is_empty() && ext_to_lsp_filetype(ext).is_some() {
+                lsp_state.last_change = Some(Instant::now());
+                lsp_state.pending_change_uri = Some(path_to_uri(&doc.path));
+                lsp_state.pending_change_version += 1;
             }
         }
     }

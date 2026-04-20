@@ -401,14 +401,20 @@ impl DocView {
         // bottom edges, partly outside the text area) render correctly.
         ctx.set_clip_rect(self.rect.x, self.rect.y, self.rect.w, self.rect.h);
 
-        // Vertical scrollbar
-        if !lines.is_empty() {
-            let total_lines = lines.last().map(|l| l.line_number).unwrap_or(1);
-            let total_h = total_lines as f64 * line_h;
+        // Vertical scrollbar. Thumb length is proportional to the visible
+        // fraction of the file (like lite-xl), clamped to a minimum so it
+        // stays grabbable in very large files. `lines` only covers the
+        // visible rows, so we have to pull the true line count from the
+        // buffer or the thumb will morph as the user scrolls.
+        let buffer_lines = self
+            .buffer_id
+            .and_then(|id| buffer::with_buffer(id, |b| Ok(b.lines.len())).ok())
+            .unwrap_or(0);
+        if buffer_lines > 0 {
+            let total_h = buffer_lines as f64 * line_h;
             if total_h > self.rect.h {
                 let sb_w = style.scrollbar_size;
                 let sb_x = self.rect.x + self.rect.w - sb_w;
-                // Track
                 ctx.draw_rect(
                     sb_x,
                     self.rect.y,
@@ -416,9 +422,9 @@ impl DocView {
                     self.rect.h,
                     style.scrollbar_track.to_array(),
                 );
-                // Thumb
                 let ratio = self.rect.h / total_h;
-                let thumb_h = (self.rect.h * ratio).max(20.0);
+                let min_thumb = style.scrollbar_size * 2.0;
+                let thumb_h = (self.rect.h * ratio).max(min_thumb).min(self.rect.h);
                 let scroll_frac = self.scroll_y / (total_h - self.rect.h).max(1.0);
                 let thumb_y = self.rect.y + scroll_frac * (self.rect.h - thumb_h);
                 ctx.draw_rect(sb_x, thumb_y, sb_w, thumb_h, style.scrollbar.to_array());
@@ -447,7 +453,8 @@ impl DocView {
                 let track_w = text_w;
                 ctx.draw_rect(sb_x, sb_y, track_w, sb_h, style.scrollbar_track.to_array());
                 let ratio = (text_w / max_line_w).clamp(0.0, 1.0);
-                let thumb_w = (track_w * ratio).max(20.0);
+                let min_thumb = style.scrollbar_size * 2.0;
+                let thumb_w = (track_w * ratio).max(min_thumb).min(track_w);
                 let scroll_frac = self.scroll_x / (max_line_w - text_w).max(1.0);
                 let thumb_x = sb_x + scroll_frac * (track_w - thumb_w);
                 ctx.draw_rect(thumb_x, sb_y, thumb_w, sb_h, style.scrollbar.to_array());
@@ -809,6 +816,7 @@ pub(crate) fn click_to_doc_pos(
 
 /// Build render lines from buffer for the visible range, with syntax highlighting.
 #[cfg(feature = "sdl")]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_render_lines(
     buf_id: u64,
     dv: &DocView,
@@ -817,6 +825,7 @@ pub(crate) fn build_render_lines(
     compiled: Option<&CompiledSyntax>,
     wrap_width: Option<f64>,
     inlay_hints: &[InlayHint],
+    token_cache: Option<&std::cell::RefCell<crate::editor::open_doc::TokenCache>>,
 ) -> Vec<RenderLine> {
     let line_h = style.code_font_height * 1.2;
     let visible_lines = ((dv.rect().h / line_h).ceil() as usize).max(1);
@@ -832,6 +841,17 @@ pub(crate) fn build_render_lines(
         let last = (first + visible_lines + 1).min(b.lines.len());
         let mut render = Vec::new();
         let mut i = first;
+        // Bulk-invalidate the per-line tokenize cache if the buffer has
+        // changed since we last populated it. This keeps the happy-path
+        // (pure scrolling) effectively free while still picking up real
+        // edits on the next frame.
+        if let Some(cache_cell) = token_cache {
+            let mut cache = cache_cell.borrow_mut();
+            if cache.change_id != b.change_id {
+                cache.lines.clear();
+                cache.change_id = b.change_id;
+            }
+        }
         while i <= last && i <= b.lines.len() {
             // Skip folded lines.
             let mut folded = false;
@@ -848,8 +868,21 @@ pub(crate) fn build_render_lines(
             let raw_line = &b.lines[i - 1];
             let text = raw_line.trim_end_matches('\n');
             let mut tokens: Vec<RenderToken> = if let Some(syntax) = compiled {
-                let toks = tokenizer::tokenize_line(syntax, raw_line);
-                toks.iter()
+                let toks_arc: std::sync::Arc<Vec<tokenizer::Token>> = if let Some(cache_cell) = token_cache {
+                    let mut cache = cache_cell.borrow_mut();
+                    if let Some(existing) = cache.lines.get(&i) {
+                        existing.clone()
+                    } else {
+                        let computed =
+                            std::sync::Arc::new(tokenizer::tokenize_line(syntax, raw_line));
+                        cache.lines.insert(i, computed.clone());
+                        computed
+                    }
+                } else {
+                    std::sync::Arc::new(tokenizer::tokenize_line(syntax, raw_line))
+                };
+                toks_arc
+                    .iter()
                     .map(|t| {
                         let trimmed = t.text.trim_end_matches('\n').to_string();
                         // Rust attributes (#[...]) should render as normal/white, not keyword blue.
@@ -1117,7 +1150,7 @@ pub(crate) fn draw_breadcrumb(
     ctx.draw_rect(bar_x, bar_y, bar_w, bar_h, style.background3.to_array());
 
     let segments: Vec<&str> = path
-        .split(|c: char| c == '/' || c == '\\')
+        .split(['/', '\\'])
         .filter(|s| !s.is_empty())
         .collect();
     if segments.is_empty() {

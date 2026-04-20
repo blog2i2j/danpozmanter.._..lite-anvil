@@ -125,6 +125,50 @@ pub(crate) fn normalize_path(p: &str) -> String {
     }
 }
 
+/// Filter + sort `sidebar_entries` for notes-mode display.
+/// Returns indices into `sidebar_entries` in the order they should be
+/// rendered. `sort_mode`: 0 = A-Z asc, 1 = A-Z desc, 2 = recent-first,
+/// 3 = oldest-first. Filter is a case-insensitive substring match on
+/// the entry name (empty = no filter).
+fn compute_notes_display_order(
+    entries: &[SidebarEntry],
+    search: &str,
+    sort_mode: u8,
+) -> Vec<usize> {
+    let needle = search.to_lowercase();
+    let mut indices: Vec<usize> = (0..entries.len())
+        .filter(|&i| {
+            if needle.is_empty() {
+                true
+            } else {
+                entries[i].name.to_lowercase().contains(&needle)
+            }
+        })
+        .collect();
+    match sort_mode {
+        0 => indices.sort_by(|&a, &b| {
+            entries[a].name.to_lowercase().cmp(&entries[b].name.to_lowercase())
+        }),
+        1 => indices.sort_by(|&a, &b| {
+            entries[b].name.to_lowercase().cmp(&entries[a].name.to_lowercase())
+        }),
+        2 | 3 => {
+            let mtime = |path: &str| -> std::time::SystemTime {
+                std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+            };
+            indices.sort_by(|&a, &b| {
+                let ta = mtime(&entries[a].path);
+                let tb = mtime(&entries[b].path);
+                if sort_mode == 2 { tb.cmp(&ta) } else { ta.cmp(&tb) }
+            });
+        }
+        _ => {}
+    }
+    indices
+}
+
 /// Wrapper around `scan_directory` that, in notes-mode, flattens to a
 /// `*.md`-only top-level list (no folders, no recursion).
 fn scan_for_sidebar(
@@ -274,9 +318,9 @@ fn parse_hex_color(s: &str) -> Option<[u8; 4]> {
 /// We watch each file's *parent directory* (not the file inode) and
 /// filter events by filename. This is the standard robust pattern for
 /// inotify-backed watchers: an external editor saving via write-to-temp
-/// + atomic rename replaces the file's inode, which silently breaks a
-/// file-inode watch — only the first save fires and all subsequent
-/// ones miss. Watching the directory sidesteps that entirely.
+/// and atomic rename replaces the file's inode, which silently breaks a
+/// file-inode watch (only the first save fires and all subsequent ones
+/// miss). Watching the directory sidesteps that entirely.
 pub(crate) struct AutoreloadState {
     watcher: Option<notify::RecommendedWatcher>,
     rx: Option<Receiver<notify::Result<Event>>>,
@@ -423,6 +467,17 @@ pub fn run(
         crate::renderer::font::set_glyph_cache_limit(1024);
         crate::renderer::font::set_skip_prewarm(true);
         config.max_undos = 100;
+    }
+    // macOS: aggressively lower the glyph-cache ceiling + skip ASCII
+    // prewarm on every auxiliary font (h1/h2/h3/big/icon_big/seti).
+    // Only `ui` and `code` see sustained glyph traffic; the rest barely
+    // touch their cache, so warming 95 ASCII glyphs per face wastes ~2-3 MB
+    // upfront. macOS pays the highest price for this since Metal keeps
+    // each glyph's backing bitmap resident in the GPU's shared memory.
+    #[cfg(target_os = "macos")]
+    {
+        crate::renderer::font::set_glyph_cache_limit(512);
+        crate::renderer::font::set_skip_prewarm(true);
     }
 
     // Create window.
@@ -675,6 +730,9 @@ pub fn run(
                             cached_scroll_y: -1.0,
                             cached_hint_count: 0,
                             dirty_cache: std::cell::Cell::new(None),
+                            token_cache: std::cell::RefCell::new(
+                                crate::editor::open_doc::TokenCache::default(),
+                            ),
             preview: crate::editor::markdown_preview::MarkdownPreviewState::default(),
                         });
                     } else {
@@ -710,6 +768,9 @@ pub fn run(
             cached_scroll_y: -1.0,
             cached_hint_count: 0,
             dirty_cache: std::cell::Cell::new(None),
+            token_cache: std::cell::RefCell::new(
+                crate::editor::open_doc::TokenCache::default(),
+            ),
             preview: crate::editor::markdown_preview::MarkdownPreviewState::default(),
         });
     }
@@ -723,6 +784,17 @@ pub fn run(
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(DEFAULT_SIDEBAR_W);
     let mut sidebar_dragging = false;
+    // Held while the mouse is pressed on the editor's vertical
+    // scrollbar; lets drag-scrolling track the cursor until release.
+    // The drag offset is the pixel gap between the top of the thumb and
+    // the click y at the moment the press began, so the thumb stays
+    // anchored to the grip point as the mouse moves.
+    let mut editor_sb_dragging = false;
+    let mut editor_sb_drag_offset: f64 = 0.0;
+    let mut terminal_sb_dragging = false;
+    let mut terminal_sb_drag_offset: f64 = 0.0;
+    let mut sidebar_sb_dragging = false;
+    let mut sidebar_sb_drag_offset: f64 = 0.0;
     let mut editor_mouse_down = false;
     // Local shift-key tracker. SDL's mouse events don't carry modifier state,
     // so tracking it from keyboard events directly by key name makes shift+click
@@ -733,6 +805,12 @@ pub fn run(
     let mut mouse_y: f64 = 0.0;
     let mut sidebar_entries: Vec<SidebarEntry>;
     let mut sidebar_scroll: f64 = 0.0;
+    // Content height + scrollbar track geometry captured during the sidebar
+    // draw so the click/drag paths can reuse the same numbers instead of
+    // recomputing the filtered notes-mode entry list.
+    let mut sidebar_content_h: f64 = 0.0;
+    let mut sidebar_sb_top: f64 = 0.0;
+    let mut sidebar_sb_h: f64 = 0.0;
 
     // Determine project root for sidebar.
     // Notes-mode forces the configured notes folder so the sidebar
@@ -754,6 +832,32 @@ pub fn run(
     };
 
     let mut sidebar_show_hidden = false;
+    // Set while the window is occluded or hidden. We skip the render
+    // pass entirely while true so Metal/IOSurface/RenCache buffers
+    // don't get touched for frames nobody will see. Reset on Exposed
+    // / Shown / FocusGained.
+    let mut window_hidden: bool = false;
+    // Idle-drop: if the user hasn't interacted for a while, release the
+    // glyph / render caches. They'll be rebuilt on the next draw.
+    let mut last_activity: Instant = Instant::now();
+    let mut dropped_caches_for_idle: bool = false;
+    const IDLE_DROP_SECS: u64 = 60;
+    // macOS memory-pressure poll: check every N seconds. If the kernel
+    // reports WARN or CRITICAL, drop caches immediately.
+    let mut last_mem_pressure_check: Instant = Instant::now();
+    const MEM_PRESSURE_CHECK_SECS: u64 = 5;
+    // Notes-mode sidebar: search filter + sort. NoteSquirrel parity.
+    // sort_mode: 0 = A-Z asc, 1 = A-Z desc, 2 = Recent (newest first),
+    //            3 = Recent (oldest first).
+    let mut notes_search: String = String::new();
+    let mut notes_search_focused: bool = false;
+    let mut notes_sort_mode: u8 =
+        crate::editor::storage::load_text(userdir_path, "session", "notes_sort_mode")
+            .ok()
+            .flatten()
+            .and_then(|s| s.trim().parse::<u8>().ok())
+            .filter(|v| *v <= 3)
+            .unwrap_or(0);
     let file_icons = load_file_icons(datadir);
     sidebar_entries = if subsystems.has_sidebar() && !project_root.is_empty() {
         scan_for_sidebar(subsystems.has_notes_mode(), &project_root, sidebar_show_hidden)
@@ -956,6 +1060,8 @@ pub fn run(
             "doc:save-as",
             "core:toggle-markdown-preview",
             "notes:delete-current",
+            "test:run-all",
+            "test:run-in-current-file",
         ];
         for cmd in palette_extras {
             if seen.insert((*cmd).to_string()) {
@@ -1321,6 +1427,13 @@ pub fn run(
 
     // Context menu state.
     let mut context_menu = ContextMenu::new();
+    // (doc_path, test_name) to run; set by the badge-click hit-test and
+    // consumed by the `test:run-single` command dispatch.
+    let mut pending_single_test: Option<(String, String)> = None;
+    // Per-frame discovered tests for the active doc; rebuilt each frame.
+    let mut active_tests: Vec<crate::editor::test_runner::DiscoveredTest> = Vec::new();
+    // Per-frame badge rects for the active doc.
+    let mut test_badges: Vec<crate::editor::test_runner::TestBadgeRegion> = Vec::new();
     // Sidebar entry targeted by the current context menu (path, is_dir).
     // Set when right-clicking a sidebar row; consumed by the rename flow.
     let mut sidebar_menu_target: Option<(String, bool)> = None;
@@ -1376,6 +1489,12 @@ pub fn run(
     // full definition parsing to first use per extension.
     let syntax_index = crate::editor::syntax::load_syntax_index(datadir);
     let mut compiled_syntax_cache: HashMap<String, Option<CompiledSyntax>> = HashMap::new();
+    // MRU ordering for `compiled_syntax_cache`: `compiled_syntax_mru[0]`
+    // is the most recently used extension. Lets us cap the cache at
+    // `SYNTAX_CACHE_CAP` entries and evict the oldest instead of
+    // growing unbounded on sessions that touch many file types.
+    let mut compiled_syntax_mru: Vec<String> = Vec::new();
+    const SYNTAX_CACHE_CAP: usize = 8;
 
     // LSP state.
     let mut lsp_state = LspState::new();
@@ -1485,8 +1604,38 @@ pub fn run(
             }
         }
 
+        // Idle-drop: after N seconds with no events, release cached
+        // glyph bitmaps and command buffers. Next interactive frame
+        // rebuilds them lazily. This is most of the benefit of the
+        // macOS memory-pressure hook without needing platform FFI.
+        if !dropped_caches_for_idle
+            && last_activity.elapsed().as_secs() >= IDLE_DROP_SECS
+        {
+            crate::renderer::drop_caches();
+            dropped_caches_for_idle = true;
+        }
+
+        // macOS memory-pressure probe. `None` on other platforms.
+        if last_mem_pressure_check.elapsed().as_secs() >= MEM_PRESSURE_CHECK_SECS {
+            last_mem_pressure_check = Instant::now();
+            if let Some(level) = crate::renderer::macos_memory_pressure_level() {
+                if level >= 1 {
+                    // WARN or CRITICAL -- release everything reclaimable.
+                    crate::renderer::drop_caches();
+                    compiled_syntax_cache.retain(|k, _| {
+                        docs.iter()
+                            .any(|d| d.path.rsplit('.').next().unwrap_or("") == k)
+                    });
+                    compiled_syntax_mru.retain(|k| compiled_syntax_cache.contains_key(k));
+                }
+            }
+        }
+
         // Poll all pending events.
         while let Some(event) = crate::window::poll_event_native() {
+            // Any event counts as activity for idle-drop tracking.
+            last_activity = Instant::now();
+            dropped_caches_for_idle = false;
             match &event {
                 EditorEvent::Quit => {
                     if single_file_mode && docs.iter().any(doc_is_modified) {
@@ -1500,7 +1649,16 @@ pub fn run(
                     }
                 }
                 EditorEvent::Exposed | EditorEvent::Resized { .. } | EditorEvent::FocusGained => {
+                    window_hidden = false;
                     redraw = true;
+                }
+                EditorEvent::Shown => {
+                    window_hidden = false;
+                    redraw = true;
+                }
+                EditorEvent::Occluded | EditorEvent::Hidden => {
+                    window_hidden = true;
+                    crate::renderer::drop_caches();
                 }
                 EditorEvent::KeyReleased { key, .. } => {
                     let k = key.as_str();
@@ -1575,6 +1733,29 @@ pub fn run(
                     if cfg!(target_os = "macos") && config.mac_command_as_ctrl && mods.gui {
                         mods.ctrl = true;
                         mods.gui = false;
+                    }
+
+                    // Notes-mode sidebar search input.
+                    if subsystems.has_notes_mode() && notes_search_focused {
+                        match key.as_str() {
+                            "backspace" => {
+                                notes_search.pop();
+                                redraw = true;
+                                continue;
+                            }
+                            "escape" => {
+                                notes_search.clear();
+                                notes_search_focused = false;
+                                redraw = true;
+                                continue;
+                            }
+                            "return" | "enter" => {
+                                notes_search_focused = false;
+                                redraw = true;
+                                continue;
+                            }
+                            _ => {}
+                        }
                     }
 
                     // Context menu intercepts keys when visible.
@@ -1765,7 +1946,7 @@ pub fn run(
                             }
                             let s = &text[..cursor];
                             let stripped = s.trim_end_matches(['/', '\\']);
-                            if let Some(idx) = stripped.rfind(|c: char| c == '/' || c == '\\') {
+                            if let Some(idx) = stripped.rfind(['/', '\\']) {
                                 idx + 1
                             } else {
                                 0
@@ -1782,7 +1963,7 @@ pub fn run(
                             } else {
                                 0
                             };
-                            match rest[skip..].find(|c: char| c == '/' || c == '\\') {
+                            match rest[skip..].find(['/', '\\']) {
                                 Some(idx) => cursor + skip + idx + 1,
                                 None => text.len(),
                             }
@@ -2539,6 +2720,135 @@ pub fn run(
                                 _ => {}
                             }
                         }
+                        // Terminal Ctrl+Shift+A: select every visible cell
+                        // so the user can copy the current viewport
+                        // (including whatever scrollback is currently
+                        // shown) without dragging across it manually. The
+                        // gnome-terminal / xterm convention. Plain Ctrl+A
+                        // stays as the shell's "move to line start" so
+                        // the shell is still usable.
+                        if mods.ctrl && mods.shift && !mods.alt && key == "a" {
+                            let (_, wh, _, _) = crate::window::get_window_size();
+                            let win_h = wh as f64;
+                            let status_h_a = style.font_height + style.padding_y * 2.0;
+                            let tab_h_a = if !single_file_mode && !docs.is_empty() {
+                                style.font_height + style.padding_y * 3.0
+                            } else {
+                                0.0
+                            };
+                            let terminal_h_a = (win_h * 0.3)
+                                .min(win_h - tab_h_a - status_h_a - 50.0)
+                                .max(80.0);
+                            let tab_bar_h_a = if !terminal.terminals.is_empty() {
+                                style.font_height + style.padding_y * 3.0
+                            } else {
+                                0.0
+                            };
+                            let char_h_a = style.code_font_height * 1.2;
+                            let rows_visible = (((terminal_h_a
+                                - style.divider_size
+                                - tab_bar_h_a
+                                - style.padding_y * 2.0)
+                                / char_h_a)
+                                .floor()
+                                .max(1.0))
+                                as usize;
+                            if let Some(inst) = terminal.terminals.get_mut(terminal.active)
+                            {
+                                inst.sel_start = Some((0, 0));
+                                inst.sel_end =
+                                    Some((rows_visible.saturating_sub(1), usize::MAX));
+                                inst.sel_dragging = false;
+                            }
+                            redraw = true;
+                            continue;
+                        }
+                        // Terminal copy / paste.
+                        //   Ctrl+Shift+C  or  Ctrl+Insert : copy selection
+                        //   Ctrl+Shift+V  or  Shift+Insert: paste clipboard
+                        // Plain Ctrl+C / Ctrl+V remain sent to the shell
+                        // (SIGINT / literal, respectively).
+                        let is_copy_combo = mods.ctrl
+                            && ((mods.shift && key == "c") || (!mods.shift && key == "insert"));
+                        let is_paste_combo = mods.shift
+                            && ((mods.ctrl && key == "v") || (!mods.ctrl && key == "insert"));
+                        if is_copy_combo {
+                            if let Some(inst) = terminal.terminals.get(terminal.active) {
+                                if let (Some(s), Some(e)) = (inst.sel_start, inst.sel_end)
+                                {
+                                    if let Some((a, b)) =
+                                        crate::editor::terminal_panel::normalized_selection(
+                                            s, e,
+                                        )
+                                    {
+                                        let cap = inst.tbuf.history_len() as f64;
+                                        let scrollback_rows = inst
+                                            .scrollback
+                                            .round()
+                                            .max(0.0)
+                                            .min(cap)
+                                            as usize;
+                                        // Recompute rows_visible from current geometry.
+                                        let (_, wh, _, _) =
+                                            crate::window::get_window_size();
+                                        let win_h = wh as f64;
+                                        let status_h_c =
+                                            style.font_height + style.padding_y * 2.0;
+                                        let tab_h_c =
+                                            if !single_file_mode && !docs.is_empty() {
+                                                style.font_height + style.padding_y * 3.0
+                                            } else {
+                                                0.0
+                                            };
+                                        let terminal_h_c = (win_h * 0.3)
+                                            .min(win_h - tab_h_c - status_h_c - 50.0)
+                                            .max(80.0);
+                                        let tab_bar_h_c = if !terminal.terminals.is_empty()
+                                        {
+                                            style.font_height + style.padding_y * 3.0
+                                        } else {
+                                            0.0
+                                        };
+                                        let char_h_c = style.code_font_height * 1.2;
+                                        let rows_visible = (((terminal_h_c
+                                            - style.divider_size
+                                            - tab_bar_h_c
+                                            - style.padding_y * 2.0)
+                                            / char_h_c)
+                                            .floor()
+                                            .max(1.0))
+                                            as usize;
+                                        let rows_data =
+                                            inst.tbuf.visible_rows(rows_visible, scrollback_rows);
+                                        let text =
+                                            crate::editor::terminal_panel::extract_selection_text(
+                                                &rows_data, a, b,
+                                            );
+                                        if !text.is_empty() {
+                                            crate::window::set_clipboard_text(&text);
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
+                                inst.sel_start = None;
+                                inst.sel_end = None;
+                                inst.sel_dragging = false;
+                            }
+                            redraw = true;
+                            continue;
+                        }
+                        if is_paste_combo {
+                            if let Some(text) = crate::window::get_clipboard_text() {
+                                if let Some(inst) = terminal.active_terminal() {
+                                    let _ = inst.inner.write(text.as_bytes());
+                                    inst.scrollback = 0.0;
+                                    inst.scrollback_target = 0.0;
+                                }
+                            }
+                            redraw = true;
+                            continue;
+                        }
                         if let Some(inst) = terminal.active_terminal() {
                             let data = match key.as_str() {
                                 "return" | "keypad enter" => Some(b"\r".to_vec()),
@@ -3257,6 +3567,12 @@ pub fn run(
                         redraw = true;
                         continue;
                     }
+                    // Route typing into the Note Anvil sidebar search when focused.
+                    if subsystems.has_notes_mode() && notes_search_focused {
+                        notes_search.push_str(text);
+                        redraw = true;
+                        continue;
+                    }
                     // Forward text to terminal when focused.
                     if subsystems.has_terminal() && terminal.visible && terminal.focused {
                         if let Some(inst) = terminal.active_terminal() {
@@ -3633,6 +3949,12 @@ pub fn run(
                                         redraw = true;
                                         continue;
                                     }
+                                    if cmd.starts_with("test:") {
+                                        let cmd: String = cmd;
+                                        include!("commands_dispatch.rs");
+                                        redraw = true;
+                                        continue;
+                                    }
                                     if let Some(doc) = docs.get_mut(active_tab) {
                                         let marker =
                                             comment_marker_for_path(&doc.path, &syntax_index);
@@ -3670,18 +3992,40 @@ pub fn run(
                             && *x < sidebar_w_rc
                         {
                             let entry_h = style.font_height + style.padding_y;
-                            let sidebar_toolbar_h_rc = if subsystems.has_sidebar() {
+                            let sidebar_toolbar_h_rc = if subsystems.has_toolbar() {
                                 style.font_height + style.padding_y * 2.0
                             } else {
                                 0.0
                             };
                             let sidebar_dir_header_h = style.font_height + style.padding_y;
-                            let click_idx = ((*y
+                            let notes_ui_h_rc = if subsystems.has_notes_mode() {
+                                (style.font_height + style.padding_y * 2.0) * 2.0
+                            } else {
+                                0.0
+                            };
+                            let notes_display_rc: Vec<usize> = if subsystems.has_notes_mode() {
+                                compute_notes_display_order(
+                                    &sidebar_entries,
+                                    &notes_search,
+                                    notes_sort_mode,
+                                )
+                            } else {
+                                (0..sidebar_entries.len()).collect()
+                            };
+                            let disp_idx = ((*y
                                 - sidebar_toolbar_h_rc
                                 - sidebar_dir_header_h
+                                - notes_ui_h_rc
                                 + sidebar_scroll)
                                 / entry_h)
                                 .floor() as i64;
+                            let click_idx: i64 = if disp_idx >= 0
+                                && (disp_idx as usize) < notes_display_rc.len()
+                            {
+                                notes_display_rc[disp_idx as usize] as i64
+                            } else {
+                                -1
+                            };
                             if click_idx >= 0
                                 && (click_idx as usize) < sidebar_entries.len()
                             {
@@ -3775,12 +4119,85 @@ pub fn run(
                                 separator: false,
                             });
                         }
+                        let active_doc_path =
+                            docs.get(active_tab).map(|d| d.path.as_str()).unwrap_or("");
+                        if subsystems.has_terminal()
+                            && crate::editor::test_runner::detect_runner_with_fallback(
+                                &project_root,
+                                active_doc_path,
+                            )
+                            .is_some()
+                        {
+                            items.push(MenuItem {
+                                text: String::new(),
+                                info: None,
+                                command: None,
+                                separator: true,
+                            });
+                            items.push(MenuItem {
+                                text: "Run All Tests".into(),
+                                info: None,
+                                command: Some("test:run-all".into()),
+                                separator: false,
+                            });
+                            items.push(MenuItem {
+                                text: "Run All Tests in Current File".into(),
+                                info: None,
+                                command: Some("test:run-in-current-file".into()),
+                                separator: false,
+                            });
+                        }
                         context_menu.show(*x, *y, items);
                         redraw = true;
                         continue;
                     }
 
                     let sidebar_w = if sidebar_visible { sidebar_width } else { 0.0 };
+
+                    // Sidebar scrollbar grab (lite-xl style). Must run before
+                    // sidebar resize and sidebar click handlers, since the
+                    // scrollbar lives inside the sidebar rect on the right.
+                    if subsystems.has_sidebar()
+                        && sidebar_visible
+                        && *button == MouseButton::Left
+                        && sidebar_content_h > sidebar_sb_h
+                        && sidebar_sb_h > 0.0
+                    {
+                        let sb_w = style.scrollbar_size;
+                        let sb_x = sidebar_w - style.divider_size - sb_w;
+                        if *x >= sb_x
+                            && *x < sb_x + sb_w
+                            && *y >= sidebar_sb_top
+                            && *y < sidebar_sb_top + sidebar_sb_h
+                        {
+                            let ratio = sidebar_sb_h / sidebar_content_h;
+                            let min_thumb = style.scrollbar_size * 2.0;
+                            let thumb_h = (sidebar_sb_h * ratio)
+                                .max(min_thumb)
+                                .min(sidebar_sb_h);
+                            let max_scroll =
+                                (sidebar_content_h - sidebar_sb_h).max(1.0);
+                            let scroll_frac =
+                                (sidebar_scroll / max_scroll).clamp(0.0, 1.0);
+                            let thumb_y = sidebar_sb_top
+                                + scroll_frac * (sidebar_sb_h - thumb_h);
+                            if *y >= thumb_y && *y < thumb_y + thumb_h {
+                                sidebar_sb_drag_offset = *y - thumb_y;
+                            } else {
+                                sidebar_sb_drag_offset = thumb_h / 2.0;
+                                let new_top = (*y - thumb_h / 2.0).clamp(
+                                    sidebar_sb_top,
+                                    sidebar_sb_top + sidebar_sb_h - thumb_h,
+                                );
+                                let travel = (sidebar_sb_h - thumb_h).max(1.0);
+                                let new_frac = (new_top - sidebar_sb_top) / travel;
+                                sidebar_scroll = (new_frac * max_scroll).max(0.0);
+                            }
+                            sidebar_sb_dragging = true;
+                            redraw = true;
+                            continue;
+                        }
+                    }
 
                     // Sidebar resize drag: click near the right edge.
                     if subsystems.has_sidebar()
@@ -3797,10 +4214,14 @@ pub fn run(
                     if subsystems.has_sidebar() && sidebar_visible && *x < sidebar_w {
                         use crate::editor::view::DrawContext as _;
                         let ibf = style.icon_big_font;
-                        let sidebar_toolbar_h = draw_ctx.font_height(ibf) + style.padding_y * 2.0;
+                        let sidebar_toolbar_h = if subsystems.has_toolbar() {
+                            draw_ctx.font_height(ibf) + style.padding_y * 2.0
+                        } else {
+                            0.0
+                        };
 
-                        // Toolbar button click.
-                        if *y < sidebar_toolbar_h {
+                        // Toolbar button click (only when toolbar is enabled).
+                        if subsystems.has_toolbar() && *y < sidebar_toolbar_h {
                             let toolbar_buttons: &[(&str, &str)] = &[
                                 ("f", "core:new-doc"),
                                 ("D", "core:open-file"),
@@ -3833,10 +4254,70 @@ pub fn run(
 
                         let entry_h = style.font_height + style.padding_y;
                         let sidebar_dir_header_h = style.font_height + style.padding_y;
-                        let click_idx = ((*y - sidebar_toolbar_h - sidebar_dir_header_h
+                        // Notes-mode sort/search rows sit between the directory
+                        // header and the file list.
+                        let notes_sort_row_h = style.font_height + style.padding_y * 2.0;
+                        let notes_search_row_h = style.font_height + style.padding_y * 2.0;
+                        let notes_ui_h = if subsystems.has_notes_mode() {
+                            notes_sort_row_h + notes_search_row_h
+                        } else {
+                            0.0
+                        };
+                        if subsystems.has_notes_mode() {
+                            let sort_y0 = sidebar_toolbar_h + sidebar_dir_header_h;
+                            let sort_y1 = sort_y0 + notes_sort_row_h;
+                            let search_y1 = sort_y1 + notes_search_row_h;
+                            if *y >= sort_y0 && *y < sort_y1 {
+                                // Sort-mode toggle. Left half = A-Z, right = Recent.
+                                let half = (sidebar_w / 2.0).floor();
+                                if *x < half {
+                                    // A-Z: toggle between asc (0) and desc (1).
+                                    notes_sort_mode =
+                                        if notes_sort_mode == 0 { 1 } else { 0 };
+                                } else {
+                                    // Recent: toggle between newest-first (2)
+                                    // and oldest-first (3).
+                                    notes_sort_mode =
+                                        if notes_sort_mode == 2 { 3 } else { 2 };
+                                }
+                                notes_search_focused = false;
+                                let _ = crate::editor::storage::save_text(
+                                    userdir_path,
+                                    "session",
+                                    "notes_sort_mode",
+                                    &notes_sort_mode.to_string(),
+                                );
+                                redraw = true;
+                                continue;
+                            }
+                            if *y >= sort_y1 && *y < search_y1 {
+                                notes_search_focused = true;
+                                redraw = true;
+                                continue;
+                            }
+                            // Click outside the search row unfocuses it.
+                            notes_search_focused = false;
+                        }
+                        let notes_display_click: Vec<usize> = if subsystems.has_notes_mode() {
+                            compute_notes_display_order(
+                                &sidebar_entries,
+                                &notes_search,
+                                notes_sort_mode,
+                            )
+                        } else {
+                            (0..sidebar_entries.len()).collect()
+                        };
+                        let disp_click_idx = ((*y
+                            - sidebar_toolbar_h
+                            - sidebar_dir_header_h
+                            - notes_ui_h
                             + sidebar_scroll)
                             / entry_h)
                             .floor() as usize;
+                        let click_idx = notes_display_click
+                            .get(disp_click_idx)
+                            .copied()
+                            .unwrap_or(sidebar_entries.len());
                         if click_idx < sidebar_entries.len() {
                             let entry = &sidebar_entries[click_idx];
                             if entry.is_dir {
@@ -4018,8 +4499,57 @@ pub fn run(
 
                         if *y >= term_y_click && *y < win_h - status_h_click {
                             terminal.focused = true;
-                            redraw = true;
-                            continue;
+                            // Clicking inside the terminal viewport starts a
+                            // text selection (mouse-drag copy). If the click
+                            // lands on the scrollbar strip on the right
+                            // edge, fall through so the dedicated scrollbar
+                            // handler below can grab the thumb.
+                            use crate::editor::view::DrawContext as _;
+                            let char_h_v = style.code_font_height * 1.2;
+                            let char_w_v = draw_ctx.font_width(style.code_font, "m");
+                            let ty_start = term_y_click
+                                + style.divider_size
+                                + tab_bar_h_click
+                                + 2.0;
+                            let visible_h = (term_y_click + terminal_h_click
+                                - ty_start
+                                - style.padding_y)
+                                .max(0.0);
+                            let rows_visible =
+                                (visible_h / char_h_v).floor().max(1.0) as usize;
+                            let sb_w_v = style.scrollbar_size.max(6.0);
+                            let on_scrollbar = *x >= term_x_click + term_w_click - sb_w_v
+                                && *x < term_x_click + term_w_click
+                                && *y >= ty_start
+                                && *y < ty_start + char_h_v * rows_visible as f64;
+                            if on_scrollbar {
+                                // Do not consume -- let the scrollbar
+                                // handler below pick this up.
+                            } else {
+                                let in_viewport = *y >= ty_start
+                                    && *y < ty_start + char_h_v * rows_visible as f64
+                                    && *x >= term_x_click
+                                    && *x < term_x_click + term_w_click - sb_w_v
+                                    && char_w_v > 0.0;
+                                if in_viewport && *button == MouseButton::Left {
+                                    let col = (((*x - term_x_click - style.padding_x)
+                                        / char_w_v)
+                                        .floor() as i64)
+                                        .max(0) as usize;
+                                    let vis_row = (((*y - ty_start) / char_h_v)
+                                        .floor() as i64)
+                                        .max(0) as usize;
+                                    if let Some(inst) =
+                                        terminal.terminals.get_mut(terminal.active)
+                                    {
+                                        inst.sel_start = Some((vis_row, col));
+                                        inst.sel_end = Some((vis_row, col));
+                                        inst.sel_dragging = true;
+                                    }
+                                }
+                                redraw = true;
+                                continue;
+                            }
                         } else {
                             terminal.focused = false;
                         }
@@ -4155,6 +4685,173 @@ pub fn run(
                         }
                     }
 
+                    // Editor scrollbar mouse-down: grab the thumb (lite-xl
+                    // style). If the click is on the thumb itself, we keep
+                    // the existing scroll and remember the offset within the
+                    // thumb so dragging feels like grabbing a handle. If the
+                    // click is on the empty track, we jump so the thumb
+                    // centers under the cursor, then grab for the drag.
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        let dv_rect = doc.view.rect();
+                        let sb_w = style.scrollbar_size;
+                        let sb_x = dv_rect.x + dv_rect.w - sb_w;
+                        if *x >= sb_x
+                            && *x < sb_x + sb_w
+                            && *y >= dv_rect.y
+                            && *y < dv_rect.y + dv_rect.h
+                            && dv_rect.h > 0.0
+                        {
+                            let line_h_sb = style.code_font_height * 1.2;
+                            let total_lines = doc
+                                .view
+                                .buffer_id
+                                .and_then(|id| {
+                                    buffer::with_buffer(id, |b| Ok(b.lines.len())).ok()
+                                })
+                                .unwrap_or(1) as f64;
+                            let total_h = total_lines * line_h_sb;
+                            if total_h > dv_rect.h {
+                                let ratio = dv_rect.h / total_h;
+                                let min_thumb = style.scrollbar_size * 2.0;
+                                let thumb_h =
+                                    (dv_rect.h * ratio).max(min_thumb).min(dv_rect.h);
+                                let scroll_frac =
+                                    doc.view.scroll_y / (total_h - dv_rect.h).max(1.0);
+                                let thumb_y =
+                                    dv_rect.y + scroll_frac * (dv_rect.h - thumb_h);
+                                if *y >= thumb_y && *y < thumb_y + thumb_h {
+                                    editor_sb_drag_offset = *y - thumb_y;
+                                } else {
+                                    editor_sb_drag_offset = thumb_h / 2.0;
+                                    let new_top =
+                                        (*y - thumb_h / 2.0).clamp(
+                                            dv_rect.y,
+                                            dv_rect.y + dv_rect.h - thumb_h,
+                                        );
+                                    let new_frac =
+                                        (new_top - dv_rect.y) / (dv_rect.h - thumb_h);
+                                    let new_scroll =
+                                        (new_frac * (total_h - dv_rect.h)).max(0.0);
+                                    doc.view.target_scroll_y = new_scroll;
+                                    doc.view.scroll_y = new_scroll;
+                                }
+                                editor_sb_dragging = true;
+                                redraw = true;
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Terminal scrollbar click: set scrollback_target by the
+                    // clicked fraction of the track.
+                    if subsystems.has_terminal() && terminal.visible {
+                        let (ww, wh, _, _) = crate::window::get_window_size();
+                        let win_w = ww as f64;
+                        let win_h = wh as f64;
+                        let status_h_sc = style.font_height + style.padding_y * 2.0;
+                        let tab_h_sc = if !single_file_mode && !docs.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let terminal_h_sc = (win_h * 0.3)
+                            .min(win_h - tab_h_sc - status_h_sc - 50.0)
+                            .max(80.0);
+                        let term_y_sc = win_h - terminal_h_sc - status_h_sc;
+                        let sidebar_w_sc = if subsystems.has_sidebar() && sidebar_visible {
+                            sidebar_width
+                        } else {
+                            0.0
+                        };
+                        let term_x_sc = sidebar_w_sc;
+                        let term_w_sc = win_w - sidebar_w_sc;
+                        let tab_bar_h_sc = if !terminal.terminals.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let char_h_sc = style.code_font_height * 1.2;
+                        let ty_start = term_y_sc
+                            + style.divider_size
+                            + tab_bar_h_sc
+                            + 2.0;
+                        let visible_h = (term_y_sc + terminal_h_sc
+                            - ty_start
+                            - style.padding_y)
+                            .max(0.0);
+                        let rows_visible =
+                            (visible_h / char_h_sc).floor().max(1.0) as usize;
+                        let sb_w_sc = style.scrollbar_size.max(6.0);
+                        let sb_x_sc = term_x_sc + term_w_sc - sb_w_sc;
+                        let sb_h_sc = char_h_sc * rows_visible as f64;
+                        if *x >= sb_x_sc
+                            && *x < sb_x_sc + sb_w_sc
+                            && *y >= ty_start
+                            && *y < ty_start + sb_h_sc
+                        {
+                            if let Some(inst) =
+                                terminal.terminals.get_mut(terminal.active)
+                            {
+                                let cap = inst.tbuf.history_len() as f64;
+                                if cap > 0.0 && sb_h_sc > 0.0 {
+                                    let total = cap + rows_visible as f64;
+                                    let ratio = (rows_visible as f64 / total)
+                                        .clamp(0.0, 1.0);
+                                    let min_thumb = sb_w_sc * 2.0;
+                                    let thumb_h =
+                                        (sb_h_sc * ratio).max(min_thumb).min(sb_h_sc);
+                                    let pos_from_top =
+                                        (cap - inst.scrollback_target) / cap;
+                                    let thumb_y =
+                                        ty_start + pos_from_top * (sb_h_sc - thumb_h);
+                                    if *y >= thumb_y && *y < thumb_y + thumb_h {
+                                        terminal_sb_drag_offset = *y - thumb_y;
+                                    } else {
+                                        terminal_sb_drag_offset = thumb_h / 2.0;
+                                        let new_top = (*y - thumb_h / 2.0).clamp(
+                                            ty_start,
+                                            ty_start + sb_h_sc - thumb_h,
+                                        );
+                                        let travel = (sb_h_sc - thumb_h).max(1.0);
+                                        let new_from_top = (new_top - ty_start) / travel;
+                                        inst.scrollback_target = (1.0 - new_from_top) * cap;
+                                    }
+                                    terminal_sb_dragging = true;
+                                    redraw = true;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    // Test-runner badge hit-test: if the click lands on
+                    // one of the inline "Run test" hints, dispatch a
+                    // single-test run and skip caret placement.
+                    if !test_badges.is_empty() {
+                        let hit = test_badges.iter().find(|r| {
+                            *x >= r.x1 && *x < r.x2 && *y >= r.y1 && *y < r.y2
+                        });
+                        if let Some(region) = hit {
+                            if let Some(test) = active_tests.get(region.test_index) {
+                                let doc_path = docs
+                                    .get(active_tab)
+                                    .map(|d| d.path.clone())
+                                    .unwrap_or_default();
+                                if !doc_path.is_empty() {
+                                    pending_single_test =
+                                        Some((doc_path, test.name.clone()));
+                                    {
+                                        let cmd: String =
+                                            "test:run-single".to_string();
+                                        include!("commands_dispatch.rs");
+                                    }
+                                }
+                            }
+                            redraw = true;
+                            continue;
+                        }
+                    }
+
                     if let Some(doc) = docs.get_mut(active_tab) {
                         let dv = &mut doc.view;
                         if let Some(buf_id) = dv.buffer_id {
@@ -4237,6 +4934,176 @@ pub fn run(
                         }
                         continue;
                     }
+                    // Editor scrollbar drag: move the thumb so its grabbed
+                    // point stays under the cursor, then derive scroll.
+                    if editor_sb_dragging {
+                        if let Some(doc) = docs.get_mut(active_tab) {
+                            let dv_rect = doc.view.rect();
+                            let line_h_sb = style.code_font_height * 1.2;
+                            let total_lines = doc
+                                .view
+                                .buffer_id
+                                .and_then(|id| {
+                                    buffer::with_buffer(id, |b| Ok(b.lines.len())).ok()
+                                })
+                                .unwrap_or(1)
+                                as f64;
+                            let total_h = total_lines * line_h_sb;
+                            if total_h > dv_rect.h && dv_rect.h > 0.0 {
+                                let ratio = dv_rect.h / total_h;
+                                let min_thumb = style.scrollbar_size * 2.0;
+                                let thumb_h =
+                                    (dv_rect.h * ratio).max(min_thumb).min(dv_rect.h);
+                                let new_top = (*y - editor_sb_drag_offset).clamp(
+                                    dv_rect.y,
+                                    dv_rect.y + dv_rect.h - thumb_h,
+                                );
+                                let travel = (dv_rect.h - thumb_h).max(1.0);
+                                let new_frac = (new_top - dv_rect.y) / travel;
+                                let new_scroll =
+                                    (new_frac * (total_h - dv_rect.h)).max(0.0);
+                                doc.view.target_scroll_y = new_scroll;
+                                doc.view.scroll_y = new_scroll;
+                                redraw = true;
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Terminal scrollbar drag: recompute scrollback from
+                    // mouse y. Must come before the selection drag, so a
+                    // mouse-down on the track doesn't turn into a cell
+                    // selection on drag.
+                    if terminal_sb_dragging && subsystems.has_terminal() && terminal.visible {
+                        let (_, wh, _, _) = crate::window::get_window_size();
+                        let win_h = wh as f64;
+                        let status_h_sm = style.font_height + style.padding_y * 2.0;
+                        let tab_h_sm = if !single_file_mode && !docs.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let terminal_h_sm = (win_h * 0.3)
+                            .min(win_h - tab_h_sm - status_h_sm - 50.0)
+                            .max(80.0);
+                        let term_y_sm = win_h - terminal_h_sm - status_h_sm;
+                        let tab_bar_h_sm = if !terminal.terminals.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let char_h_sm = style.code_font_height * 1.2;
+                        let ty_start = term_y_sm
+                            + style.divider_size
+                            + tab_bar_h_sm
+                            + 2.0;
+                        let visible_h = (term_y_sm + terminal_h_sm
+                            - ty_start
+                            - style.padding_y)
+                            .max(0.0);
+                        let rows_visible =
+                            (visible_h / char_h_sm).floor().max(1.0) as usize;
+                        let sb_h = char_h_sm * rows_visible as f64;
+                        let sb_w_sm = style.scrollbar_size.max(6.0);
+                        if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
+                            let cap = inst.tbuf.history_len() as f64;
+                            if cap > 0.0 && sb_h > 0.0 {
+                                let total = cap + rows_visible as f64;
+                                let ratio =
+                                    (rows_visible as f64 / total).clamp(0.0, 1.0);
+                                let min_thumb = sb_w_sm * 2.0;
+                                let thumb_h =
+                                    (sb_h * ratio).max(min_thumb).min(sb_h);
+                                let new_top = (*y - terminal_sb_drag_offset).clamp(
+                                    ty_start,
+                                    ty_start + sb_h - thumb_h,
+                                );
+                                let travel = (sb_h - thumb_h).max(1.0);
+                                let new_from_top = (new_top - ty_start) / travel;
+                                inst.scrollback_target = (1.0 - new_from_top) * cap;
+                                redraw = true;
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Terminal: extend the active selection while drag is in
+                    // progress. Done before any other mouse-move branch
+                    // because the terminal sits at the bottom of the
+                    // window and its drag shouldn't trigger sidebar resize
+                    // or editor caret drag.
+                    if subsystems.has_terminal() && terminal.visible {
+                        use crate::editor::view::DrawContext as _;
+                        let (_, wh, _, _) = crate::window::get_window_size();
+                        let win_h = wh as f64;
+                        let status_h_m = style.font_height + style.padding_y * 2.0;
+                        let tab_h_m = if !single_file_mode && !docs.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let terminal_h_m = (win_h * 0.3)
+                            .min(win_h - tab_h_m - status_h_m - 50.0)
+                            .max(80.0);
+                        let term_y_m = win_h - terminal_h_m - status_h_m;
+                        let sidebar_w_m = if subsystems.has_sidebar() && sidebar_visible {
+                            sidebar_width
+                        } else {
+                            0.0
+                        };
+                        let term_x_m = sidebar_w_m;
+                        let tab_bar_h_m = if !terminal.terminals.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let char_h_m = style.code_font_height * 1.2;
+                        let char_w_m = draw_ctx.font_width(style.code_font, "m");
+                        let ty_start = term_y_m
+                            + style.divider_size
+                            + tab_bar_h_m
+                            + 2.0;
+                        let visible_h = (term_y_m + terminal_h_m
+                            - ty_start
+                            - style.padding_y)
+                            .max(0.0);
+                        let rows_visible =
+                            (visible_h / char_h_m).floor().max(1.0) as usize;
+                        if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
+                            if inst.sel_dragging && char_w_m > 0.0 {
+                                let col = ((*x - term_x_m - style.padding_x)
+                                    / char_w_m)
+                                    .floor()
+                                    .max(0.0) as usize;
+                                let vis_row = (((*y - ty_start) / char_h_m)
+                                    .floor()
+                                    .max(0.0) as usize)
+                                    .min(rows_visible.saturating_sub(1));
+                                inst.sel_end = Some((vis_row, col));
+                                redraw = true;
+                            }
+                        }
+                    }
+                    if sidebar_sb_dragging {
+                        if sidebar_content_h > sidebar_sb_h && sidebar_sb_h > 0.0 {
+                            let ratio = sidebar_sb_h / sidebar_content_h;
+                            let min_thumb = style.scrollbar_size * 2.0;
+                            let thumb_h = (sidebar_sb_h * ratio)
+                                .max(min_thumb)
+                                .min(sidebar_sb_h);
+                            let new_top = (*y - sidebar_sb_drag_offset).clamp(
+                                sidebar_sb_top,
+                                sidebar_sb_top + sidebar_sb_h - thumb_h,
+                            );
+                            let travel = (sidebar_sb_h - thumb_h).max(1.0);
+                            let new_frac = (new_top - sidebar_sb_top) / travel;
+                            let max_scroll =
+                                (sidebar_content_h - sidebar_sb_h).max(1.0);
+                            sidebar_scroll = (new_frac * max_scroll).max(0.0);
+                            redraw = true;
+                        }
+                        continue;
+                    }
                     if sidebar_dragging {
                         let (ww, _, _, _) = crate::window::get_window_size();
                         let max_sidebar = (ww as f64 * 0.9).max(MIN_SIDEBAR_W);
@@ -4311,6 +5178,15 @@ pub fn run(
                     }
                     editor_mouse_down = false;
                     tab_dragging = None;
+                    editor_sb_dragging = false;
+                    terminal_sb_dragging = false;
+                    sidebar_sb_dragging = false;
+                    // End terminal selection drag; the selection itself
+                    // stays visible until dismissed by another click or
+                    // the escape / copy key.
+                    if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
+                        inst.sel_dragging = false;
+                    }
                     redraw = true;
                     continue;
                 }
@@ -4346,7 +5222,10 @@ pub fn run(
                     }
                     if subsystems.has_sidebar() && sidebar_visible && mouse_x < sidebar_width {
                         // Mouse is over the sidebar -- scroll sidebar only.
-                        sidebar_scroll = (sidebar_scroll - scroll_amt).max(0.0);
+                        let max_scroll =
+                            (sidebar_content_h - sidebar_sb_h).max(0.0);
+                        sidebar_scroll = (sidebar_scroll - scroll_amt)
+                            .clamp(0.0, max_scroll);
                     } else if let Some(doc) = docs.get_mut(active_tab) {
                         // Route wheel to whichever pane the cursor is over
                         // in split preview mode.
@@ -4371,20 +5250,17 @@ pub fn run(
         }
 
         // LSP: auto-start for the active file if no transport is running.
-        if subsystems.has_lsp() {
-            if lsp_state.transport_id.is_none() {
-                if let Some(doc) = docs.get(active_tab) {
-                    if !doc.path.is_empty() {
-                        try_start_lsp(
-                            &doc.path,
-                            &mut lsp_state,
-                            &lsp_specs,
-                            userdir,
-                            config.verbose,
-                        );
-                    }
-                }
-            }
+        if subsystems.has_lsp() && lsp_state.transport_id.is_none()
+            && let Some(doc) = docs.get(active_tab)
+            && !doc.path.is_empty()
+        {
+            try_start_lsp(
+                &doc.path,
+                &mut lsp_state,
+                &lsp_specs,
+                userdir,
+                config.verbose,
+            );
         }
 
         // Poll background file load. If the thread is done, swap the buffer in.
@@ -4425,6 +5301,9 @@ pub fn run(
                             cached_scroll_y: -1.0,
                             cached_hint_count: 0,
                             dirty_cache: std::cell::Cell::new(None),
+                            token_cache: std::cell::RefCell::new(
+                                crate::editor::open_doc::TokenCache::default(),
+                            ),
             preview: crate::editor::markdown_preview::MarkdownPreviewState::default(),
                         });
                         active_tab = docs.len() - 1;
@@ -4949,11 +5828,6 @@ pub fn run(
                                                             .and_then(|v| v.as_u64())
                                                             .unwrap_or(0)
                                                             as usize,
-                                                        end_line: end
-                                                            .and_then(|s| s.get("line"))
-                                                            .and_then(|v| v.as_u64())
-                                                            .unwrap_or(0)
-                                                            as usize,
                                                         end_col: end
                                                             .and_then(|s| s.get("character"))
                                                             .and_then(|v| v.as_u64())
@@ -4964,11 +5838,6 @@ pub fn run(
                                                             .and_then(|v| v.as_u64())
                                                             .unwrap_or(1)
                                                             as u8,
-                                                        message: d
-                                                            .get("message")
-                                                            .and_then(|v| v.as_str())
-                                                            .unwrap_or("")
-                                                            .to_string(),
                                                     }
                                                 })
                                                 .collect()
@@ -5042,37 +5911,35 @@ pub fn run(
         }
 
         // Terminal: poll output from each pty.
-        if subsystems.has_terminal() {
-            if terminal.visible {
-                let mut dead_indices = Vec::new();
-                for (i, inst) in terminal.terminals.iter_mut().enumerate() {
-                    inst.inner.poll();
-                    if !inst.inner.running {
-                        dead_indices.push(i);
-                    } else if let Some(data) = inst.inner.read(4096) {
-                        if !data.is_empty() {
-                            inst.tbuf.process_output(&data);
-                            redraw = true;
-                        }
-                    }
-                }
-                // Remove dead terminals in reverse order.
-                for i in dead_indices.into_iter().rev() {
-                    terminal.terminals[i].inner.cleanup();
-                    terminal.terminals.remove(i);
+        if subsystems.has_terminal() && terminal.visible {
+            let mut dead_indices = Vec::new();
+            for (i, inst) in terminal.terminals.iter_mut().enumerate() {
+                inst.inner.poll();
+                if !inst.inner.running {
+                    dead_indices.push(i);
+                } else if let Some(data) = inst.inner.read(4096)
+                    && !data.is_empty()
+                {
+                    inst.tbuf.process_output(&data);
                     redraw = true;
                 }
-                if terminal.terminals.is_empty() {
-                    terminal.visible = false;
-                    terminal.focused = false;
-                    terminal.active = 0;
-                    // Panel just went away -- force a native repaint so the
-                    // editor content reclaims the vacated strip in the
-                    // same frame instead of waiting for the next event.
-                    crate::window::force_invalidate();
-                } else if terminal.active >= terminal.terminals.len() {
-                    terminal.active = terminal.terminals.len() - 1;
-                }
+            }
+            // Remove dead terminals in reverse order.
+            for i in dead_indices.into_iter().rev() {
+                terminal.terminals[i].inner.cleanup();
+                terminal.terminals.remove(i);
+                redraw = true;
+            }
+            if terminal.terminals.is_empty() {
+                terminal.visible = false;
+                terminal.focused = false;
+                terminal.active = 0;
+                // Panel just went away -- force a native repaint so the
+                // editor content reclaims the vacated strip in the
+                // same frame instead of waiting for the next event.
+                crate::window::force_invalidate();
+            } else if terminal.active >= terminal.terminals.len() {
+                terminal.active = terminal.terminals.len() - 1;
             }
         }
 
@@ -5290,6 +6157,13 @@ pub fn run(
                 }
             }
 
+            if redraw && window_hidden {
+                // Consume the redraw flag but skip the actual render pass.
+                // The compositor would throw away our frames anyway while
+                // the window is occluded/minimised, and we've dropped the
+                // glyph cache / render-cache buffers in the event handler.
+                redraw = false;
+            }
             if redraw {
                 // Update window title and status bar from active tab.
                 let app_name = if subsystems.has_notes_mode() {
@@ -5619,9 +6493,16 @@ pub fn run(
                     draw_ctx.draw_rect(0.0, 0.0, sidebar_w, height, style.background2.to_array());
 
                     // Mini toolbar at the top of the sidebar (big icon font).
+                    // When the toolbar subsystem is off (Note-Anvil), collapse
+                    // the reserved height so the directory header sits flush
+                    // with the top instead of leaving an empty strip.
                     let ibf = style.icon_big_font;
                     let icon_h = draw_ctx.font_height(ibf);
-                    let toolbar_h = icon_h + style.padding_y * 2.0;
+                    let toolbar_h = if subsystems.has_toolbar() {
+                        icon_h + style.padding_y * 2.0
+                    } else {
+                        0.0
+                    };
                     if subsystems.has_toolbar() {
                         draw_ctx.draw_rect(
                             0.0,
@@ -5710,21 +6591,150 @@ pub fn run(
                         style.divider.to_array(),
                     );
 
+                    // Notes-mode: sort toggle + search box between the
+                    // directory header and the file list.
+                    let notes_row_h = if subsystems.has_notes_mode() {
+                        let row_h = style.font_height + style.padding_y * 2.0;
+                        let search_h = style.font_height + style.padding_y * 2.0;
+                        let bar_y = toolbar_h + dir_header_h;
+                        // Sort-toggle row background.
+                        draw_ctx.draw_rect(
+                            0.0,
+                            bar_y,
+                            sidebar_w,
+                            row_h,
+                            style.background2.to_array(),
+                        );
+                        let half = (sidebar_w / 2.0).floor();
+                        let is_alpha = notes_sort_mode <= 1;
+                        let is_recent = notes_sort_mode >= 2;
+                        let arrow = |asc: bool| if asc { "\u{2191}" } else { "\u{2193}" };
+                        let alpha_arrow = arrow(notes_sort_mode == 0);
+                        let recent_arrow = arrow(notes_sort_mode == 3);
+                        let alpha_label = format!("A-Z {alpha_arrow}");
+                        let recent_label = format!("Recent {recent_arrow}");
+                        if is_alpha {
+                            draw_ctx.draw_rect(
+                                0.0,
+                                bar_y,
+                                half,
+                                row_h,
+                                style.line_highlight.to_array(),
+                            );
+                        }
+                        if is_recent {
+                            draw_ctx.draw_rect(
+                                half,
+                                bar_y,
+                                sidebar_w - half,
+                                row_h,
+                                style.line_highlight.to_array(),
+                            );
+                        }
+                        let alpha_w = draw_ctx.font_width(style.font, &alpha_label);
+                        let recent_w = draw_ctx.font_width(style.font, &recent_label);
+                        let text_y = bar_y + (row_h - style.font_height) / 2.0;
+                        draw_ctx.draw_text(
+                            style.font,
+                            &alpha_label,
+                            (half - alpha_w) / 2.0,
+                            text_y,
+                            if is_alpha { style.accent.to_array() } else { style.dim.to_array() },
+                        );
+                        draw_ctx.draw_text(
+                            style.font,
+                            &recent_label,
+                            half + (sidebar_w - half - recent_w) / 2.0,
+                            text_y,
+                            if is_recent { style.accent.to_array() } else { style.dim.to_array() },
+                        );
+                        draw_ctx.draw_rect(
+                            half,
+                            bar_y + style.padding_y * 0.3,
+                            style.divider_size,
+                            row_h - style.padding_y * 0.6,
+                            style.divider.to_array(),
+                        );
+                        // Search input row.
+                        let search_y = bar_y + row_h;
+                        let search_bg = if notes_search_focused {
+                            style.background.to_array()
+                        } else {
+                            style.background3.to_array()
+                        };
+                        draw_ctx.draw_rect(
+                            style.padding_x,
+                            search_y + style.padding_y * 0.4,
+                            sidebar_w - style.padding_x * 2.0,
+                            search_h - style.padding_y * 0.8,
+                            search_bg,
+                        );
+                        let label = if notes_search.is_empty() && !notes_search_focused {
+                            "Search notes..."
+                        } else {
+                            notes_search.as_str()
+                        };
+                        let label_color = if notes_search.is_empty() && !notes_search_focused {
+                            style.dim.to_array()
+                        } else {
+                            style.text.to_array()
+                        };
+                        draw_ctx.draw_text(
+                            style.font,
+                            label,
+                            style.padding_x * 2.0,
+                            search_y + (search_h - style.font_height) / 2.0,
+                            label_color,
+                        );
+                        // Caret when focused.
+                        if notes_search_focused {
+                            let caret_x = style.padding_x * 2.0
+                                + draw_ctx.font_width(style.font, &notes_search);
+                            draw_ctx.draw_rect(
+                                caret_x,
+                                search_y + style.padding_y * 0.5,
+                                1.0,
+                                style.font_height,
+                                style.caret.to_array(),
+                            );
+                        }
+                        draw_ctx.draw_rect(
+                            0.0,
+                            bar_y + row_h + search_h - style.divider_size,
+                            sidebar_w,
+                            style.divider_size,
+                            style.divider.to_array(),
+                        );
+                        row_h + search_h
+                    } else {
+                        0.0
+                    };
+
                     // File tree entries — clip to the area below the header so
                     // scrolled entries don't overdraw the toolbar or folder name.
                     let entry_h = style.font_height + style.padding_y;
                     let icon_font_h = draw_ctx.font_height(style.icon_font);
                     let icon_w = draw_ctx.font_width(style.icon_font, "D") + style.padding_x * 0.5;
                     let active_path = docs.get(active_tab).map(|d| d.path.as_str()).unwrap_or("");
-                    let sidebar_content_top = toolbar_h + dir_header_h;
+                    let sidebar_content_top = toolbar_h + dir_header_h + notes_row_h;
                     draw_ctx.set_clip_rect(
                         0.0,
                         sidebar_content_top,
                         sidebar_w,
                         height - sidebar_content_top,
                     );
-                    let mut ey = toolbar_h + dir_header_h - sidebar_scroll;
-                    for entry in &sidebar_entries {
+                    let notes_display: Vec<usize> = if subsystems.has_notes_mode() {
+                        compute_notes_display_order(
+                            &sidebar_entries,
+                            &notes_search,
+                            notes_sort_mode,
+                        )
+                    } else {
+                        (0..sidebar_entries.len()).collect()
+                    };
+                    let mut ey = toolbar_h + dir_header_h + notes_row_h - sidebar_scroll;
+                    for &disp_idx in &notes_display {
+                        let entry = &sidebar_entries[disp_idx];
                         if ey + entry_h > sidebar_content_top && ey < height {
                             let indent = entry.depth as f64 * style.padding_x * 1.5;
                             let x = style.padding_x + indent;
@@ -5814,6 +6824,41 @@ pub fn run(
                     }
                     // Reset clip to full window for the sidebar edge divider.
                     crate::editor::app_state::clip_init(width, height);
+
+                    // Sidebar scrollbar (lite-xl style): proportional thumb
+                    // with a minimum size, drawn just inside the right edge.
+                    let total_entries_h = notes_display.len() as f64 * entry_h;
+                    let sb_area_y = sidebar_content_top;
+                    let sb_area_h = (height - sidebar_content_top).max(0.0);
+                    sidebar_content_h = total_entries_h;
+                    sidebar_sb_top = sb_area_y;
+                    sidebar_sb_h = sb_area_h;
+                    if total_entries_h > sb_area_h && sb_area_h > 0.0 {
+                        let sb_w = style.scrollbar_size;
+                        let sb_x = sidebar_w - style.divider_size - sb_w;
+                        draw_ctx.draw_rect(
+                            sb_x,
+                            sb_area_y,
+                            sb_w,
+                            sb_area_h,
+                            style.scrollbar_track.to_array(),
+                        );
+                        let ratio = sb_area_h / total_entries_h;
+                        let min_thumb = style.scrollbar_size * 2.0;
+                        let thumb_h =
+                            (sb_area_h * ratio).max(min_thumb).min(sb_area_h);
+                        let max_scroll = (total_entries_h - sb_area_h).max(1.0);
+                        let scroll_frac = (sidebar_scroll / max_scroll).clamp(0.0, 1.0);
+                        let thumb_y = sb_area_y + scroll_frac * (sb_area_h - thumb_h);
+                        draw_ctx.draw_rect(
+                            sb_x,
+                            thumb_y,
+                            sb_w,
+                            thumb_h,
+                            style.scrollbar.to_array(),
+                        );
+                    }
+
                     // Divider on the right edge.
                     draw_ctx.draw_rect(
                         sidebar_w - style.divider_size,
@@ -5829,9 +6874,20 @@ pub fn run(
                     let dv = &doc.view;
                     if let Some(buf_id) = dv.buffer_id {
                         let ext = doc.path.rsplit('.').next().unwrap_or("");
-                        // Compile and cache syntax for this extension.
+                        // Compile-on-demand and bump MRU. Evict the LRU
+                        // entry once the cache exceeds SYNTAX_CACHE_CAP
+                        // so memory doesn't grow unbounded on sessions
+                        // that touch many file types.
+                        let ext_owned = ext.to_string();
+                        compiled_syntax_mru.retain(|e| e != &ext_owned);
+                        compiled_syntax_mru.insert(0, ext_owned.clone());
+                        while compiled_syntax_mru.len() > SYNTAX_CACHE_CAP {
+                            if let Some(drop_ext) = compiled_syntax_mru.pop() {
+                                compiled_syntax_cache.remove(&drop_ext);
+                            }
+                        }
                         let compiled_opt = compiled_syntax_cache
-                            .entry(ext.to_string())
+                            .entry(ext_owned)
                             .or_insert_with(|| {
                                 let filename = doc.path.rsplit('/').next().unwrap_or(&doc.path);
                                 let entry =
@@ -5897,6 +6953,7 @@ pub fn run(
                                     compiled_opt.as_ref(),
                                     wrap_w,
                                     hints,
+                                    Some(&doc.token_cache),
                                 )
                             }
                         } else {
@@ -5908,6 +6965,7 @@ pub fn run(
                                 compiled_opt.as_ref(),
                                 wrap_w,
                                 hints,
+                                Some(&doc.token_cache),
                             )
                         };
                         let (sel, cursor_line, cursor_col, all_cursors) =
@@ -5957,6 +7015,88 @@ pub fn run(
                             &doc.git_changes,
                             &all_cursors,
                         );
+
+                        // Test-runner badges: scan the doc for recognised
+                        // test definitions and paint a "Run test" CodeLens-
+                        // style hint in `style.dim` (greys with the theme,
+                        // matches VS Code's descriptionForeground). Only
+                        // runs if a runner can be detected -- no point
+                        // offering the affordance if nothing can execute.
+                        use crate::editor::view::DrawContext as _;
+                        test_badges.clear();
+                        if !doc.path.is_empty()
+                            && crate::editor::test_runner::detect_runner_with_fallback(
+                                &project_root,
+                                &doc.path,
+                            )
+                            .is_some()
+                        {
+                            active_tests = {
+                                let text_lines = buffer::with_buffer(buf_id, |b| {
+                                    Ok(b.lines
+                                        .iter()
+                                        .map(|l| l.trim_end_matches('\n').to_string())
+                                        .collect::<Vec<_>>())
+                                })
+                                .unwrap_or_default();
+                                crate::editor::test_runner::discover_tests(
+                                    &doc.path, &text_lines,
+                                )
+                            };
+                            let line_h = style.code_font_height * 1.2;
+                            let dv_rect = dv.rect();
+                            // Plain ASCII text so no font has to carry a
+                            // triangle glyph; the previous "▶" rendered as
+                            // a .notdef box in Lilex and other code fonts
+                            // that don't cover U+25B6.
+                            let badge_text = "Run test";
+                            let badge_w = draw_ctx.font_width(style.font, badge_text)
+                                + style.padding_x;
+                            for (i, test) in active_tests.iter().enumerate() {
+                                // Render on the SAME row as the `fn` line
+                                // (`test.line`), right-aligned. That puts
+                                // the hint visually below any decorator /
+                                // #[test] attribute and above the function
+                                // body -- the closest single-row
+                                // approximation to VS Code's dedicated
+                                // CodeLens row. Right-aligning keeps it
+                                // away from the fn signature for most
+                                // common fn widths.
+                                let fn_line = test.line.max(1);
+                                let row_y = dv_rect.y
+                                    + (fn_line as f64 - 1.0) * line_h
+                                    - dv.scroll_y;
+                                if row_y + line_h < dv_rect.y
+                                    || row_y >= dv_rect.y + dv_rect.h
+                                {
+                                    continue;
+                                }
+                                let badge_x = (dv_rect.x + dv_rect.w
+                                    - style.scrollbar_size
+                                    - badge_w
+                                    - style.padding_x)
+                                    .max(dv_rect.x);
+                                draw_ctx.draw_text(
+                                    style.font,
+                                    badge_text,
+                                    badge_x,
+                                    row_y + (line_h - style.font_height) / 2.0,
+                                    style.dim.to_array(),
+                                );
+                                test_badges.push(
+                                    crate::editor::test_runner::TestBadgeRegion {
+                                        x1: badge_x,
+                                        y1: row_y,
+                                        x2: badge_x + badge_w,
+                                        y2: row_y + line_h,
+                                        test_index: i,
+                                    },
+                                );
+                            }
+                        } else {
+                            active_tests.clear();
+                        }
+
                         pending_render_cache =
                             Some((active_tab, render_lines, current_change_id, scroll_y_now));
                         // Draw bracket match underlines at cursor position.
@@ -5995,42 +7135,41 @@ pub fn run(
                             }
                         }
                         // Draw diagnostic underlines from LSP (only for LSP-handled files).
-                        if subsystems.has_lsp() {
-                            if is_lsp_file {
-                                if let Some(diags) = lsp_state.diagnostics.get(&doc.path) {
-                                    let line_h = style.code_font_height * 1.2;
-                                    let gutter_w = dv.gutter_width;
-                                    let doc_x = dv.rect().x + gutter_w + style.padding_x;
-                                    let doc_y = dv.rect().y;
-                                    for diag in diags {
-                                        let color = match diag.severity {
-                                            1 => style.error.to_array(),
-                                            2 => style.warn.to_array(),
-                                            _ => style.dim.to_array(),
-                                        };
-                                        let end_col = if diag.end_col == diag.start_col {
-                                            diag.start_col + 1
-                                        } else {
-                                            diag.end_col
-                                        };
-                                        // LSP lines are 0-based.
-                                        let y_pos = doc_y + (diag.start_line as f64) * line_h
-                                            + line_h
-                                            - 2.0
-                                            - dv.scroll_y;
-                                        if y_pos < doc_y || y_pos > doc_y + dv.rect().h {
-                                            continue;
-                                        }
-                                        use crate::editor::view::DrawContext as _;
-                                        let char_w = draw_ctx.font_width(style.code_font, "m");
-                                        let x1 =
-                                            doc_x + diag.start_col as f64 * char_w - dv.scroll_x;
-                                        let x2 =
-                                            doc_x + end_col as f64 * char_w - dv.scroll_x;
-                                        let w = (x2 - x1).max(char_w);
-                                        draw_ctx.draw_rect(x1, y_pos, w, 2.0, color);
-                                    }
+                        if subsystems.has_lsp()
+                            && is_lsp_file
+                            && let Some(diags) = lsp_state.diagnostics.get(&doc.path)
+                        {
+                            let line_h = style.code_font_height * 1.2;
+                            let gutter_w = dv.gutter_width;
+                            let doc_x = dv.rect().x + gutter_w + style.padding_x;
+                            let doc_y = dv.rect().y;
+                            for diag in diags {
+                                let color = match diag.severity {
+                                    1 => style.error.to_array(),
+                                    2 => style.warn.to_array(),
+                                    _ => style.dim.to_array(),
+                                };
+                                let end_col = if diag.end_col == diag.start_col {
+                                    diag.start_col + 1
+                                } else {
+                                    diag.end_col
+                                };
+                                // LSP lines are 0-based.
+                                let y_pos = doc_y + (diag.start_line as f64) * line_h
+                                    + line_h
+                                    - 2.0
+                                    - dv.scroll_y;
+                                if y_pos < doc_y || y_pos > doc_y + dv.rect().h {
+                                    continue;
                                 }
+                                use crate::editor::view::DrawContext as _;
+                                let char_w = draw_ctx.font_width(style.code_font, "m");
+                                let x1 =
+                                    doc_x + diag.start_col as f64 * char_w - dv.scroll_x;
+                                let x2 =
+                                    doc_x + end_col as f64 * char_w - dv.scroll_x;
+                                let w = (x2 - x1).max(char_w);
+                                draw_ctx.draw_rect(x1, y_pos, w, 2.0, color);
                             }
                         }
                     }
@@ -6461,6 +7600,14 @@ pub fn run(
                         let rows_data =
                             inst.tbuf.visible_rows(rows_visible, scrollback_rows);
 
+                        // Normalized selection range for this frame.
+                        let sel_range = match (inst.sel_start, inst.sel_end) {
+                            (Some(s), Some(e)) => {
+                                crate::editor::terminal_panel::normalized_selection(s, e)
+                            }
+                            _ => None,
+                        };
+
                         let cur_row_1 = inst.tbuf.cursor_row();
                         let cur_col_1 = inst.tbuf.cursor_col();
                         let cur_visible_row = if scrollback_rows == 0 {
@@ -6493,10 +7640,39 @@ pub fn run(
                                     .unwrap_or(style.text.to_array());
                                 let bg = crate::editor::terminal::unpack_color(cell.bg);
 
-                                // Draw bg if non-zero.
-                                if let Some(bg_color) = bg {
-                                    if bg_color[3] > 0 && bg_color != [0, 0, 0, 255] {
-                                        draw_ctx.draw_rect(cx, ry, char_w, char_h, bg_color);
+                                // Selection highlight for this cell.
+                                let in_sel = match sel_range {
+                                    Some((a, b)) => {
+                                        (row_idx > a.0 && row_idx < b.0)
+                                            || (row_idx == a.0
+                                                && row_idx == b.0
+                                                && col_idx >= a.1
+                                                && col_idx < b.1)
+                                            || (row_idx == a.0
+                                                && row_idx != b.0
+                                                && col_idx >= a.1)
+                                            || (row_idx == b.0
+                                                && row_idx != a.0
+                                                && col_idx < b.1)
+                                    }
+                                    None => false,
+                                };
+                                if in_sel {
+                                    draw_ctx.draw_rect(
+                                        cx,
+                                        ry,
+                                        char_w,
+                                        char_h,
+                                        style.selection.to_array(),
+                                    );
+                                }
+
+                                // Draw bg if non-zero (and not already selected).
+                                if !in_sel {
+                                    if let Some(bg_color) = bg {
+                                        if bg_color[3] > 0 && bg_color != [0, 0, 0, 255] {
+                                            draw_ctx.draw_rect(cx, ry, char_w, char_h, bg_color);
+                                        }
                                     }
                                 }
 
@@ -6553,8 +7729,9 @@ pub fn run(
                                 style.scrollbar_track.to_array(),
                             );
                             let total = cap + rows_visible as f64;
-                            let ratio = (rows_visible as f64 / total).clamp(0.05, 1.0);
-                            let thumb_h = (sb_h * ratio).max(20.0).min(sb_h);
+                            let ratio = (rows_visible as f64 / total).clamp(0.0, 1.0);
+                            let min_thumb = sb_w * 2.0;
+                            let thumb_h = (sb_h * ratio).max(min_thumb).min(sb_h);
                             // scrollback = 0 -> thumb at bottom of track
                             // scrollback = cap -> thumb at top.
                             let pos_from_top = (cap - inst.scrollback) / cap;
@@ -8192,6 +9369,7 @@ fn char_count(s: &str) -> usize {
 /// `line_wrapping`: when true, horizontal auto-scroll is suppressed since the
 /// cursor is always reachable by wrap — scrolling right would push content
 /// out of view even though nothing extends past the visual right edge.
+#[allow(clippy::too_many_arguments)]
 fn handle_doc_command(
     dv: &mut DocView,
     cmd: &str,
@@ -9152,7 +10330,9 @@ fn load_fonts(
         for path in paths {
             let scaled_size = spec.size as f32 * scale as f32;
             let inner = FontInner::load(path, scaled_size, aa, hint)?;
-            refs.push(std::sync::Arc::new(parking_lot::Mutex::new(inner)));
+            let arc = std::sync::Arc::new(parking_lot::Mutex::new(inner));
+            crate::renderer::font::register_font(&arc);
+            refs.push(arc);
         }
         Ok(ctx.add_font(refs))
     };

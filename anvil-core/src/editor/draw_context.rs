@@ -13,6 +13,13 @@ pub struct NativeDrawContext {
 }
 
 #[cfg(feature = "sdl")]
+impl Default for NativeDrawContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "sdl")]
 impl NativeDrawContext {
     /// Create a new context with the given font slots.
     pub fn new() -> Self {

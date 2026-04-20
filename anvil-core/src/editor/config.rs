@@ -137,7 +137,7 @@ pub struct TerminalConfig {
 }
 
 /// File-handling options that cut across the save / load pipeline.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FilesConfig {
     /// When `true`, saves go through a temp file and a rename, so a crash
@@ -504,19 +504,13 @@ impl Default for TerminalConfig {
     }
 }
 
-impl Default for FilesConfig {
-    fn default() -> Self {
-        Self { atomic_save: false }
-    }
-}
-
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
             divider_size: 1,
-            scrollbar_size: 8,
-            expanded_scrollbar_size: 12,
-            minimum_thumb_size: 20,
+            scrollbar_size: 16,
+            expanded_scrollbar_size: 20,
+            minimum_thumb_size: 32,
             contracted_scrollbar_margin: 8,
             expanded_scrollbar_margin: 12,
             caret_width: 2,

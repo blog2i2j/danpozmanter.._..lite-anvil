@@ -66,6 +66,13 @@ pub enum EditorEvent {
     Exposed,
     FocusGained,
     FocusLost,
+    /// Window is fully hidden behind another surface; the compositor
+    /// would throw away any frames we draw. Used to stop rendering.
+    Occluded,
+    /// Window was minimised / moved to a different Space.
+    Hidden,
+    /// Window is visible again after being Occluded/Hidden.
+    Shown,
     MouseLeft,
     Quit,
 }

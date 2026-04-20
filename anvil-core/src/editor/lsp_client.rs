@@ -12,15 +12,12 @@ pub(crate) struct InlayHint {
 }
 
 /// A single LSP diagnostic with pre-extracted fields.
-#[allow(dead_code)] // end_line and message are stored for future tooltip/multi-line support
 pub(crate) struct Diagnostic {
     pub start_line: usize,
     pub start_col: usize,
-    pub end_line: usize,
     pub end_col: usize,
     /// 1=error, 2=warning, 3=info, 4=hint
     pub severity: u8,
-    pub message: String,
 }
 
 /// LSP connection state tracked in the main loop.
@@ -431,10 +428,8 @@ mod tests {
             vec![Diagnostic {
                 start_line: 1,
                 start_col: 1,
-                end_line: 1,
                 end_col: 5,
                 severity: 1,
-                message: "old".to_string(),
             }],
         );
         // New publishDiagnostics for the same URI replaces (HashMap insert overwrites).
@@ -443,10 +438,8 @@ mod tests {
             vec![Diagnostic {
                 start_line: 2,
                 start_col: 1,
-                end_line: 2,
                 end_col: 5,
                 severity: 2,
-                message: "new".to_string(),
             }],
         );
         let v = &s.diagnostics[&uri];
@@ -463,10 +456,8 @@ mod tests {
             vec![Diagnostic {
                 start_line: 1,
                 start_col: 1,
-                end_line: 1,
                 end_col: 1,
                 severity: 1,
-                message: "a".to_string(),
             }],
         );
         s.diagnostics.insert(
@@ -474,10 +465,8 @@ mod tests {
             vec![Diagnostic {
                 start_line: 5,
                 start_col: 1,
-                end_line: 5,
                 end_col: 1,
                 severity: 2,
-                message: "b".to_string(),
             }],
         );
         assert_eq!(s.diagnostics.len(), 2);

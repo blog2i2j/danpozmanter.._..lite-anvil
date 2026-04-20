@@ -215,20 +215,6 @@ pub fn shutdown() {
     unsafe { SDL_Quit() };
 }
 
-/// On restart: drop the window unless it was marked persistent.
-#[allow(dead_code)]
-pub fn prepare_restart() {
-    SDL.with(|s| {
-        if let Some(ref mut state) = *s.borrow_mut() {
-            if !state.persistent {
-                if let Some(w) = state.window.take() {
-                    // SAFETY: w.raw is valid; ownership is consumed here.
-                    unsafe { SDL_DestroyWindow(w.raw) };
-                }
-            }
-        }
-    });
-}
 
 // Bytes of the application icon used by `set_window_icon`. Defaults to
 // the Lite-Anvil icon; Nano-Anvil overrides it at startup via
@@ -874,6 +860,16 @@ fn translate_event_native(
     }
     if t == SDL_EVENT_WINDOW_FOCUS_LOST {
         return Some(EditorEvent::FocusLost);
+    }
+    if t == SDL_EVENT_WINDOW_OCCLUDED {
+        return Some(EditorEvent::Occluded);
+    }
+    if t == SDL_EVENT_WINDOW_HIDDEN || t == SDL_EVENT_WINDOW_MINIMIZED {
+        return Some(EditorEvent::Hidden);
+    }
+    if t == SDL_EVENT_WINDOW_SHOWN || t == SDL_EVENT_WINDOW_RESTORED {
+        state.needs_invalidate = true;
+        return Some(EditorEvent::Shown);
     }
     if t == SDL_EVENT_KEY_DOWN || t == SDL_EVENT_KEY_UP {
         let (scancode, keycode, keymod, repeat) = unsafe {

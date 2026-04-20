@@ -26,7 +26,10 @@ pub struct CompileFlags {
 
 impl CompileFlags {
     /// Parse a flags string (`"i"`, `"ms"`, etc.) into structured flags.
-    pub fn from_str(flags: &str) -> Self {
+    /// Unknown flag characters are silently ignored, so this is
+    /// deliberately infallible rather than implementing
+    /// `std::str::FromStr`.
+    pub fn parse(flags: &str) -> Self {
         let mut f = Self::default();
         for c in flags.chars() {
             match c {
@@ -76,7 +79,7 @@ impl NativeRegex {
 
     /// Compile with a flags string (`"ims"` style).
     pub fn compile_with(pattern: &str, flags: &str) -> Result<Self, RegexError> {
-        Self::compile(pattern, CompileFlags::from_str(flags))
+        Self::compile(pattern, CompileFlags::parse(flags))
     }
 
     /// Number of capture groups (excluding the whole-match group 0).

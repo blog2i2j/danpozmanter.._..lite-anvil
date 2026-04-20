@@ -86,7 +86,7 @@ const QUOTE_BAR_W: f64 = 3.0;
 /// Bullet/checkbox gutter reserved on the left of a list item. Wide enough
 /// to fit the checkbox outline plus a comfortable right-side gap before
 /// the item's text column starts.
-const LIST_GUTTER: f64 = 36.0;
+const LIST_GUTTER: f64 = 44.0;
 /// Left inset inside `LIST_GUTTER` where the bullet/number/checkbox is drawn.
 const LIST_MARKER_INSET: f64 = 8.0;
 /// Inner cell padding in tables.
@@ -140,7 +140,7 @@ fn heading_metrics(ctx: &dyn DrawContext, level: u8, style: &StyleContext) -> (u
 /// hierarchy; h4-h5 use body text; h6 fades to dim.
 fn heading_color(level: u8, style: &StyleContext) -> [u8; 4] {
     match level {
-        1 | 2 | 3 => style.accent.to_array(),
+        1..=3 => style.accent.to_array(),
         6 => style.dim.to_array(),
         _ => style.text.to_array(),
     }
@@ -620,13 +620,16 @@ fn draw_list(
         // (`block_height` uses `width - LIST_GUTTER`) consistent with draw.
         if let Some(checked) = item.task {
             // Box sized to fit comfortably inside one line of body text.
-            // The extra `+ 1.0` offset shifts the box a pixel below the
-            // geometric centerline so it lines up with the glyph visual
-            // center rather than the line-slot center (fonts put more
-            // padding below the x-height than above it).
             let box_size = (lh * 0.58).floor().clamp(10.0, lh - 5.0);
-            let box_y = (cur_y + (lh - box_size) * 0.5 + 1.0).floor();
+            // Center vertically on the glyph x-height rather than the
+            // full line slot -- UI fonts carry more descender/leading
+            // than ascender room, so the line-slot center lands below
+            // where the eye reads "middle of the letters".
+            let box_y = (cur_y + (style.font_height - box_size) * 0.5).round();
             let box_x = x + LIST_MARKER_INSET;
+            // Interior fill: slightly lighter than the page background so
+            // the box reads as a distinct surface even when empty.
+            ctx.draw_rect(box_x, box_y, box_size, box_size, style.background3.to_array());
             // Outline.
             ctx.draw_rect(box_x, box_y, box_size, 1.0, text_color);
             ctx.draw_rect(box_x, box_y + box_size - 1.0, box_size, 1.0, text_color);

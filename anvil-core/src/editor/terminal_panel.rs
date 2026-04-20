@@ -205,6 +205,55 @@ pub(crate) fn theme_terminal_palette(
     (palette, fg)
 }
 
+/// Normalize a mouse-drag selection into an (anchor, cursor) pair where
+/// anchor <= cursor in reading order. Returns `None` if the selection
+/// is empty / a single point.
+#[cfg(any(unix, windows))]
+pub(crate) fn normalized_selection(
+    start: (usize, usize),
+    end: (usize, usize),
+) -> Option<((usize, usize), (usize, usize))> {
+    if start == end {
+        return None;
+    }
+    let (a, b) = if start.0 < end.0 || (start.0 == end.0 && start.1 <= end.1) {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    Some((a, b))
+}
+
+/// Build the plain-text payload for a mouse-drag selection over the
+/// given visible rows. `a` and `b` are `(row, col)` with `a <= b` in
+/// reading order (use [`normalized_selection`] to normalise first).
+/// Trailing spaces on each row are trimmed so copied output is
+/// paste-friendly instead of carrying the blank rest-of-row padding.
+#[cfg(any(unix, windows))]
+pub(crate) fn extract_selection_text(
+    visible_rows: &[std::borrow::Cow<'_, [crate::editor::terminal_buffer::Cell]>],
+    a: (usize, usize),
+    b: (usize, usize),
+) -> String {
+    let mut out = String::new();
+    for row in a.0..=b.0 {
+        let Some(cells) = visible_rows.get(row) else { continue };
+        let start_col = if row == a.0 { a.1 } else { 0 };
+        let end_col = if row == b.0 { b.1 } else { cells.len() };
+        let slice_end = end_col.min(cells.len());
+        let mut line = String::new();
+        for c in &cells[start_col.min(cells.len())..slice_end] {
+            let ch = char::from_u32(c.ch).unwrap_or(' ');
+            line.push(ch);
+        }
+        out.push_str(line.trim_end());
+        if row != b.0 {
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Build a tab title for a freshly spawned terminal, showing the index
 /// and the basename of its working directory. Matches 1.5.5 TerminalView
 /// labeling ("Terminal: <dir>").
@@ -232,7 +281,7 @@ mod tests {
         // Use a file path inside a DIFFERENT existing dir so the doc-dir
         // branch would return something distinguishable from project_root.
         let doc_parent = std::env::var_os("HOME")
-            .map(|h| std::path::PathBuf::from(h))
+            .map(std::path::PathBuf::from)
             .unwrap_or_else(|| tmp.clone());
         let fake_file = doc_parent.join("some_file.rs");
         let got = resolve_terminal_cwd(
@@ -322,6 +371,57 @@ mod tests {
     }
 
     #[test]
+    fn normalized_selection_orders_reading_order() {
+        assert_eq!(normalized_selection((0, 0), (0, 0)), None);
+        assert_eq!(
+            normalized_selection((2, 1), (0, 5)),
+            Some(((0, 5), (2, 1)))
+        );
+        assert_eq!(
+            normalized_selection((1, 3), (1, 1)),
+            Some(((1, 1), (1, 3)))
+        );
+    }
+
+    #[test]
+    fn extract_selection_text_single_row_partial() {
+        use crate::editor::terminal_buffer::Cell;
+        let default_fg = [0, 0, 0, 255];
+        let row: Vec<Cell> = "hello world".chars().map(|c| Cell {
+            ch: c as u32,
+            fg: 0,
+            bg: 0,
+        }).collect();
+        let _ = default_fg;
+        let rows: Vec<std::borrow::Cow<'_, [Cell]>> =
+            vec![std::borrow::Cow::Owned(row)];
+        let got = extract_selection_text(&rows, (0, 6), (0, 11));
+        assert_eq!(got, "world");
+    }
+
+    #[test]
+    fn extract_selection_text_multi_row_trims_trailing_spaces() {
+        use crate::editor::terminal_buffer::Cell;
+        let mk = |s: &str| -> Vec<Cell> {
+            let mut padded = s.to_string();
+            while padded.len() < 10 {
+                padded.push(' ');
+            }
+            padded.chars().map(|c| Cell {
+                ch: c as u32,
+                fg: 0,
+                bg: 0,
+            }).collect()
+        };
+        let rows: Vec<std::borrow::Cow<'_, [Cell]>> = vec![
+            std::borrow::Cow::Owned(mk("foo")),
+            std::borrow::Cow::Owned(mk("bar")),
+        ];
+        let got = extract_selection_text(&rows, (0, 0), (1, 3));
+        assert_eq!(got, "foo\nbar");
+    }
+
+    #[test]
     fn cd_payload_has_leading_space_and_clear() {
         // Leading space lets shells with `HISTCONTROL=ignorespace` /
         // `setopt histignorespace` skip this line in history; `clear`
@@ -356,6 +456,12 @@ mod unix_impl {
         pub(crate) scrollback: f64,
         /// Target scrollback the current value is easing toward.
         pub(crate) scrollback_target: f64,
+        /// Mouse-drag selection anchor (visible_row, col) at mouse-down.
+        pub(crate) sel_start: Option<(usize, usize)>,
+        /// Mouse-drag selection end (visible_row, col); updated on move.
+        pub(crate) sel_end: Option<(usize, usize)>,
+        /// True while the left button is held over the terminal.
+        pub(crate) sel_dragging: bool,
     }
 
     /// Standard 16-color ANSI palette.
@@ -451,6 +557,9 @@ mod unix_impl {
                         title,
                         scrollback: 0.0,
                         scrollback_target: 0.0,
+                        sel_start: None,
+                        sel_end: None,
+                        sel_dragging: false,
                     };
                     self.terminals.push(inst);
                     self.active = idx;
@@ -532,6 +641,12 @@ mod windows_impl {
         pub(crate) scrollback: f64,
         /// Target scrollback the current value is easing toward.
         pub(crate) scrollback_target: f64,
+        /// Mouse-drag selection anchor (visible_row, col) at mouse-down.
+        pub(crate) sel_start: Option<(usize, usize)>,
+        /// Mouse-drag selection end (visible_row, col); updated on move.
+        pub(crate) sel_end: Option<(usize, usize)>,
+        /// True while the left button is held over the terminal.
+        pub(crate) sel_dragging: bool,
     }
 
     /// Standard 16-color ANSI palette.
@@ -622,6 +737,9 @@ mod windows_impl {
                         title,
                         scrollback: 0.0,
                         scrollback_target: 0.0,
+                        sel_start: None,
+                        sel_end: None,
+                        sel_dragging: false,
                     };
                     self.terminals.push(inst);
                     self.active = idx;

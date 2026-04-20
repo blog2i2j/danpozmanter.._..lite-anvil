@@ -101,7 +101,6 @@ pub struct RenCache {
     cells_prev: [u32; CELLS_X * CELLS_Y],
     pub screen: RenRect,
     pub last_clip: RenRect,
-    pub show_debug: bool,
 }
 
 impl RenCache {
@@ -112,7 +111,6 @@ impl RenCache {
             cells_prev: [0xFF_FF_FF_FF; CELLS_X * CELLS_Y],
             screen: RenRect::default(),
             last_clip: RenRect::default(),
-            show_debug: false,
         };
         // cells_prev = 0xFFFFFFFF → first frame fully dirty.
         c.cells_prev.fill(0xFF_FF_FF_FF);

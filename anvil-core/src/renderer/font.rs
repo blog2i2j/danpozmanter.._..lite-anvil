@@ -65,6 +65,39 @@ pub fn set_skip_prewarm(skip: bool) {
     SKIP_PREWARM.with(|c| c.set(skip));
 }
 
+thread_local! {
+    /// Weak references to every `FontInner` loaded on this thread so
+    /// memory-pressure paths (occluded window, macOS memory-pressure
+    /// signal) can walk them and drop cached glyph bitmaps.
+    static FONT_REGISTRY: std::cell::RefCell<Vec<std::sync::Weak<parking_lot::Mutex<FontInner>>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Record a live font so `clear_glyph_caches` can find it later.
+pub(crate) fn register_font(f: &FontRef) {
+    FONT_REGISTRY.with(|r| {
+        let mut r = r.borrow_mut();
+        r.retain(|w| w.upgrade().is_some());
+        r.push(std::sync::Arc::downgrade(f));
+    });
+}
+
+/// Clear the per-font glyph cache for every font on this thread. The
+/// next draw will re-rasterise glyphs on demand.
+pub fn clear_glyph_caches() {
+    FONT_REGISTRY.with(|r| {
+        let mut r = r.borrow_mut();
+        r.retain(|w| {
+            if let Some(arc) = w.upgrade() {
+                arc.lock().glyphs.clear();
+                true
+            } else {
+                false
+            }
+        });
+    });
+}
+
 // ── Antialiasing / Hinting ────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -377,82 +410,3 @@ pub fn is_whitespace(cp: u32) -> bool {
 
 pub type FontRef = Arc<Mutex<FontInner>>;
 
-/// A font or font-group handle.
-/// A single font has `fonts.len() == 1`; a group has multiple entries.
-pub struct RenFont(pub Vec<FontRef>);
-
-impl RenFont {
-    pub fn new(inner: FontInner) -> Self {
-        RenFont(vec![Arc::new(Mutex::new(inner))])
-    }
-
-    fn first(&self) -> parking_lot::MutexGuard<'_, FontInner> {
-        self.0[0].lock()
-    }
-
-    pub fn get_width(&self, text: &str, tab_offset: f32) -> f32 {
-        self.0[0].lock().text_width(text, tab_offset)
-    }
-    pub fn get_height(&self) -> i32 {
-        self.first().height
-    }
-    pub fn get_size(&self) -> f32 {
-        self.first().size
-    }
-    pub fn get_tab_size(&self) -> i32 {
-        self.first().tab_size
-    }
-    pub fn set_size(&self, size: f32) {
-        for f in &self.0 {
-            let mut g = f.lock();
-            g.size = size;
-            let _ = g.recompute_metrics();
-        }
-    }
-    pub fn set_tab_size(&self, n: i32) {
-        for f in &self.0 {
-            f.lock().tab_size = n;
-        }
-    }
-    pub fn get_path(&self) -> String {
-        self.first().path.clone()
-    }
-
-    pub fn copy_with(
-        &self,
-        size: Option<f32>,
-        antialiasing: Option<Antialiasing>,
-        hinting: Option<Hinting>,
-    ) -> Result<RenFont, String> {
-        let mut refs = Vec::with_capacity(self.0.len());
-        for arc in &self.0 {
-            let g = arc.lock();
-            let aa = antialiasing.unwrap_or(g.antialiasing);
-            let h = hinting.unwrap_or(g.hinting);
-            let sz = size.unwrap_or(g.size);
-            let new_inner = FontInner::load(&g.path, sz, aa, h)?;
-            refs.push(Arc::new(Mutex::new(new_inner)));
-        }
-        Ok(RenFont(refs))
-    }
-}
-
-// ── Parse font option strings ─────────────────────────────────────────────────
-
-pub fn parse_antialiasing(s: &str) -> Result<Antialiasing, String> {
-    match s {
-        "none" => Ok(Antialiasing::None),
-        "grayscale" => Ok(Antialiasing::Grayscale),
-        "subpixel" => Ok(Antialiasing::Subpixel),
-        other => Err(format!("unknown antialiasing: {other}")),
-    }
-}
-
-pub fn parse_hinting(s: &str) -> Result<Hinting, String> {
-    match s {
-        "none" => Ok(Hinting::None),
-        "slight" => Ok(Hinting::Slight),
-        "full" => Ok(Hinting::Full),
-        other => Err(format!("unknown hinting: {other}")),
-    }
-}

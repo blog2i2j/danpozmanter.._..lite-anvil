@@ -1,8 +1,8 @@
-/// Trait-based subsystem definitions for optional editor features.
-///
-/// Each subsystem represents a feature that Lite-Anvil includes but
-/// Nano-Anvil omits. The `EditorSubsystems` container holds an
-/// `Option` for each, and the event loop dispatches conditionally.
+//! Trait-based subsystem definitions for optional editor features.
+//!
+//! Each subsystem represents a feature that Lite-Anvil includes but
+//! Nano-Anvil omits. The `EditorSubsystems` container holds an
+//! `Option` for each, and the event loop dispatches conditionally.
 
 /// Sidebar file tree panel.
 pub trait SidebarSubsystem {

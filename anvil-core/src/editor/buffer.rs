@@ -59,8 +59,10 @@ impl BomType {
         }
     }
 
-    /// Parse from string representation.
-    pub fn from_str(s: &str) -> BomType {
+    /// Parse from string representation. Returns `BomType::None` for
+    /// unrecognised input rather than failing, so this is deliberately
+    /// infallible rather than implementing `std::str::FromStr`.
+    pub fn parse(s: &str) -> BomType {
         match s {
             "utf-8" => BomType::Utf8,
             "utf-16-be" => BomType::Utf16Be,
@@ -1508,7 +1510,7 @@ mod tests {
             BomType::Utf16Be,
             BomType::Utf16Le,
         ] {
-            assert_eq!(BomType::from_str(bt.as_str()), bt);
+            assert_eq!(BomType::parse(bt.as_str()), bt);
         }
     }
 

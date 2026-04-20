@@ -111,18 +111,60 @@ install_linux() {
         "$icon_dir/nano-anvil.png" \
         "$icon_dir/note-anvil.png" 2>/dev/null || true
 
-    # If we previously installed to the *other* prefix (system vs user),
-    # the older PNG may still win the theme lookup. Drop both old paths
-    # so the freshly-installed one is the only candidate.
+    # User install: if ANY previous install ever put an anvil icon
+    # system-wide (and left behind a stale / incomplete set), KDE's
+    # KIconLoader prefers the system path and will fall back to the
+    # mime-type icon for any app whose PNG is only in ~/.local. So
+    # instead of wiping the system copies (which requires sudo), we
+    # top them up: if a writable system hicolor dir already contains
+    # lite-anvil.png or nano-anvil.png, copy note-anvil.png (and the
+    # others) alongside them so the theme lookup resolves for every
+    # app. Silently no-op if the dirs aren't writable.
     if [ "$SYSTEM" -eq 0 ]; then
-        # User install — wipe any old system-prefix icons. (No sudo: only
-        # cleans up if the user has perms.)
-        rm -f /usr/local/share/icons/hicolor/256x256/apps/lite-anvil.png \
-              /usr/local/share/icons/hicolor/256x256/apps/nano-anvil.png \
-              /usr/local/share/icons/hicolor/256x256/apps/note-anvil.png \
-              /usr/share/icons/hicolor/256x256/apps/lite-anvil.png \
-              /usr/share/icons/hicolor/256x256/apps/nano-anvil.png \
-              /usr/share/icons/hicolor/256x256/apps/note-anvil.png 2>/dev/null || true
+        for sys_icons in \
+            /usr/local/share/icons/hicolor/256x256/apps \
+            /usr/share/icons/hicolor/256x256/apps; do
+            if [ -w "$sys_icons" ]; then
+                if [ -f "$sys_icons/lite-anvil.png" ] \
+                   || [ -f "$sys_icons/nano-anvil.png" ]; then
+                    cp -f "$stage_dir/lite-anvil.png" "$sys_icons/lite-anvil.png" 2>/dev/null || true
+                    [ -f "$stage_dir/nano-anvil.png" ] && \
+                        cp -f "$stage_dir/nano-anvil.png" "$sys_icons/nano-anvil.png" 2>/dev/null || true
+                    [ -f "$stage_dir/note-anvil.png" ] && \
+                        cp -f "$stage_dir/note-anvil.png" "$sys_icons/note-anvil.png" 2>/dev/null || true
+                    touch "$sys_icons/lite-anvil.png" \
+                          "$sys_icons/nano-anvil.png" \
+                          "$sys_icons/note-anvil.png" 2>/dev/null || true
+                    local sys_root="${sys_icons%/256x256/apps}"
+                    rm -f "$sys_root/icon-theme.cache" 2>/dev/null || true
+                    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+                        gtk-update-icon-cache -f -t "$sys_root" 2>/dev/null || true
+                    fi
+                fi
+            fi
+        done
+    fi
+
+    # System install: strip any pre-existing user-local .desktop / icon
+    # copies so KDE's KIconLoader can't pick a stale user-local entry
+    # with the wrong `Icon=` over the fresh system copy. XDG priority
+    # has user-local entries shadowing system, which is why a prior
+    # `./install.sh` run + now `./install.sh --system` can leave the
+    # user-local shadow winning and the system icon ignored.
+    if [ "$SYSTEM" -eq 1 ]; then
+        rm -f "$HOME/.local/share/applications/lite-anvil.desktop" \
+              "$HOME/.local/share/applications/nano-anvil.desktop" \
+              "$HOME/.local/share/applications/note-anvil.desktop" \
+              "$HOME/.local/share/icons/hicolor/256x256/apps/lite-anvil.png" \
+              "$HOME/.local/share/icons/hicolor/256x256/apps/nano-anvil.png" \
+              "$HOME/.local/share/icons/hicolor/256x256/apps/note-anvil.png" \
+              "$HOME/.local/bin/lite-anvil" \
+              "$HOME/.local/bin/nano-anvil" \
+              "$HOME/.local/bin/note-anvil" 2>/dev/null || true
+        rm -f "$HOME/.local/share/icons/hicolor/icon-theme.cache" 2>/dev/null || true
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+        fi
     fi
 
     if command -v update-desktop-database >/dev/null 2>&1; then
@@ -135,9 +177,89 @@ install_linux() {
     # GTK falls back to per-file scanning and picks up our new PNG.
     local icon_root="${icon_dir%/256x256/apps}"
     $sudo_cmd rm -f "$icon_root/icon-theme.cache" 2>/dev/null || true
+    # Ensure the hicolor root has an `index.theme`. KDE/Plasma's
+    # KIconLoader skips a hicolor root that isn't a real theme, which
+    # means a user-install (`~/.local/share/icons/hicolor/`) is ignored
+    # unless the root is registered. Without this, KDE found icons that
+    # had also been installed system-wide (from an earlier
+    # `--system` run) but silently fell through to the mime-type
+    # fallback for any icon present only in the user root -- e.g.
+    # `Icon=note-anvil` after a fresh user install resolved to the
+    # Breeze text-markdown notebook. Writing the minimum spec-compliant
+    # `index.theme` fixes the lookup for every hicolor-only icon this
+    # install ships.
+    if [ ! -f "$icon_root/index.theme" ]; then
+        $sudo_cmd tee "$icon_root/index.theme" >/dev/null <<'EOF'
+[Icon Theme]
+Name=Hicolor
+Comment=Fallback icon theme
+Directories=16x16/apps,22x22/apps,24x24/apps,32x32/apps,48x48/apps,64x64/apps,128x128/apps,256x256/apps,512x512/apps,scalable/apps
+
+[16x16/apps]
+Size=16
+Type=Fixed
+Context=Applications
+
+[22x22/apps]
+Size=22
+Type=Fixed
+Context=Applications
+
+[24x24/apps]
+Size=24
+Type=Fixed
+Context=Applications
+
+[32x32/apps]
+Size=32
+Type=Fixed
+Context=Applications
+
+[48x48/apps]
+Size=48
+Type=Fixed
+Context=Applications
+
+[64x64/apps]
+Size=64
+Type=Fixed
+Context=Applications
+
+[128x128/apps]
+Size=128
+Type=Fixed
+Context=Applications
+
+[256x256/apps]
+Size=256
+Type=Fixed
+Context=Applications
+
+[512x512/apps]
+Size=512
+Type=Fixed
+Context=Applications
+
+[scalable/apps]
+Size=48
+Type=Scalable
+MinSize=8
+MaxSize=512
+Context=Applications
+EOF
+    fi
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then
         ${sudo_cmd:-} gtk-update-icon-cache -f -t "$icon_root" 2>/dev/null || true
     fi
+    # KDE / Plasma: rebuild the sycoca cache + the per-user icon cache
+    # so newly-installed .desktop files and icons show up in the
+    # taskbar without a session restart.
+    if command -v kbuildsycoca6 >/dev/null 2>&1; then
+        ${sudo_cmd:-} kbuildsycoca6 --noincremental 2>/dev/null || true
+    elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+        ${sudo_cmd:-} kbuildsycoca5 --noincremental 2>/dev/null || true
+    fi
+    rm -f "$HOME/.cache/icon-cache.kcache" 2>/dev/null || true
 
     echo "Installed lite-anvil, nano-anvil, and note-anvil to $bin_dir/"
 

@@ -36,6 +36,7 @@ pub mod terminal_buffer;
 pub mod terminal_panel;
 #[cfg(windows)]
 pub mod terminal_windows;
+pub mod test_runner;
 pub mod title_view;
 pub mod tokenizer;
 pub mod toolbar_view;

@@ -15,7 +15,23 @@ use crate::editor::main_loop::{normalize_path, AutoreloadState};
 use crate::editor::markdown_preview::MarkdownPreviewState;
 use crate::editor::picker;
 use crate::editor::storage;
+use crate::editor::tokenizer::Token;
 use crate::editor::view::View;
+
+/// Per-buffer tokenizer result cache. Stores `tokenize_line` output keyed
+/// by 1-based line index, invalidated in bulk when the buffer's
+/// `change_id` advances. Lets scrolling reuse tokens for lines that
+/// haven't changed instead of re-running the regex engine every frame.
+pub(crate) struct TokenCache {
+    pub change_id: i64,
+    pub lines: HashMap<usize, std::sync::Arc<Vec<Token>>>,
+}
+
+impl Default for TokenCache {
+    fn default() -> Self {
+        Self { change_id: -1, lines: HashMap::new() }
+    }
+}
 
 /// Everything the editor tracks per open tab: the view state, the path
 /// on disk, the saved-state fingerprint for dirty detection, and a few
@@ -42,6 +58,9 @@ pub(crate) struct OpenDoc {
     /// as the buffer's current change_id matches. Avoids rehashing the
     /// whole buffer 4+ times per render frame for tab labels and status.
     pub dirty_cache: std::cell::Cell<Option<(i64, bool)>>,
+    /// Per-line tokenize cache. Reused across frames so scrolling does
+    /// not re-tokenize lines whose content is unchanged.
+    pub token_cache: std::cell::RefCell<TokenCache>,
     /// Rendered markdown preview state. Idle (zero-cost) until the user
     /// toggles preview on for this tab.
     pub preview: MarkdownPreviewState,
@@ -192,6 +211,7 @@ pub(crate) fn open_file_into(path: &str, docs: &mut Vec<OpenDoc>, use_git: bool)
         cached_scroll_y: -1.0,
         cached_hint_count: 0,
         dirty_cache: std::cell::Cell::new(None),
+        token_cache: std::cell::RefCell::new(TokenCache::default()),
         preview: MarkdownPreviewState::default(),
     });
     true
@@ -295,6 +315,7 @@ pub(crate) fn restore_project_session(
                 cached_scroll_y: -1.0,
                 cached_hint_count: 0,
                 dirty_cache: std::cell::Cell::new(None),
+                token_cache: std::cell::RefCell::new(TokenCache::default()),
                 preview: MarkdownPreviewState::default(),
             });
         } else if open_file_into(file, docs, use_git) {

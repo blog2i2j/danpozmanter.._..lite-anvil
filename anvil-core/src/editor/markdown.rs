@@ -86,7 +86,6 @@ pub enum Block {
         inlines: Vec<Span>,
     },
     Code {
-        #[allow(dead_code)]
         lang: Option<String>,
         text: String,
     },
@@ -100,7 +99,6 @@ pub enum Block {
         items: Vec<ListItem>,
     },
     Table {
-        #[allow(dead_code)]
         alignments: Vec<Alignment>,
         head: Vec<Vec<Span>>,
         rows: Vec<Vec<Vec<Span>>>,

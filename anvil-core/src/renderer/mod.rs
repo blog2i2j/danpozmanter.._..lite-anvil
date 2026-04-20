@@ -95,10 +95,41 @@ pub fn native_end_frame() {
     });
 }
 
-/// Drop the renderer cache, releasing FontRef arcs held by previous draw commands.
-#[allow(dead_code)]
-pub fn reset_cache() {
+/// Drop per-window caches that are cheap to rebuild on next draw.
+/// Called when the window is occluded/hidden so we don't hold onto
+/// megabytes of glyph bitmaps and render-cache command buffers while
+/// the compositor isn't showing our frames.
+pub fn drop_caches() {
     CACHE.with(|c| {
         *c.borrow_mut() = None;
     });
+    font::clear_glyph_caches();
+}
+
+/// macOS memory-pressure level.  `Some(0)` normal, `Some(1)` warn,
+/// `Some(2)` critical, `None` when the sysctl isn't available (non-
+/// macOS or the node doesn't exist on the running kernel).
+#[cfg(target_os = "macos")]
+pub fn macos_memory_pressure_level() -> Option<u32> {
+    use std::ffi::CString;
+    let name = CString::new("kern.memorystatus_vm_pressure_level").ok()?;
+    let mut value: u32 = 0;
+    let mut size: libc::size_t = std::mem::size_of::<u32>();
+    // SAFETY: `name` is a NUL-terminated C string we just created;
+    // `value` and `size` are valid for reads/writes of sizeof(u32).
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            &mut value as *mut u32 as *mut libc::c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc == 0 { Some(value) } else { None }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn macos_memory_pressure_level() -> Option<u32> {
+    None
 }
