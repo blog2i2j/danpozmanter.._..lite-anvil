@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.11.4] - 2026-04-21 -- AppImage fix: bundle runtime libraries.
+
+* AppImage builds now copy every non-core-glibc shared library the binary links against into `$APPDIR/usr/lib/` (recursively via `ldd`) and `AppRun` sets `LD_LIBRARY_PATH` to that directory. Prior builds shipped only the editor binary, so `libpcre2-8.so.0` and `libgcc_s.so.1` were resolved against the host — which fails on distros that have moved past libpcre2 soname 0, on Alpine/musl via gcompat, and on NixOS via `appimage-run`. Core glibc / loader libraries (`libc`, `libm`, `libdl`, `libpthread`, `ld-linux-*`, etc.).
+
 ## [2.11.3] - 2026-04-20 -- macOS memory: renderer command allocs + shared cached_render.
 
 * Reverted the 2.11.1 / 2.11.2 memory work (LSP prune, `malloc_zone_pressure_relief`, token-cache window cap) — they regressed..

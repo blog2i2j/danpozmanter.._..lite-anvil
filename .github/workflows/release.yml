@@ -94,6 +94,46 @@ jobs:
           curl -L -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
 
+          # Core glibc / loader libraries must match the host kernel and
+          # ABI, so they stay unbundled. Everything else the binary links
+          # against (libpcre2-8, libgcc_s, and any transitive SDL /
+          # freetype deps that survived static linking) gets copied into
+          # $APPDIR/usr/lib so the AppImage runs on distros that don't
+          # happen to have those libraries — Alpine via gcompat, NixOS
+          # via appimage-run, and mainline distros that have migrated
+          # libpcre2 past soname 0.
+          is_system_lib() {
+              case "$(basename "$1")" in
+                  ld-linux-*.so.*|libc.so.*|libm.so.*|libdl.so.*|\
+                  libpthread.so.*|librt.so.*|libresolv.so.*|libnsl.so.*|\
+                  libutil.so.*|libcrypt.so.*|libBrokenLocale.so.*|\
+                  libanl.so.*|libmemusage.so.*|libmvec.so.*|\
+                  libnss_*.so.*|libthread_db.so.*)
+                      return 0 ;;
+                  *)
+                      return 1 ;;
+              esac
+          }
+
+          bundle_deps() {
+              local root_binary="$1" libdir="$2"
+              mkdir -p "$libdir"
+              local pending=("$root_binary")
+              while [ ${#pending[@]} -gt 0 ]; do
+                  local target="${pending[0]}"
+                  pending=("${pending[@]:1}")
+                  while IFS= read -r lib; do
+                      is_system_lib "$lib" && continue
+                      local dest="$libdir/$(basename "$lib")"
+                      [ -f "$dest" ] && continue
+                      cp -Lf "$lib" "$dest"
+                      chmod 755 "$dest"
+                      pending+=("$dest")
+                  done < <(ldd "$target" 2>/dev/null \
+                           | awk '$2 == "=>" && $3 ~ /^\// { print $3 }')
+              done
+          }
+
           build_appimage() {
               local app="$1"
               local data_src="$2"
@@ -102,12 +142,17 @@ jobs:
 
               local dir="${app}.AppDir"
               rm -rf "$dir"
-              mkdir -p "$dir/usr/bin" "$dir/usr/share/applications" \
+              mkdir -p "$dir/usr/bin" "$dir/usr/lib" \
+                       "$dir/usr/share/applications" \
                        "$dir/usr/share/icons/hicolor/256x256/apps" \
                        "$dir/usr/share/${app}"
 
               cp "target/release/${app}" "$dir/usr/bin/${app}"
               chmod 755 "$dir/usr/bin/${app}"
+              bundle_deps "$dir/usr/bin/${app}" "$dir/usr/lib"
+              echo "Bundled libs for ${app}:"
+              ls -1 "$dir/usr/lib" || true
+
               cp -r "$data_src" "$dir/usr/share/${app}/data"
               cp "$desktop_src" "$dir/usr/share/applications/${app}.desktop"
               cp "$desktop_src" "$dir/${app}.desktop"
