@@ -47,7 +47,9 @@ pub(crate) struct OpenDoc {
     pub git_changes: HashMap<usize, LineChange>,
     /// Cached tokenized render lines. Invalidated only when the buffer
     /// content changes (edits, undo/redo, reload), NOT on cursor movement.
-    pub cached_render: Vec<RenderLine>,
+    /// Wrapped in `Arc` so cache-hit redraws can share by refcount
+    /// instead of cloning the whole `Vec<RenderLine>` each frame.
+    pub cached_render: std::sync::Arc<Vec<RenderLine>>,
     /// The buffer change_id when cached_render was last built.
     pub cached_change_id: i64,
     /// The scroll-y when cached_render was last built (rebuild on scroll).
@@ -206,7 +208,7 @@ pub(crate) fn open_file_into(path: &str, docs: &mut Vec<OpenDoc>, use_git: bool)
         indent_type: indent_type.to_string(),
         indent_size,
         git_changes,
-        cached_render: Vec::new(),
+        cached_render: std::sync::Arc::new(Vec::new()),
         cached_change_id: -1,
         cached_scroll_y: -1.0,
         cached_hint_count: 0,
@@ -310,7 +312,7 @@ pub(crate) fn restore_project_session(
                 indent_type: "soft".to_string(),
                 indent_size: 2,
                 git_changes: HashMap::new(),
-                cached_render: Vec::new(),
+                cached_render: std::sync::Arc::new(Vec::new()),
                 cached_change_id: -1,
                 cached_scroll_y: -1.0,
                 cached_hint_count: 0,

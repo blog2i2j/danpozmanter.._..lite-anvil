@@ -1,5 +1,11 @@
 # Change Log
 
+## [2.11.3] - 2026-04-20 -- macOS memory: renderer command allocs + shared cached_render.
+
+* Reverted the 2.11.1 / 2.11.2 memory work (LSP prune, `malloc_zone_pressure_relief`, token-cache window cap) — they regressed..
+* Renderer draw-text commands no longer heap-allocate per call. `DrawTextCmd.fonts` is now `Arc<[FontRef]>` shared with the font slot in `NativeDrawContext`, so `draw_text` performs one refcount bump instead of the old `Vec<FontRef>` clone. `DrawTextCmd.text` is `Box<str>` rather than `String`, dropping the per-cmd capacity field.
+* `OpenDoc.cached_render` is now `Arc<Vec<RenderLine>>`. Cache-hit redraws share by refcount instead of cloning the entire `Vec<RenderLine>` (which itself holds `Vec<RenderToken>` with `String` allocations per token). Invalidation on buffer change / scroll / hint-count is unchanged.
+
 ## [2.11.2] - 2026-04-20 -- macOS CI fix: `unsafe extern` block for edition 2024.
 
 * Fixed macOS CI compile error: the `malloc_zone_pressure_relief` FFI block added in 2.11.1 was a bare `extern "C"`, which Rust 2024 rejects (`extern blocks must be unsafe`). Changed to `unsafe extern "C"`.

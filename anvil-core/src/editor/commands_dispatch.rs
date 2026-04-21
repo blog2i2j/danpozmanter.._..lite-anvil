@@ -98,7 +98,7 @@ match cmd.as_str() {
             indent_type: "soft".to_string(),
             indent_size: 2,
             git_changes: std::collections::HashMap::new(),
-            cached_render: Vec::new(),
+            cached_render: std::sync::Arc::new(Vec::new()),
             cached_change_id: -1,
             cached_scroll_y: -1.0,
             cached_hint_count: 0,
@@ -384,7 +384,7 @@ match cmd.as_str() {
     // Invalidate the per-tab render cache so wrapped and
     // un-wrapped layouts don't get re-used across toggles.
     for d in docs.iter_mut() {
-        d.cached_render.clear();
+        d.cached_render = std::sync::Arc::new(Vec::new());
         d.cached_change_id = -1;
     }
     // Reset horizontal scroll when turning wrap on so the

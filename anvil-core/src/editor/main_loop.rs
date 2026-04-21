@@ -725,7 +725,7 @@ pub fn run(
                             indent_type: "soft".to_string(),
                             indent_size: 2,
                             git_changes: std::collections::HashMap::new(),
-                            cached_render: Vec::new(),
+                            cached_render: std::sync::Arc::new(Vec::new()),
                             cached_change_id: -1,
                             cached_scroll_y: -1.0,
                             cached_hint_count: 0,
@@ -763,7 +763,7 @@ pub fn run(
             indent_type: "soft".to_string(),
             indent_size: 4,
             git_changes: std::collections::HashMap::new(),
-            cached_render: Vec::new(),
+            cached_render: std::sync::Arc::new(Vec::new()),
             cached_change_id: -1,
             cached_scroll_y: -1.0,
             cached_hint_count: 0,
@@ -911,7 +911,8 @@ pub fn run(
     // avoid borrow-checker conflicts with the immutable doc borrow during
     // rendering. Includes the tab index so we write to the correct doc even
     // if the user switched tabs between frames.
-    let mut pending_render_cache: Option<(usize, Vec<RenderLine>, i64, f64)> = None;
+    let mut pending_render_cache: Option<(usize, std::sync::Arc<Vec<RenderLine>>, i64, f64)> =
+        None;
 
     // Background file load job. When a large file is being loaded on a
     // background thread, this holds the progress atomics and the join handle.
@@ -1606,44 +1607,27 @@ pub fn run(
 
         // Idle-drop: after N seconds with no events, release cached
         // glyph bitmaps and command buffers. Next interactive frame
-        // rebuilds them lazily. Also prune the LSP state's per-file
-        // HashMaps and the per-doc tokenize cache - those are the
-        // actual steady-state growth on macOS, not the glyph cache.
+        // rebuilds them lazily. This is most of the benefit of the
+        // macOS memory-pressure hook without needing platform FFI.
         if !dropped_caches_for_idle
             && last_activity.elapsed().as_secs() >= IDLE_DROP_SECS
         {
             crate::renderer::drop_caches();
-            let open_paths: Vec<String> =
-                docs.iter().map(|d| d.path.clone()).collect();
-            lsp_state.prune_to_open_files(open_paths.iter().map(|s| s.as_str()));
-            for d in docs.iter() {
-                let mut cache = d.token_cache.borrow_mut();
-                cache.lines.clear();
-                cache.change_id = -1;
-            }
             dropped_caches_for_idle = true;
         }
 
         // macOS memory-pressure probe. `None` on other platforms.
         if last_mem_pressure_check.elapsed().as_secs() >= MEM_PRESSURE_CHECK_SECS {
             last_mem_pressure_check = Instant::now();
-            if let Some(level) = crate::renderer::macos_memory_pressure_level()
-                && level >= 1
-            {
-                // WARN or CRITICAL -- release everything reclaimable.
-                crate::renderer::drop_caches();
-                let open_paths: Vec<String> =
-                    docs.iter().map(|d| d.path.clone()).collect();
-                lsp_state.prune_to_open_files(open_paths.iter().map(|s| s.as_str()));
-                compiled_syntax_cache.retain(|k, _| {
-                    docs.iter()
-                        .any(|d| d.path.rsplit('.').next().unwrap_or("") == k)
-                });
-                compiled_syntax_mru.retain(|k| compiled_syntax_cache.contains_key(k));
-                for d in docs.iter() {
-                    let mut cache = d.token_cache.borrow_mut();
-                    cache.lines.clear();
-                    cache.change_id = -1;
+            if let Some(level) = crate::renderer::macos_memory_pressure_level() {
+                if level >= 1 {
+                    // WARN or CRITICAL -- release everything reclaimable.
+                    crate::renderer::drop_caches();
+                    compiled_syntax_cache.retain(|k, _| {
+                        docs.iter()
+                            .any(|d| d.path.rsplit('.').next().unwrap_or("") == k)
+                    });
+                    compiled_syntax_mru.retain(|k| compiled_syntax_cache.contains_key(k));
                 }
             }
         }
@@ -3082,7 +3066,7 @@ pub fn run(
                                             Ok(())
                                         });
                                         doc.cached_change_id = -1;
-                                        doc.cached_render.clear();
+                                        doc.cached_render = std::sync::Arc::new(Vec::new());
                                         if let Ok((cid, sig)) = buffer::with_buffer(buf_id, |b| {
                                             Ok((b.change_id, buffer::content_signature(&b.lines)))
                                         }) {
@@ -5313,7 +5297,7 @@ pub fn run(
                             indent_type: indent_type.to_string(),
                             indent_size,
                             git_changes: std::collections::HashMap::new(),
-                            cached_render: Vec::new(),
+                            cached_render: std::sync::Arc::new(Vec::new()),
                             cached_change_id: -1,
                             cached_scroll_y: -1.0,
                             cached_hint_count: 0,
@@ -6104,7 +6088,7 @@ pub fn run(
                             // change_id comparison to catch the bump
                             // (cheap, and removes any reliance on it).
                             doc.cached_change_id = -1;
-                            doc.cached_render.clear();
+                            doc.cached_render = std::sync::Arc::new(Vec::new());
                             // Keep the "saved" markers aligned with
                             // what we just wrote so the next external
                             // change doesn't misfire the Reload prompt.
@@ -6954,15 +6938,31 @@ pub fn run(
                         let current_change_id =
                             buffer::with_buffer(buf_id, |b| Ok(b.change_id)).unwrap_or(0);
                         let scroll_y_now = dv.scroll_y;
-                        let render_lines = if let Some(doc) = docs.get(active_tab) {
-                            if doc.cached_change_id == current_change_id
-                                && (doc.cached_scroll_y - scroll_y_now).abs() < 0.5
-                                && doc.cached_hint_count == hints.len()
-                                && !doc.cached_render.is_empty()
-                            {
-                                doc.cached_render.clone()
+                        // `cached_render` is Arc-shared so the cache-hit
+                        // path is a refcount bump rather than a full
+                        // `Vec<RenderLine>` clone per redraw.
+                        let render_lines: std::sync::Arc<Vec<RenderLine>> =
+                            if let Some(doc) = docs.get(active_tab) {
+                                if doc.cached_change_id == current_change_id
+                                    && (doc.cached_scroll_y - scroll_y_now).abs() < 0.5
+                                    && doc.cached_hint_count == hints.len()
+                                    && !doc.cached_render.is_empty()
+                                {
+                                    std::sync::Arc::clone(&doc.cached_render)
+                                } else {
+                                    std::sync::Arc::new(build_render_lines(
+                                        buf_id,
+                                        dv,
+                                        &style,
+                                        ext,
+                                        compiled_opt.as_ref(),
+                                        wrap_w,
+                                        hints,
+                                        Some(&doc.token_cache),
+                                    ))
+                                }
                             } else {
-                                build_render_lines(
+                                std::sync::Arc::new(build_render_lines(
                                     buf_id,
                                     dv,
                                     &style,
@@ -6971,20 +6971,8 @@ pub fn run(
                                     wrap_w,
                                     hints,
                                     Some(&doc.token_cache),
-                                )
-                            }
-                        } else {
-                            build_render_lines(
-                                buf_id,
-                                dv,
-                                &style,
-                                ext,
-                                compiled_opt.as_ref(),
-                                wrap_w,
-                                hints,
-                                Some(&doc.token_cache),
-                            )
-                        };
+                                ))
+                            };
                         let (sel, cursor_line, cursor_col, all_cursors) =
                             buffer::with_buffer(buf_id, |b| {
                                 let mut sels = Vec::new();

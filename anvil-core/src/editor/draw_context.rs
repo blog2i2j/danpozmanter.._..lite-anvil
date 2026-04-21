@@ -8,8 +8,10 @@ use crate::editor::view::DrawContext;
 #[cfg(feature = "sdl")]
 pub struct NativeDrawContext {
     /// Fonts available for drawing, indexed by a simple slot system.
-    /// Slot 0 = UI font, Slot 1 = code font, etc.
-    fonts: Vec<Vec<FontRef>>,
+    /// Slot 0 = UI font, Slot 1 = code font, etc. Each slot is an
+    /// `Arc<[FontRef]>` so `draw_text` can hand the renderer cache a
+    /// cheap refcount-bump clone instead of cloning the whole `Vec`.
+    fonts: Vec<std::sync::Arc<[FontRef]>>,
 }
 
 #[cfg(feature = "sdl")]
@@ -29,11 +31,11 @@ impl NativeDrawContext {
     /// Register a font group in a slot, returning the slot index.
     pub fn add_font(&mut self, font_refs: Vec<FontRef>) -> u64 {
         let id = self.fonts.len() as u64;
-        self.fonts.push(font_refs);
+        self.fonts.push(std::sync::Arc::<[FontRef]>::from(font_refs));
         id
     }
 
-    fn get_font(&self, font_id: u64) -> Option<&Vec<FontRef>> {
+    fn get_font(&self, font_id: u64) -> Option<&std::sync::Arc<[FontRef]>> {
         self.fonts.get(font_id as usize)
     }
 }
@@ -63,12 +65,13 @@ impl DrawContext for NativeDrawContext {
         let Some(fonts) = self.get_font(font_id) else {
             return x;
         };
-        let fonts = fonts.clone();
+        // Cheap refcount bump instead of the previous per-call `Vec` clone.
+        let fonts = std::sync::Arc::clone(fonts);
         let mut result_x = x;
         with_cache(|c| {
             result_x = c.push_draw_text(
                 fonts,
-                text.to_string(),
+                Box::<str>::from(text),
                 x as f32,
                 y as i32,
                 RenColor {
@@ -103,7 +106,7 @@ impl DrawContext for NativeDrawContext {
 
     fn font_width(&self, font_id: u64, text: &str) -> f64 {
         self.get_font(font_id)
-            .and_then(|fonts| fonts.first())
+            .and_then(|fonts| fonts.as_ref().first())
             .map(|f| f.lock().text_width(text, 0.0) as f64)
             .unwrap_or(0.0)
     }

@@ -66,8 +66,14 @@ impl RenRect {
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 pub struct DrawTextCmd {
-    pub fonts: Vec<FontRef>,
-    pub text: String,
+    /// Shared-ownership slice of the font group. Cloning this per
+    /// command is a single atomic refcount bump - the per-call
+    /// `Vec<FontRef>` alloc the old shape required (thousands per
+    /// frame on a code view) is gone.
+    pub fonts: std::sync::Arc<[FontRef]>,
+    /// `Box<str>` rather than `String` so the cmd never carries the
+    /// 8-byte `capacity` field. The buffer is write-once.
+    pub text: Box<str>,
     pub x: f32,
     pub y: i32,
     pub color: RenColor,
@@ -172,10 +178,12 @@ impl RenCache {
     }
 
     /// Push a DrawText command. Returns the new x position after the text.
+    /// Takes the font slice and text by shared/owned handles so the
+    /// caller does not re-allocate per call.
     pub fn push_draw_text(
         &mut self,
-        fonts: Vec<FontRef>,
-        text: String,
+        fonts: std::sync::Arc<[FontRef]>,
+        text: Box<str>,
         x: f32,
         y: i32,
         color: RenColor,
