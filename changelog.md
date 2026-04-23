@@ -1,5 +1,14 @@
 # Change Log
 
+## [2.11.6] - 2026-04-23 -- Tab overflow UI, tab right-click menu, Open Recent stale-render fix, preview auto-scroll fix.
+
+* Tab bar overflow: tab names truncate to 10 chars + `...` when they don't all fit.
+* Overflow dropdown button (filled down-arrow) at the right edge opens a left-anchored menu listing every open tab; click an entry to switch. Left-click only; Escape closes.
+* Hover tooltip on a truncated tab shows the full filename and (space permitting) the path.
+* Right-click on a tab shows Close / Close All to the Right / Close All to the Left / Close All; batch closes trigger the unsaved-changes nag if any target is modified.
+* Fixed: Open Recent could flash the previous project's file — the deferred render-cache now validates the doc's `buffer_id`, not just the tab index.
+* Fixed: markdown preview auto-scrolled while typing; the per-frame scroll lerp is gone and `scroll_y` tracks `target_scroll_y` directly.
+
 ## [2.11.5] - 2026-04-21 -- Fix: `core:new-window` (Ctrl+Shift+N) was a no-op.
 
 * `core:new-window`dispatch handler (regression fix).

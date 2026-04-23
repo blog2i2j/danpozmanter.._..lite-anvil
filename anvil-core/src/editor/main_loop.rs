@@ -452,6 +452,17 @@ fn comment_marker_for_path(
         .map(|(o, c)| CommentMarker::Block(o.clone(), c.clone()))
 }
 
+/// Truncate a tab name to `max_chars` characters, appending an ellipsis when
+/// the original is longer. Operates on Unicode scalar values so multi-byte
+/// filenames don't get cut mid-codepoint.
+fn truncate_tab_name(name: &str, max_chars: usize) -> String {
+    if name.chars().count() <= max_chars {
+        return name.to_string();
+    }
+    let prefix: String = name.chars().take(max_chars).collect();
+    format!("{prefix}...")
+}
+
 /// Run the editor main loop. Returns true if restart requested.
 #[cfg(feature = "sdl")]
 pub fn run(
@@ -801,6 +812,13 @@ pub fn run(
     // robust against any SDL_GetModState quirks on different platforms/WMs.
     let mut shift_held = false;
     let mut tab_dragging: Option<usize> = None;
+    // Dropdown menu shown when the tab bar overflows — lists every open tab
+    // so they stay reachable even when their labels don't fit on screen.
+    let mut tab_dropdown_open: bool = false;
+    // Tab targeted by the most recent right-click; consumed by the
+    // tab:close / close-left / close-right / close-all dispatch in the
+    // context-menu click handler.
+    let mut tab_menu_target: Option<usize> = None;
     let mut mouse_x: f64 = 0.0;
     let mut mouse_y: f64 = 0.0;
     let mut sidebar_entries: Vec<SidebarEntry>;
@@ -911,8 +929,18 @@ pub fn run(
     // avoid borrow-checker conflicts with the immutable doc borrow during
     // rendering. Includes the tab index so we write to the correct doc even
     // if the user switched tabs between frames.
-    let mut pending_render_cache: Option<(usize, std::sync::Arc<Vec<RenderLine>>, i64, f64)> =
-        None;
+    // Tuple layout: (tab_idx, buffer_id, lines, change_id, scroll_y). The
+    // `buffer_id` is the only stable identity for the doc being rendered —
+    // `tab_idx` aliases once the docs list is swapped (e.g. Open Recent
+    // replaces the project), so the consumer uses `buffer_id` to skip
+    // applying a render captured against a now-defunct doc.
+    let mut pending_render_cache: Option<(
+        usize,
+        u64,
+        std::sync::Arc<Vec<RenderLine>>,
+        i64,
+        f64,
+    )> = None;
 
     // Background file load job. When a large file is being loaded on a
     // background thread, this holds the progress atomics and the join handle.
@@ -1757,6 +1785,13 @@ pub fn run(
                             }
                             _ => {}
                         }
+                    }
+
+                    // Tab overflow dropdown: Escape dismisses it.
+                    if tab_dropdown_open && key.as_str() == "escape" {
+                        tab_dropdown_open = false;
+                        redraw = true;
+                        continue;
                     }
 
                     // Context menu intercepts keys when visible.
@@ -3916,13 +3951,28 @@ pub fn run(
 
                     // Context menu: left-click outside dismisses, right-click shows.
                     if context_menu.visible && *button == MouseButton::Left {
+                        use crate::editor::view::DrawContext as _;
                         // Check if click is inside the context menu area.
                         let item_h = style.font_height + style.padding_y;
                         let menu_h = item_h * context_menu.items.len() as f64 + style.padding_y;
                         let menu_x = context_menu.position.x;
                         let menu_y = context_menu.position.y;
-                        // Approximate menu width.
-                        let menu_w = 200.0;
+                        // Compute the actual menu width from its items so hits
+                        // don't fall outside the drawn area (the old 200px
+                        // approximation missed wider labels like
+                        // "Close All to the Right").
+                        let mut menu_w = 0.0_f64;
+                        for it in &context_menu.items {
+                            let w = draw_ctx.font_width(style.font, &it.text);
+                            let total_w = if let Some(ref info) = it.info {
+                                w + draw_ctx.font_width(style.font, info)
+                                    + style.padding_x * 3.0
+                            } else {
+                                w + style.padding_x * 2.0
+                            };
+                            menu_w = menu_w.max(total_w);
+                        }
+                        menu_w = menu_w.max(120.0);
                         if *x >= menu_x
                             && *x <= menu_x + menu_w
                             && *y >= menu_y
@@ -3956,6 +4006,70 @@ pub fn run(
                                         redraw = true;
                                         continue;
                                     }
+                                    if cmd.starts_with("tab:close") {
+                                        if let Some(target) = tab_menu_target.take() {
+                                            // `indices` is built in reverse so
+                                            // removing by index stays valid as the
+                                            // list shrinks.
+                                            let total = docs.len();
+                                            let indices: Vec<usize> = match cmd.as_str() {
+                                                "tab:close" => {
+                                                    if target < total { vec![target] } else { vec![] }
+                                                }
+                                                "tab:close-right" => {
+                                                    ((target + 1)..total).rev().collect()
+                                                }
+                                                "tab:close-left" => {
+                                                    (0..target).rev().collect()
+                                                }
+                                                "tab:close-all" => {
+                                                    (0..total).rev().collect()
+                                                }
+                                                _ => vec![],
+                                            };
+                                            // If any targeted doc is modified, nag
+                                            // on the first modified one and skip
+                                            // the rest — matches the close-button
+                                            // safety net so we don't silently drop
+                                            // unsaved buffers in a batch op.
+                                            let first_mod = indices
+                                                .iter()
+                                                .rev()
+                                                .copied()
+                                                .find(|&i| {
+                                                    docs.get(i).is_some_and(doc_is_modified)
+                                                });
+                                            if let Some(i) = first_mod {
+                                                let name = docs[i].name.clone();
+                                                nag = Nag::UnsavedChanges {
+                                                    message: nag_msg_close(&name),
+                                                    tab_to_close: Some(i),
+                                                };
+                                            } else {
+                                                for i in indices {
+                                                    if let Some(d) = docs.get(i) {
+                                                        autoreload.unwatch(&d.path);
+                                                    }
+                                                    docs.remove(i);
+                                                }
+                                                if active_tab >= docs.len()
+                                                    && !docs.is_empty()
+                                                {
+                                                    active_tab = docs.len() - 1;
+                                                } else if docs.is_empty() {
+                                                    active_tab = 0;
+                                                } else if cmd == "tab:close-left" {
+                                                    // The active tab's index
+                                                    // shifted by the number of
+                                                    // docs removed from the left.
+                                                    active_tab =
+                                                        active_tab.saturating_sub(target);
+                                                }
+                                            }
+                                        }
+                                        redraw = true;
+                                        continue;
+                                    }
                                     if let Some(doc) = docs.get_mut(active_tab) {
                                         let marker =
                                             comment_marker_for_path(&doc.path, &syntax_index);
@@ -3981,6 +4095,136 @@ pub fn run(
                     }
 
                     if *button == MouseButton::Right {
+                        // Right-click on a tab: show the tab context menu (Close /
+                        // Close others left|right / Close all). Clicks on the
+                        // dropdown button or empty tab-bar space are swallowed so
+                        // the doc Cut/Copy/Paste menu doesn't spawn off-screen at
+                        // the far right of the window.
+                        let tab_h_rc = if !single_file_mode && !docs.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        if *y < tab_h_rc {
+                            use crate::editor::view::DrawContext as _;
+                            let sidebar_w_tab = if subsystems.has_sidebar()
+                                && sidebar_visible
+                            {
+                                sidebar_width
+                            } else {
+                                0.0
+                            };
+                            let (ww_tr, wh_tr, _, _) = crate::window::get_window_size();
+                            let win_w_tr = ww_tr as f64;
+                            let win_h_tr = wh_tr as f64;
+                            let close_btn_w = draw_ctx.font_width(style.icon_font, "C")
+                                + style.padding_x;
+                            let dropdown_btn_w =
+                                (style.font_height + style.padding_x * 2.0).ceil();
+                            let avail_full = (win_w_tr - sidebar_w_tab).max(0.0);
+                            let mut full_total = 0.0_f64;
+                            for doc in docs.iter() {
+                                let label = if doc_is_modified(doc) {
+                                    format!("*{}", doc.name)
+                                } else {
+                                    doc.name.clone()
+                                };
+                                full_total += draw_ctx.font_width(style.font, &label)
+                                    + style.padding_x * 2.0
+                                    + close_btn_w
+                                    + style.divider_size;
+                            }
+                            let tabs_overflow = full_total > avail_full;
+                            let tabs_right_limit = if tabs_overflow {
+                                (win_w_tr - dropdown_btn_w).max(sidebar_w_tab)
+                            } else {
+                                win_w_tr
+                            };
+
+                            // Walk tabs in the same order / widths as the draw
+                            // pass, find the one under the click.
+                            let mut tx = sidebar_w_tab;
+                            let mut hit: Option<usize> = None;
+                            for (i, doc) in docs.iter().enumerate() {
+                                let display_label = if tabs_overflow {
+                                    let base = truncate_tab_name(&doc.name, 10);
+                                    if doc_is_modified(doc) {
+                                        format!("*{base}")
+                                    } else {
+                                        base
+                                    }
+                                } else if doc_is_modified(doc) {
+                                    format!("*{}", doc.name)
+                                } else {
+                                    doc.name.clone()
+                                };
+                                let tw = draw_ctx.font_width(style.font, &display_label)
+                                    + style.padding_x * 2.0
+                                    + close_btn_w
+                                    + style.divider_size;
+                                let hit_right = (tx + tw).min(tabs_right_limit);
+                                if *x >= tx && *x < hit_right {
+                                    hit = Some(i);
+                                    break;
+                                }
+                                tx += tw;
+                                if tx >= tabs_right_limit {
+                                    break;
+                                }
+                            }
+                            if let Some(i) = hit {
+                                tab_menu_target = Some(i);
+                                let total = docs.len();
+                                let mut items = vec![MenuItem {
+                                    text: "Close".into(),
+                                    info: None,
+                                    command: Some("tab:close".into()),
+                                    separator: false,
+                                }];
+                                if i + 1 < total {
+                                    items.push(MenuItem {
+                                        text: "Close All to the Right".into(),
+                                        info: None,
+                                        command: Some("tab:close-right".into()),
+                                        separator: false,
+                                    });
+                                }
+                                if i > 0 {
+                                    items.push(MenuItem {
+                                        text: "Close All to the Left".into(),
+                                        info: None,
+                                        command: Some("tab:close-left".into()),
+                                        separator: false,
+                                    });
+                                }
+                                if total > 1 {
+                                    items.push(MenuItem {
+                                        text: "Close All".into(),
+                                        info: None,
+                                        command: Some("tab:close-all".into()),
+                                        separator: false,
+                                    });
+                                }
+                                // Estimate the menu size and clamp its origin so
+                                // it never renders off-screen. The context menu's
+                                // draw_native sizes itself to the widest label.
+                                let item_h = style.font_height + style.padding_y;
+                                let menu_h =
+                                    item_h * items.len() as f64 + style.padding_y;
+                                let mut menu_w = 0.0_f64;
+                                for it in &items {
+                                    menu_w = menu_w.max(
+                                        draw_ctx.font_width(style.font, &it.text)
+                                            + style.padding_x * 2.0,
+                                    );
+                                }
+                                let menu_x = x.min(win_w_tr - menu_w - 2.0).max(0.0);
+                                let menu_y = y.min(win_h_tr - menu_h - 2.0).max(tab_h_rc);
+                                context_menu.show(menu_x, menu_y, items);
+                            }
+                            redraw = true;
+                            continue;
+                        }
                         // Right-click on a sidebar entry: show a rename menu
                         // for that entry rather than the editor context menu.
                         let sidebar_w_rc = if subsystems.has_sidebar() && sidebar_visible {
@@ -4387,27 +4631,153 @@ pub fn run(
                     } else {
                         0.0
                     };
-                    if *y < tab_h && !docs.is_empty() {
+
+                    // Overflow dropdown handling: if the list is open, clicks inside
+                    // the list pick that tab; clicks elsewhere close it. If it's
+                    // closed, a click on the dropdown button opens it. Left-click
+                    // only — right-click in the tab bar should fall through to the
+                    // regular context menu path, not toggle the dropdown.
+                    if !docs.is_empty() && !single_file_mode && *button == MouseButton::Left {
                         use crate::editor::view::DrawContext as _;
+                        let (ww_tab, _, _, _) = crate::window::get_window_size();
+                        let width = ww_tab as f64;
                         let close_btn_w =
                             draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
-                        let mut tx = sidebar_w;
-                        let mut clicked_close = false;
-                        for (i, doc) in docs.iter().enumerate() {
-                            let tab_label = if doc_is_modified(doc) {
+                        let dropdown_btn_w =
+                            (style.font_height + style.padding_x * 2.0).ceil();
+                        let avail_full = (width - sidebar_w).max(0.0);
+                        let mut full_total = 0.0_f64;
+                        for doc in docs.iter() {
+                            let label = if doc_is_modified(doc) {
                                 format!("*{}", doc.name)
                             } else {
                                 doc.name.clone()
                             };
-                            let tw = draw_ctx.font_width(style.font, &tab_label)
+                            full_total += draw_ctx.font_width(style.font, &label)
                                 + style.padding_x * 2.0
                                 + close_btn_w
                                 + style.divider_size;
-                            if *x >= tx && *x < tx + tw {
-                                // Check if click is on the close button area.
+                        }
+                        let tabs_overflow = full_total > avail_full;
+
+                        if tab_dropdown_open && tabs_overflow {
+                            let item_h = style.font_height + style.padding_y;
+                            let mut list_w = 0.0_f64;
+                            for doc in docs.iter() {
+                                let label = if doc_is_modified(doc) {
+                                    format!("*{}", doc.name)
+                                } else {
+                                    doc.name.clone()
+                                };
+                                list_w = list_w.max(
+                                    draw_ctx.font_width(style.font, &label)
+                                        + style.padding_x * 3.0,
+                                );
+                            }
+                            let (_, wh_tab, _, _) = crate::window::get_window_size();
+                            let height = wh_tab as f64;
+                            let avail_list_w = (width - sidebar_w - 4.0).max(40.0);
+                            list_w = list_w.max(120.0).min(avail_list_w);
+                            let mut list_x = width - list_w - 2.0;
+                            if list_x < sidebar_w + 2.0 {
+                                list_x = sidebar_w + 2.0;
+                            }
+                            let max_list_h = (height - tab_h - 4.0).max(item_h);
+                            let raw_list_h = item_h * docs.len() as f64 + style.padding_y;
+                            let list_h = raw_list_h.min(max_list_h);
+                            let list_y = tab_h + 1.0;
+                            if *x >= list_x
+                                && *x < list_x + list_w
+                                && *y >= list_y
+                                && *y < list_y + list_h
+                            {
+                                let rel = (*y - list_y - style.padding_y / 2.0) / item_h;
+                                let idx = rel.floor().max(0.0) as usize;
+                                if idx < docs.len() {
+                                    active_tab = idx;
+                                    if let Some(doc) = docs.get_mut(idx) {
+                                        doc.view.target_scroll_y = doc.view.scroll_y;
+                                    }
+                                }
+                                tab_dropdown_open = false;
+                                redraw = true;
+                                continue;
+                            }
+                            // Click outside the list dismisses it; also dismiss on a
+                            // click on the dropdown button itself (toggle behavior).
+                            tab_dropdown_open = false;
+                            let btn_x = width - dropdown_btn_w;
+                            if *y < tab_h && *x >= btn_x {
+                                redraw = true;
+                                continue;
+                            }
+                        } else if tabs_overflow && *y < tab_h {
+                            let btn_x = width - dropdown_btn_w;
+                            if *x >= btn_x {
+                                tab_dropdown_open = true;
+                                redraw = true;
+                                continue;
+                            }
+                        }
+                    }
+
+                    if *y < tab_h && !docs.is_empty() {
+                        use crate::editor::view::DrawContext as _;
+                        let (ww_tab_click, _, _, _) = crate::window::get_window_size();
+                        let width = ww_tab_click as f64;
+                        let close_btn_w =
+                            draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
+                        let dropdown_btn_w =
+                            (style.font_height + style.padding_x * 2.0).ceil();
+
+                        // Recompute overflow decision to match the draw pass, and
+                        // truncate labels accordingly.
+                        let avail_full = (width - sidebar_w).max(0.0);
+                        let mut full_total = 0.0_f64;
+                        for doc in docs.iter() {
+                            let label = if doc_is_modified(doc) {
+                                format!("*{}", doc.name)
+                            } else {
+                                doc.name.clone()
+                            };
+                            full_total += draw_ctx.font_width(style.font, &label)
+                                + style.padding_x * 2.0
+                                + close_btn_w
+                                + style.divider_size;
+                        }
+                        let tabs_overflow = full_total > avail_full;
+                        let tabs_right_limit = if tabs_overflow {
+                            (width - dropdown_btn_w).max(sidebar_w)
+                        } else {
+                            width
+                        };
+
+                        let mut tx = sidebar_w;
+                        let mut clicked_close = false;
+                        for (i, doc) in docs.iter().enumerate() {
+                            let display_label = if tabs_overflow {
+                                let base = truncate_tab_name(&doc.name, 10);
+                                if doc_is_modified(doc) {
+                                    format!("*{base}")
+                                } else {
+                                    base
+                                }
+                            } else if doc_is_modified(doc) {
+                                format!("*{}", doc.name)
+                            } else {
+                                doc.name.clone()
+                            };
+                            let tw = draw_ctx.font_width(style.font, &display_label)
+                                + style.padding_x * 2.0
+                                + close_btn_w
+                                + style.divider_size;
+                            // Clip clickable area to the visible region.
+                            let click_right = (tx + tw).min(tabs_right_limit);
+                            if *x >= tx && *x < click_right {
+                                // Check if click is on the close button area (only
+                                // when the close icon is actually on-screen).
                                 let close_x = tx + tw - close_btn_w - style.divider_size;
-                                if *x >= close_x {
-                                    // Close this tab (with nag check).
+                                if *x >= close_x && close_x + close_btn_w <= tabs_right_limit {
                                     if doc_is_modified(doc) {
                                         nag = Nag::UnsavedChanges { message: nag_msg_close(&doc.name), tab_to_close: Some(i) };
                                     } else {
@@ -4421,7 +4791,6 @@ pub fn run(
                                 } else {
                                     active_tab = i;
                                     tab_dragging = Some(i);
-                                    // Cancel any pending scroll on the target tab.
                                     if let Some(doc) = docs.get_mut(i) {
                                         doc.view.target_scroll_y = doc.view.scroll_y;
                                     }
@@ -4429,6 +4798,9 @@ pub fn run(
                                 break;
                             }
                             tx += tw;
+                            if tx >= tabs_right_limit {
+                                break;
+                            }
                         }
                         let _ = clicked_close;
                         redraw = true;
@@ -4912,9 +5284,42 @@ pub fn run(
                             let sidebar_w = if sidebar_visible { sidebar_width } else { 0.0 };
                             let close_w =
                                 draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
+                            // Match the draw pass: if the tab bar overflows, labels
+                            // are truncated, so the drag hit-test must use the same
+                            // widths or reorder lands on the wrong tab.
+                            let (ww_dr, _, _, _) = crate::window::get_window_size();
+                            let width = ww_dr as f64;
+                            let dropdown_btn_w =
+                                (style.font_height + style.padding_x * 2.0).ceil();
+                            let avail_full = (width - sidebar_w).max(0.0);
+                            let mut full_total = 0.0_f64;
+                            for doc in docs.iter() {
+                                let l = if doc_is_modified(doc) {
+                                    format!("*{}", doc.name)
+                                } else {
+                                    doc.name.clone()
+                                };
+                                full_total += draw_ctx.font_width(style.font, &l)
+                                    + style.padding_x * 2.0
+                                    + close_w
+                                    + style.divider_size;
+                            }
+                            let tabs_overflow = full_total > avail_full;
+                            let tabs_right_limit = if tabs_overflow {
+                                (width - dropdown_btn_w).max(sidebar_w)
+                            } else {
+                                width
+                            };
                             let mut tx = sidebar_w;
                             for (i, doc) in docs.iter().enumerate() {
-                                let label = if doc_is_modified(doc) {
+                                let label = if tabs_overflow {
+                                    let base = truncate_tab_name(&doc.name, 10);
+                                    if doc_is_modified(doc) {
+                                        format!("*{base}")
+                                    } else {
+                                        base
+                                    }
+                                } else if doc_is_modified(doc) {
                                     format!("*{}", doc.name)
                                 } else {
                                     doc.name.clone()
@@ -4923,7 +5328,8 @@ pub fn run(
                                     + style.padding_x * 2.0
                                     + close_w
                                     + style.divider_size;
-                                if *x >= tx && *x < tx + tw && i != drag_idx {
+                                let hit_right = (tx + tw).min(tabs_right_limit);
+                                if *x >= tx && *x < hit_right && i != drag_idx {
                                     docs.swap(i, drag_idx);
                                     tab_dragging = Some(i);
                                     active_tab = i;
@@ -4931,6 +5337,9 @@ pub fn run(
                                     break;
                                 }
                                 tx += tw;
+                                if tx >= tabs_right_limit {
+                                    break;
+                                }
                             }
                         }
                         continue;
@@ -6149,12 +6558,22 @@ pub fn run(
             // stale. This MUST be outside the `if redraw` block -- otherwise
             // the cache sits unconsumed until the next event and forces an
             // infinite render loop if we try to force redraw when pending.
-            if let Some((tab_idx, lines, cid, sy)) = pending_render_cache.take() {
+            if let Some((tab_idx, rendered_buf_id, lines, cid, sy)) =
+                pending_render_cache.take()
+            {
                 if let Some(doc_mut) = docs.get_mut(tab_idx) {
-                    doc_mut.cached_render = lines;
-                    doc_mut.cached_change_id = cid;
-                    doc_mut.cached_scroll_y = sy;
-                    doc_mut.cached_hint_count = lsp_state.inlay_hints.len();
+                    // Only apply the cache if the doc at this tab still wraps the
+                    // same buffer that produced the render. A project switch
+                    // (Open Recent) swaps the entire docs list, so tab_idx can
+                    // alias a completely different file — in that case, a stale
+                    // render would overwrite the fresh doc's empty cache and
+                    // cause the previous project's text to flash on-screen.
+                    if doc_mut.view.buffer_id == Some(rendered_buf_id) {
+                        doc_mut.cached_render = lines;
+                        doc_mut.cached_change_id = cid;
+                        doc_mut.cached_scroll_y = sy;
+                        doc_mut.cached_hint_count = lsp_state.inlay_hints.len();
+                    }
                 }
             }
 
@@ -6381,6 +6800,18 @@ pub fn run(
                 crate::renderer::native_begin_frame();
                 crate::editor::app_state::clip_init(width, height);
 
+                // Tab-bar overlay state captured during the tab draw pass and
+                // consumed later (just before native_end_frame) to render the
+                // hover tooltip and overflow dropdown list. Drawing those at
+                // the end keeps them on top of the sidebar / breadcrumb / doc
+                // view — otherwise the breadcrumb would paint over them.
+                let mut tab_hover: Option<usize> = None;
+                let mut tab_overlay_tbh: f64 = 0.0;
+                let mut tab_overlay_overflow: bool = false;
+                let mut tab_overlay_rects: Vec<(f64, f64, String, String)> = Vec::new();
+                let mut tab_overlay_btn_right: f64 = width;
+                let mut tab_overlay_btn_w: f64 = 0.0;
+
                 // Draw tab bar (hidden in single-file mode).
                 let _tab_bar_h = if !single_file_mode && !docs.is_empty() {
                     let tbh = style.font_height + style.padding_y * 3.0;
@@ -6393,17 +6824,75 @@ pub fn run(
                         tbh,
                         style.background2.to_array(),
                     );
-                    let mut tx = sidebar_w;
-                    for (i, doc) in docs.iter().enumerate() {
-                        let tab_label = if doc_is_modified(doc) {
+
+                    let close_w =
+                        draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
+                    let dropdown_btn_w =
+                        (style.font_height + style.padding_x * 2.0).ceil();
+
+                    // Measure full-width tab bar (no truncation) to decide whether to
+                    // enter overflow mode. Reserving the dropdown button space keeps
+                    // the decision stable once overflow is on.
+                    let avail_full = (width - sidebar_w).max(0.0);
+                    let mut full_total = 0.0_f64;
+                    for doc in docs.iter() {
+                        let label = if doc_is_modified(doc) {
                             format!("*{}", doc.name)
                         } else {
                             doc.name.clone()
                         };
-                        let close_w = draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
-                        let tw = draw_ctx.font_width(style.font, &tab_label)
+                        full_total += draw_ctx.font_width(style.font, &label)
+                            + style.padding_x * 2.0
+                            + close_w
+                            + style.divider_size;
+                    }
+                    let tabs_overflow = full_total > avail_full;
+                    if !tabs_overflow {
+                        tab_dropdown_open = false;
+                    }
+                    let tabs_right_limit = if tabs_overflow {
+                        (width - dropdown_btn_w).max(sidebar_w)
+                    } else {
+                        width
+                    };
+                    tab_overlay_tbh = tbh;
+                    tab_overlay_overflow = tabs_overflow;
+                    tab_overlay_btn_right = width;
+                    tab_overlay_btn_w = dropdown_btn_w;
+
+                    // Cache displayed labels (with truncation when overflowing) and
+                    // per-tab rects so the tooltip pass below and the hit-tests can
+                    // reuse them without recomputing widths.
+                    let mut tab_rects: Vec<(f64, f64, String, String)> =
+                        Vec::with_capacity(docs.len());
+
+                    let mut tx = sidebar_w;
+                    for (i, doc) in docs.iter().enumerate() {
+                        let full_label = if doc_is_modified(doc) {
+                            format!("*{}", doc.name)
+                        } else {
+                            doc.name.clone()
+                        };
+                        let display_label = if tabs_overflow {
+                            let base = truncate_tab_name(&doc.name, 10);
+                            if doc_is_modified(doc) {
+                                format!("*{base}")
+                            } else {
+                                base
+                            }
+                        } else {
+                            full_label.clone()
+                        };
+                        let tw = draw_ctx.font_width(style.font, &display_label)
                             + style.padding_x * 2.0
                             + close_w;
+                        tab_rects.push((tx, tw, display_label.clone(), full_label.clone()));
+                        // Don't draw tabs that fall entirely past the dropdown limit;
+                        // they're still reachable via the dropdown menu.
+                        if tx >= tabs_right_limit {
+                            tx += tw + style.divider_size;
+                            continue;
+                        }
                         let bg = if i == active_tab {
                             style.background.to_array()
                         } else {
@@ -6414,15 +6903,17 @@ pub fn run(
                         } else {
                             style.dim.to_array()
                         };
+                        // Clip this tab to the area left of the dropdown button.
+                        let tab_visible_w = (tabs_right_limit - tx).max(0.0).min(tw);
+                        draw_ctx.set_clip_rect(tx, 0.0, tab_visible_w, tbh);
                         draw_ctx.draw_rect(tx, accent_h, tw, tbh - accent_h, bg);
-                        // Accent line on top of active tab.
                         if i == active_tab {
                             draw_ctx.draw_rect(tx, 0.0, tw, accent_h, style.accent.to_array());
                         }
                         let text_y_tab = accent_h + (tbh - accent_h - style.font_height) / 2.0;
                         draw_ctx.draw_text(
                             style.font,
-                            &tab_label,
+                            &display_label,
                             tx + style.padding_x,
                             text_y_tab,
                             fg,
@@ -6460,8 +6951,60 @@ pub fn run(
                             tbh - style.padding_y,
                             style.dim.to_array(),
                         );
+                        // Restore clip for the rest of the tab bar / dropdown draw.
+                        crate::editor::app_state::clip_init(width, height);
+
+                        // Track hover for tooltip: only when not over the close icon,
+                        // so the close-button interaction is unambiguous.
+                        if mouse_y < tbh
+                            && mouse_x >= tx
+                            && mouse_x < (tx + tw).min(tabs_right_limit)
+                            && !close_hovered
+                        {
+                            tab_hover = Some(i);
+                        }
                         tx += tw + style.divider_size;
                     }
+
+                    // Overflow dropdown button. The arrow is drawn as a filled
+                    // triangle built from horizontal one-pixel bars rather than a
+                    // font glyph — the icons.ttf bundle doesn't include a
+                    // chevron-down, and the regular font's "v" looked like a
+                    // letter, not an icon.
+                    if tabs_overflow {
+                        let btn_x = width - dropdown_btn_w;
+                        let btn_hovered = mouse_y < tbh && mouse_x >= btn_x;
+                        let btn_bg = if btn_hovered || tab_dropdown_open {
+                            style.line_highlight.to_array()
+                        } else {
+                            style.background2.to_array()
+                        };
+                        draw_ctx.draw_rect(btn_x, accent_h, dropdown_btn_w, tbh - accent_h, btn_bg);
+                        draw_ctx.draw_rect(
+                            btn_x,
+                            accent_h,
+                            style.divider_size,
+                            tbh - accent_h,
+                            style.divider.to_array(),
+                        );
+                        let arrow_color = style.text.to_array();
+                        let arrow_h = (style.font_height * 0.45).round().max(4.0);
+                        let arrow_w_px = arrow_h * 2.0;
+                        let arrow_cx = btn_x + dropdown_btn_w / 2.0;
+                        let arrow_top =
+                            accent_h + (tbh - accent_h - arrow_h) / 2.0;
+                        let rows = arrow_h as i32;
+                        for i in 0..rows {
+                            let progress = i as f64 / rows as f64;
+                            let row_w = (arrow_w_px * (1.0 - progress)).max(1.0);
+                            let row_x = arrow_cx - row_w / 2.0;
+                            let row_y = arrow_top + i as f64;
+                            draw_ctx.draw_rect(row_x, row_y, row_w, 1.0, arrow_color);
+                        }
+                    } else {
+                        tab_dropdown_open = false;
+                    }
+
                     draw_ctx.draw_rect(
                         sidebar_w,
                         tbh - style.divider_size,
@@ -6470,8 +7013,16 @@ pub fn run(
                         style.divider.to_array(),
                     );
                     crate::editor::app_state::clip_init(width, height);
+
+                    // Hand off per-tab rects to the deferred overlay pass. That
+                    // pass runs after every other panel has drawn, so the tooltip
+                    // and overflow dropdown aren't painted over by the breadcrumb
+                    // / sidebar / doc view that follow this block.
+                    tab_overlay_rects = tab_rects;
+
                     tbh
                 } else {
+                    tab_dropdown_open = false;
                     0.0
                 };
 
@@ -7102,8 +7653,13 @@ pub fn run(
                             active_tests.clear();
                         }
 
-                        pending_render_cache =
-                            Some((active_tab, render_lines, current_change_id, scroll_y_now));
+                        pending_render_cache = Some((
+                            active_tab,
+                            buf_id,
+                            render_lines,
+                            current_change_id,
+                            scroll_y_now,
+                        ));
                         // Draw bracket match underlines at cursor position.
                         if let Some(buf_id) = dv.buffer_id {
                             let bracket = buffer::with_buffer(buf_id, |b| {
@@ -7365,32 +7921,16 @@ pub fn run(
                                 doc.preview.layout.clear();
                             }
                             let rect = doc.preview.rect;
-                            // Smooth-scroll toward the target, clamped to
-                            // [0, max_scroll]. Snap to the target once the
-                            // remaining delta is under half a pixel so the
-                            // lerp actually terminates -- otherwise every
-                            // redraw advances scroll_y by an infinitesimal
-                            // fraction and forces the viewport to keep
-                            // shifting by one pixel whenever a repaint
-                            // fires for unrelated reasons.
-                            let diff =
-                                doc.preview.target_scroll_y - doc.preview.scroll_y;
-                            if diff.abs() < 0.5 {
-                                doc.preview.scroll_y = doc.preview.target_scroll_y;
-                            } else {
-                                doc.preview.scroll_y += diff * 0.25;
-                            }
+                            // No smooth scroll: track the target directly so
+                            // edits in the source that shrink `content_height`
+                            // (and with it `max_scroll`) can't drive a multi-
+                            // frame glide, which showed up as the preview
+                            // auto-scrolling while the user typed.
                             let max_scroll =
                                 (doc.preview.content_height - rect.h).max(0.0);
-                            if doc.preview.target_scroll_y > max_scroll {
-                                doc.preview.target_scroll_y = max_scroll;
-                            }
-                            if doc.preview.scroll_y > max_scroll {
-                                doc.preview.scroll_y = max_scroll;
-                            }
-                            if doc.preview.scroll_y < 0.0 {
-                                doc.preview.scroll_y = 0.0;
-                            }
+                            doc.preview.target_scroll_y =
+                                doc.preview.target_scroll_y.clamp(0.0, max_scroll);
+                            doc.preview.scroll_y = doc.preview.target_scroll_y;
                             // Divider between editor and preview.
                             use crate::editor::view::DrawContext as _;
                             draw_ctx.draw_rect(
@@ -8921,6 +9461,177 @@ pub fn run(
                         }
                     }
                 }
+
+                // Tab-bar overlays (hover tooltip + overflow dropdown list)
+                // render here so the breadcrumb / sidebar / doc view don't
+                // paint over them. The tab bar draw pass captured `tab_hover`,
+                // `tab_overlay_*`, and the per-tab rects; this pass consumes
+                // them without recomputing widths.
+                if tab_overlay_tbh > 0.0 {
+                    use crate::editor::view::DrawContext as _;
+                    crate::editor::app_state::clip_init(width, height);
+                    let tbh = tab_overlay_tbh;
+
+                    // Tooltip for a hovered (truncated) tab.
+                    if let Some(hi) = tab_hover {
+                        if tab_overlay_overflow {
+                            if let (Some(doc), Some((tx_h, tw_h, _, full_label))) =
+                                (docs.get(hi), tab_overlay_rects.get(hi))
+                            {
+                                let path = doc.path.clone();
+                                let tip_font = style.font;
+                                let name_w = draw_ctx.font_width(tip_font, full_label);
+                                let max_tip_w =
+                                    (width - sidebar_w - style.padding_x * 2.0).max(80.0);
+                                let path_full_w = draw_ctx.font_width(tip_font, &path);
+                                let (path_display, path_w) = if path_full_w
+                                    + style.padding_x * 2.0
+                                    <= max_tip_w
+                                {
+                                    (path.clone(), path_full_w)
+                                } else {
+                                    // Front-ellipsize: keep the rightmost (most
+                                    // specific) part of the path.
+                                    let ell = "...";
+                                    let ell_w = draw_ctx.font_width(tip_font, ell);
+                                    let mut trimmed: String = path.clone();
+                                    while trimmed.chars().count() > 1
+                                        && ell_w
+                                            + draw_ctx.font_width(tip_font, &trimmed)
+                                            + style.padding_x * 2.0
+                                            > max_tip_w
+                                    {
+                                        let mut ch = trimmed.chars();
+                                        ch.next();
+                                        trimmed = ch.as_str().to_string();
+                                    }
+                                    let out = format!("{ell}{trimmed}");
+                                    let w = draw_ctx.font_width(tip_font, &out);
+                                    (out, w)
+                                };
+                                let tip_w = name_w.max(path_w) + style.padding_x * 2.0;
+                                let tip_h = style.font_height * 2.0 + style.padding_y * 1.5;
+                                let tip_x = (tx_h + tw_h / 2.0 - tip_w / 2.0)
+                                    .max(sidebar_w)
+                                    .min((width - tip_w).max(sidebar_w));
+                                let tip_y = tbh + 2.0;
+                                draw_ctx.draw_rect(
+                                    tip_x - 1.0,
+                                    tip_y - 1.0,
+                                    tip_w + 2.0,
+                                    tip_h + 2.0,
+                                    style.divider.to_array(),
+                                );
+                                draw_ctx.draw_rect(
+                                    tip_x,
+                                    tip_y,
+                                    tip_w,
+                                    tip_h,
+                                    style.background.to_array(),
+                                );
+                                draw_ctx.draw_text(
+                                    tip_font,
+                                    full_label,
+                                    tip_x + style.padding_x,
+                                    tip_y + style.padding_y * 0.5,
+                                    style.text.to_array(),
+                                );
+                                draw_ctx.draw_text(
+                                    tip_font,
+                                    &path_display,
+                                    tip_x + style.padding_x,
+                                    tip_y + style.padding_y * 0.5 + style.font_height,
+                                    style.dim.to_array(),
+                                );
+                            }
+                        }
+                    }
+
+                    // Overflow dropdown list: right edge pinned to the dropdown
+                    // button's right edge (= window right), extends leftward.
+                    if tab_dropdown_open && tab_overlay_overflow {
+                        let item_h = style.font_height + style.padding_y;
+                        let mut list_w = 0.0_f64;
+                        for doc in docs.iter() {
+                            let label = if doc_is_modified(doc) {
+                                format!("*{}", doc.name)
+                            } else {
+                                doc.name.clone()
+                            };
+                            list_w = list_w.max(
+                                draw_ctx.font_width(style.font, &label) + style.padding_x * 3.0,
+                            );
+                        }
+                        let avail_list_w = (width - sidebar_w - 4.0).max(40.0);
+                        list_w = list_w.max(120.0).min(avail_list_w);
+                        let btn_right = tab_overlay_btn_right;
+                        let mut list_x = btn_right - list_w;
+                        if list_x < sidebar_w + 2.0 {
+                            list_x = sidebar_w + 2.0;
+                        }
+                        let max_list_h = (height - tbh - 4.0).max(item_h);
+                        let raw_list_h = item_h * docs.len() as f64 + style.padding_y;
+                        let list_h = raw_list_h.min(max_list_h);
+                        let list_y = tbh;
+                        draw_ctx.draw_rect(
+                            list_x - 1.0,
+                            list_y - 1.0,
+                            list_w + 2.0,
+                            list_h + 2.0,
+                            style.divider.to_array(),
+                        );
+                        draw_ctx.draw_rect(
+                            list_x,
+                            list_y,
+                            list_w,
+                            list_h,
+                            style.background.to_array(),
+                        );
+                        let mut iy = list_y + style.padding_y / 2.0;
+                        for (i, doc) in docs.iter().enumerate() {
+                            let label = if doc_is_modified(doc) {
+                                format!("*{}", doc.name)
+                            } else {
+                                doc.name.clone()
+                            };
+                            let row_hover = mouse_x >= list_x
+                                && mouse_x < list_x + list_w
+                                && mouse_y >= iy
+                                && mouse_y < iy + item_h;
+                            if i == active_tab {
+                                draw_ctx.draw_rect(
+                                    list_x,
+                                    iy,
+                                    list_w,
+                                    item_h,
+                                    style.line_highlight.to_array(),
+                                );
+                            } else if row_hover {
+                                draw_ctx.draw_rect(
+                                    list_x,
+                                    iy,
+                                    list_w,
+                                    item_h,
+                                    style.selection.to_array(),
+                                );
+                            }
+                            let color = if i == active_tab {
+                                style.accent.to_array()
+                            } else {
+                                style.text.to_array()
+                            };
+                            draw_ctx.draw_text(
+                                style.font,
+                                &label,
+                                list_x + style.padding_x,
+                                iy + (item_h - style.font_height) / 2.0,
+                                color,
+                            );
+                            iy += item_h;
+                        }
+                    }
+                }
+                let _ = tab_overlay_btn_w; // reserved for future hit-test overlays
 
                 // Draw context menu on top of everything.
                 if context_menu.visible {
