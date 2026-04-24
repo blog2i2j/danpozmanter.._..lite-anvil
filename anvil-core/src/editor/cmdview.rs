@@ -169,6 +169,13 @@ pub(crate) fn refresh_cmdview_suggestions(
 /// suggestions are rendered with the platform's native separator so
 /// the display stays consistent.
 pub(crate) fn path_suggest(text: &str, project_root: &str, dirs_only: bool) -> Vec<String> {
+    /// Cap the result set so `read_dir` + per-entry `file_type()` + sorting
+    /// stays snappy even when the user points cmdview at a directory with
+    /// thousands of entries (`/usr/bin`, big `node_modules`, etc.). 500 is
+    /// well more than fits in the visible suggestion list and keeps each
+    /// keystroke under a render frame on sluggish disks.
+    const MAX_SUGGESTIONS: usize = 500;
+
     let sep = std::path::MAIN_SEPARATOR;
     let home_key = if cfg!(target_os = "windows") {
         "USERPROFILE"
@@ -203,20 +210,32 @@ pub(crate) fn path_suggest(text: &str, project_root: &str, dirs_only: bool) -> V
         return results;
     };
     let prefix_lower = prefix.to_lowercase();
-    let mut entries_sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries_sorted.sort_by_key(|e| e.file_name());
-
-    let dir_has_trailing_sep = dir.ends_with('/') || dir.ends_with('\\');
-    for entry in entries_sorted {
-        let name = entry.file_name().to_string_lossy().to_string();
+    // Filter before sorting so the sort cost is O(matches·log(matches))
+    // instead of O(all·log(all)). For a directory with thousands of files
+    // and a specific typed prefix this is the difference between a snappy
+    // autocomplete and a noticeable stutter on every keystroke.
+    let mut matches: Vec<std::fs::DirEntry> = Vec::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name_os = entry.file_name();
+        let name = name_os.to_string_lossy();
         if name.starts_with('.') && !prefix.starts_with('.') {
             continue;
         }
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if dirs_only && !is_dir {
+        if !prefix_lower.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
             continue;
         }
-        if !prefix_lower.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
+        matches.push(entry);
+        if matches.len() >= MAX_SUGGESTIONS * 2 {
+            break;
+        }
+    }
+    matches.sort_by_key(|e| e.file_name());
+
+    let dir_has_trailing_sep = dir.ends_with('/') || dir.ends_with('\\');
+    for entry in matches {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if dirs_only && !is_dir {
             continue;
         }
         let display = if dir_has_trailing_sep || dir.is_empty() {
@@ -230,6 +249,9 @@ pub(crate) fn path_suggest(text: &str, project_root: &str, dirs_only: bool) -> V
             display
         };
         results.push(display);
+        if results.len() >= MAX_SUGGESTIONS {
+            break;
+        }
     }
     results
 }

@@ -25,10 +25,7 @@ pub fn encode_message(value: &Value) -> Result<String, String> {
 pub fn decode_messages(buffer: &str) -> Result<(Vec<Value>, String), String> {
     let mut messages = Vec::new();
     let mut remaining = buffer.to_string();
-    loop {
-        let Some(header_end) = remaining.find("\r\n\r\n") else {
-            break;
-        };
+    while let Some(header_end) = remaining.find("\r\n\r\n") {
         let header = &remaining[..header_end];
         let Some(content_length) = header.lines().find_map(|line| {
             line.split_once(':').and_then(|(k, v)| {
@@ -98,10 +95,7 @@ fn next_id() -> u64 {
 
 /// Parse LSP messages from a byte buffer, sending complete messages via the channel.
 pub fn parse_messages(buffer: &mut Vec<u8>, sender: &Sender<Value>) {
-    loop {
-        let Some(header_end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") else {
-            break;
-        };
+    while let Some(header_end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
         let header = String::from_utf8_lossy(&buffer[..header_end]);
         let Some(length) = header.lines().find_map(|line| {
             line.split_once(':').and_then(|(k, v)| {

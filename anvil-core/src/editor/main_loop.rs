@@ -463,6 +463,31 @@ fn truncate_tab_name(name: &str, max_chars: usize) -> String {
     format!("{prefix}...")
 }
 
+/// Map a Markdown fenced-code `lang` tag (e.g. from ```` ```python ````) to
+/// the file extension our bundled syntax index keys on. Unknown or empty
+/// tags fall back to the tag itself so anything the index already matches
+/// directly (like `sh`, `rs`, `go`) still works without a special case.
+fn markdown_lang_to_ext(lang: &str) -> &str {
+    match lang.to_ascii_lowercase().as_str() {
+        "rust" => "rs",
+        "python" | "python3" => "py",
+        "javascript" | "node" => "js",
+        "typescript" => "ts",
+        "shell" | "bash" | "zsh" => "sh",
+        "c++" | "cplusplus" => "cpp",
+        "c#" | "csharp" => "cs",
+        "golang" => "go",
+        "yaml" => "yml",
+        "markdown" => "md",
+        "ruby" => "rb",
+        "kotlin" => "kt",
+        "ocaml" => "ml",
+        "perl" => "pl",
+        "elixir" => "ex",
+        _ => lang,
+    }
+}
+
 /// Run the editor main loop. Returns true if restart requested.
 #[cfg(feature = "sdl")]
 pub fn run(
@@ -934,13 +959,9 @@ pub fn run(
     // `tab_idx` aliases once the docs list is swapped (e.g. Open Recent
     // replaces the project), so the consumer uses `buffer_id` to skip
     // applying a render captured against a now-defunct doc.
-    let mut pending_render_cache: Option<(
-        usize,
-        u64,
-        std::sync::Arc<Vec<RenderLine>>,
-        i64,
-        f64,
-    )> = None;
+    type PendingRenderCache =
+        Option<(usize, u64, std::sync::Arc<Vec<RenderLine>>, i64, f64)>;
+    let mut pending_render_cache: PendingRenderCache = None;
 
     // Background file load job. When a large file is being loaded on a
     // background thread, this holds the progress atomics and the join handle.
@@ -1029,6 +1050,22 @@ pub fn run(
             save_path: String,
             doc_tab: usize,
             from_save_as: bool,
+        },
+        /// "FILE already exists, overwrite?" — Save As targeted an existing
+        /// file that isn't the current doc's own path. Yes performs the
+        /// save; No returns to the Save As picker so the user can pick a
+        /// different name. Guards against autocomplete races where a
+        /// late-arriving suggestion silently retargets Enter.
+        OverwriteFile {
+            save_path: String,
+            doc_tab: usize,
+        },
+        /// "No extension detected, save anyway?" — Save As target has no
+        /// trailing `.ext`. Yes proceeds (and still checks for overwrite
+        /// next); No returns to the picker so the user can add one.
+        NoExtension {
+            save_path: String,
+            doc_tab: usize,
         },
     }
     impl Nag {
@@ -1927,8 +1964,14 @@ pub fn run(
                         redraw = true;
                     }
 
-                    // Command view (file/folder open) intercepts keys.
-                    if cmdview_active && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile || cmdview_mode == CmdViewMode::OpenRecent || cmdview_mode == CmdViewMode::Rename) {
+                    // Command view (file/folder open) intercepts keys — but
+                    // only while no nag is active. When a modal nag (overwrite,
+                    // create-dir, reload-from-disk) is up the cmdview stays on
+                    // screen but its keypress arm must step aside so Y / N /
+                    // Enter can reach the nag handler below.
+                    if cmdview_active
+                        && matches!(nag, Nag::None)
+                        && (subsystems.has_picker() || cmdview_mode == CmdViewMode::SaveAs || cmdview_mode == CmdViewMode::OpenFile || cmdview_mode == CmdViewMode::OpenRecent || cmdview_mode == CmdViewMode::Rename) {
                         /// Expand ~ and resolve relative paths to absolute.
                         /// On Windows, treat both `/` and `\` as absolute-path
                         /// indicators (`C:\...`) and use `USERPROFILE` for `~`.
@@ -2033,8 +2076,16 @@ pub fn run(
                                     redraw = true;
                                     continue;
                                 }
-                                // Use highlighted suggestion text, or current input.
-                                let chosen = if !cmdview_suggestions.is_empty()
+                                // In Save As, Enter commits exactly what the user
+                                // typed — never the highlighted suggestion — so
+                                // autocomplete races can't silently retarget the
+                                // save onto an existing file. Other modes keep
+                                // the old "use suggestion if one is highlighted"
+                                // behaviour so Enter on a sidebar match still
+                                // works.
+                                let chosen = if cmdview_mode == CmdViewMode::SaveAs {
+                                    cmdview_text.clone()
+                                } else if !cmdview_suggestions.is_empty()
                                     && cmdview_selected < cmdview_suggestions.len()
                                 {
                                     cmdview_suggestions[cmdview_selected].clone()
@@ -2253,6 +2304,47 @@ pub fn run(
                                             nag = Nag::CreateDir { parent: parent_str, save_path: save_path.clone(), doc_tab: active_tab, from_save_as: true };
                                             continue;
                                         }
+                                        // Warn if the target filename has no
+                                        // extension — common typo / forgot-to-
+                                        // type-.ext case. Check the last path
+                                        // segment so `/etc/hosts` (no ext) still
+                                        // nags, and `foo.bar/README` counts the
+                                        // filename as having no ext.
+                                        let fname = std::path::Path::new(&save_path)
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("");
+                                        let has_ext = fname
+                                            .rfind('.')
+                                            .is_some_and(|i| i > 0 && i < fname.len() - 1);
+                                        if !has_ext {
+                                            nag = Nag::NoExtension {
+                                                save_path: save_path.clone(),
+                                                doc_tab: active_tab,
+                                            };
+                                            redraw = true;
+                                            continue;
+                                        }
+                                        // If the target exists and isn't the
+                                        // current doc's own path, nag for
+                                        // overwrite confirmation. This blocks
+                                        // the autocomplete-races-Enter case
+                                        // where a late-arriving suggestion
+                                        // silently retargets the save.
+                                        let own_path = docs
+                                            .get(active_tab)
+                                            .map(|d| d.path.as_str())
+                                            .unwrap_or("");
+                                        if std::path::Path::new(&save_path).is_file()
+                                            && save_path != own_path
+                                        {
+                                            nag = Nag::OverwriteFile {
+                                                save_path: save_path.clone(),
+                                                doc_tab: active_tab,
+                                            };
+                                            redraw = true;
+                                            continue;
+                                        }
                                         if let Some(doc) = docs.get_mut(active_tab) {
                                             if let Some(buf_id) = doc.view.buffer_id {
                                                 let atomic = config.files.atomic_save;
@@ -2363,11 +2455,11 @@ pub fn run(
                                     }
                                 }
                             }
-                            "tab" => {
+                            "tab"
                                 // Select current suggestion: replace text, refresh.
                                 if !cmdview_suggestions.is_empty()
                                     && cmdview_selected < cmdview_suggestions.len()
-                                {
+                                => {
                                     cmdview_text = cmdview_suggestions[cmdview_selected].clone();
                                     cmdview_cursor = cmdview_text.len();
                                     let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
@@ -2375,7 +2467,6 @@ pub fn run(
                                         path_suggest(&cmdview_text, &project_root, dirs_only);
                                     cmdview_selected = 0;
                                 }
-                            }
                             "up" => {
                                 if cmdview_selected > 0 {
                                     cmdview_selected -= 1;
@@ -2383,12 +2474,11 @@ pub fn run(
                                     cmdview_selected = cmdview_suggestions.len() - 1;
                                 }
                             }
-                            "down" => {
-                                if !cmdview_suggestions.is_empty() {
+                            "down"
+                                if !cmdview_suggestions.is_empty() => {
                                     cmdview_selected =
                                         (cmdview_selected + 1) % cmdview_suggestions.len();
                                 }
-                            }
                             "left" => {
                                 if mods.ctrl {
                                     cmdview_cursor =
@@ -2402,6 +2492,25 @@ pub fn run(
                                 if mods.ctrl {
                                     cmdview_cursor =
                                         cmdview_word_right(&cmdview_text, cmdview_cursor);
+                                } else if cmdview_cursor == cmdview_text.len()
+                                    && !cmdview_suggestions.is_empty()
+                                    && cmdview_selected < cmdview_suggestions.len()
+                                {
+                                    // Right-arrow at end of input accepts the
+                                    // highlighted suggestion (like Tab) so
+                                    // users aren't forced to press Enter —
+                                    // which also commits the action and can
+                                    // race a late autocomplete update.
+                                    cmdview_text =
+                                        cmdview_suggestions[cmdview_selected].clone();
+                                    cmdview_cursor = cmdview_text.len();
+                                    let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
+                                    cmdview_suggestions = path_suggest(
+                                        &cmdview_text,
+                                        &project_root,
+                                        dirs_only,
+                                    );
+                                    cmdview_selected = 0;
                                 } else {
                                     cmdview_cursor =
                                         cmdview_next_char(&cmdview_text, cmdview_cursor);
@@ -2413,8 +2522,8 @@ pub fn run(
                             "end" => {
                                 cmdview_cursor = cmdview_text.len();
                             }
-                            "delete" => {
-                                if cmdview_cursor < cmdview_text.len() {
+                            "delete"
+                                if cmdview_cursor < cmdview_text.len() => {
                                     let next = cmdview_next_char(&cmdview_text, cmdview_cursor);
                                     cmdview_text.replace_range(cmdview_cursor..next, "");
                                     refresh_cmdview_suggestions(
@@ -2428,7 +2537,6 @@ pub fn run(
                                     );
                                     cmdview_selected = 0;
                                 }
-                            }
                             "backspace" => {
                                 if mods.ctrl {
                                     // Delete the previous path segment up to the cursor.
@@ -2529,12 +2637,11 @@ pub fn run(
                             "up" => {
                                 project_search_selected = project_search_selected.saturating_sub(1);
                             }
-                            "down" => {
-                                if !project_search_results.is_empty() {
+                            "down"
+                                if !project_search_results.is_empty() => {
                                     project_search_selected = (project_search_selected + 1)
                                         .min(project_search_results.len() - 1);
                                 }
-                            }
                             "backspace" => {
                                 project_search_query.pop();
                                 project_search_results = run_project_search(
@@ -2591,9 +2698,9 @@ pub fn run(
                                 project_replace_focus_on_replace =
                                     !project_replace_focus_on_replace;
                             }
-                            "return" | "keypad enter" if mods.ctrl => {
+                            "return" | "keypad enter" if mods.ctrl
                                 // Execute replace all.
-                                if !project_replace_search.is_empty() {
+                                && !project_replace_search.is_empty() => {
                                     let count = execute_project_replace(
                                         &project_root,
                                         &project_replace_search,
@@ -2622,10 +2729,9 @@ pub fn run(
                                         }
                                     }
                                 }
-                            }
-                            "return" | "keypad enter" => {
+                            "return" | "keypad enter"
                                 // Preview: run search to show matches.
-                                if !project_replace_search.is_empty() {
+                                if !project_replace_search.is_empty() => {
                                     project_replace_results = run_project_search(
                                         &project_replace_search,
                                         &project_root,
@@ -2635,17 +2741,15 @@ pub fn run(
                                     );
                                     project_replace_selected = 0;
                                 }
-                            }
                             "up" => {
                                 project_replace_selected =
                                     project_replace_selected.saturating_sub(1);
                             }
-                            "down" => {
-                                if !project_replace_results.is_empty() {
+                            "down"
+                                if !project_replace_results.is_empty() => {
                                     project_replace_selected = (project_replace_selected + 1)
                                         .min(project_replace_results.len() - 1);
                                 }
-                            }
                             "backspace" => {
                                 if project_replace_focus_on_replace {
                                     project_replace_with.pop();
@@ -2696,12 +2800,11 @@ pub fn run(
                             "up" => {
                                 git_status_selected = git_status_selected.saturating_sub(1);
                             }
-                            "down" => {
-                                if !git_status_entries.is_empty() {
+                            "down"
+                                if !git_status_entries.is_empty() => {
                                     git_status_selected =
                                         (git_status_selected + 1).min(git_status_entries.len() - 1);
                                 }
-                            }
                             "r" | "R" => {
                                 git_status_entries = run_git_status(&project_root);
                                 git_status_selected = 0;
@@ -2721,12 +2824,11 @@ pub fn run(
                             "up" => {
                                 git_log_selected = git_log_selected.saturating_sub(1);
                             }
-                            "down" => {
-                                if !git_log_entries.is_empty() {
+                            "down"
+                                if !git_log_entries.is_empty() => {
                                     git_log_selected =
                                         (git_log_selected + 1).min(git_log_entries.len() - 1);
                                 }
-                            }
                             _ => {}
                         }
                         redraw = true;
@@ -2929,6 +3031,156 @@ pub fn run(
                         redraw = true;
                         if key == "escape" {
                             continue;
+                        }
+                    }
+
+                    // "No extension detected, save anyway?" prompt. Yes runs
+                    // the overwrite check next (and the save if that
+                    // passes); No just dismisses the nag so the user can
+                    // type `.ext` in the picker and press Enter again.
+                    if let Nag::NoExtension { save_path, doc_tab } = &nag {
+                        let save_path = save_path.clone();
+                        let tab = *doc_tab;
+                        eat_next_text_input = true;
+                        match key.as_str() {
+                            "y" | "Y" | "return" | "keypad enter" => {
+                                // Chain into the overwrite path: if the file
+                                // exists and isn't the current doc's own
+                                // path, hand off to OverwriteFile; otherwise
+                                // perform the save directly.
+                                let own_path = docs
+                                    .get(tab)
+                                    .map(|d| d.path.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if std::path::Path::new(&save_path).is_file()
+                                    && save_path != own_path
+                                {
+                                    nag = Nag::OverwriteFile {
+                                        save_path,
+                                        doc_tab: tab,
+                                    };
+                                    redraw = true;
+                                    continue;
+                                }
+                                if let Some(doc) = docs.get_mut(tab) {
+                                    if let Some(buf_id) = doc.view.buffer_id {
+                                        let atomic = config.files.atomic_save;
+                                        let saved_id = buffer::with_buffer(buf_id, |b| {
+                                            buffer::save_file(b, &save_path, b.crlf, atomic)
+                                                .map_err(|_| buffer::BufferError::UnknownBuffer)?;
+                                            Ok(b.change_id)
+                                        });
+                                        if let Ok(id) = saved_id {
+                                            doc.saved_change_id = id;
+                                            doc.saved_signature = buffer::with_buffer(
+                                                buf_id,
+                                                |b| Ok(buffer::content_signature(&b.lines)),
+                                            )
+                                            .unwrap_or(0);
+                                            doc.path = save_path.clone();
+                                            doc.name = std::path::Path::new(&save_path)
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| save_path.clone());
+                                            autoreload.watch(&save_path);
+                                            log_to_file(
+                                                userdir,
+                                                &format!("Saved {save_path}"),
+                                            );
+                                            info_message = Some((
+                                                format!("Saved {}", doc.name),
+                                                Instant::now(),
+                                            ));
+                                        } else {
+                                            info_message = Some((
+                                                format!("Failed to save {save_path}"),
+                                                Instant::now(),
+                                            ));
+                                        }
+                                    }
+                                }
+                                nag = Nag::None;
+                                cmdview_active = false;
+                                redraw = true;
+                                continue;
+                            }
+                            "n" | "N" | "escape" => {
+                                nag = Nag::None;
+                                redraw = true;
+                                continue;
+                            }
+                            _ => {
+                                redraw = true;
+                                continue;
+                            }
+                        }
+                    }
+
+                    // "Overwrite FILE?" prompt intercepts keys. Yes writes
+                    // over the existing file; No returns to the Save As
+                    // picker so the user can adjust the filename. Escape /N
+                    // just dismisses the nag (keeps cmdview open).
+                    if let Nag::OverwriteFile { save_path, doc_tab } = &nag {
+                        let save_path = save_path.clone();
+                        let tab = *doc_tab;
+                        eat_next_text_input = true;
+                        match key.as_str() {
+                            "y" | "Y" | "return" | "keypad enter" => {
+                                if let Some(doc) = docs.get_mut(tab) {
+                                    if let Some(buf_id) = doc.view.buffer_id {
+                                        let atomic = config.files.atomic_save;
+                                        let saved_id = buffer::with_buffer(buf_id, |b| {
+                                            buffer::save_file(b, &save_path, b.crlf, atomic)
+                                                .map_err(|_| buffer::BufferError::UnknownBuffer)?;
+                                            Ok(b.change_id)
+                                        });
+                                        if let Ok(id) = saved_id {
+                                            doc.saved_change_id = id;
+                                            doc.saved_signature = buffer::with_buffer(
+                                                buf_id,
+                                                |b| Ok(buffer::content_signature(&b.lines)),
+                                            )
+                                            .unwrap_or(0);
+                                            doc.path = save_path.clone();
+                                            doc.name = std::path::Path::new(&save_path)
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| save_path.clone());
+                                            autoreload.watch(&save_path);
+                                            log_to_file(
+                                                userdir,
+                                                &format!("Saved {save_path}"),
+                                            );
+                                            info_message = Some((
+                                                format!("Saved {}", doc.name),
+                                                Instant::now(),
+                                            ));
+                                        } else {
+                                            info_message = Some((
+                                                format!("Failed to save {save_path}"),
+                                                Instant::now(),
+                                            ));
+                                        }
+                                    }
+                                }
+                                nag = Nag::None;
+                                cmdview_active = false;
+                                redraw = true;
+                                continue;
+                            }
+                            "n" | "N" | "escape" => {
+                                // Back off to the picker — cmdview stays
+                                // open with the text the user typed so they
+                                // can rename.
+                                nag = Nag::None;
+                                redraw = true;
+                                continue;
+                            }
+                            _ => {
+                                redraw = true;
+                                continue;
+                            }
                         }
                     }
 
@@ -6645,7 +6897,7 @@ pub fn run(
                             ))
                         })
                         .unwrap_or((1, 1, 1));
-                        let pct = if total > 0 { (line * 100) / total } else { 100 };
+                        let pct = (line * 100).checked_div(total).unwrap_or(100);
                         status_view.left_items.push(StatusItem {
                             text: format!("  Ln {line}/{total}, Col {col}  ({pct}%)"),
                             color: Some(style.dim.to_array()),
@@ -7740,7 +7992,7 @@ pub fn run(
                             let dv = &doc.view;
                             use crate::editor::view::DrawContext as _;
                             let line_h = style.code_font_height * 1.2;
-                            let first = ((dv.scroll_y / line_h).floor() as usize).max(0) + 1;
+                            let first = ((dv.scroll_y / line_h).floor() as usize) + 1;
                             let vis = ((dv.rect().h / line_h).ceil() as usize) + 2;
                             let blame_color = style.dim.to_array();
                             let right_edge = dv.rect().x + dv.rect().w - style.padding_x;
@@ -7919,6 +8171,51 @@ pub fn run(
                                 doc.preview.blocks = crate::editor::markdown::parse(&text);
                                 doc.preview.cached_change_id = cur_change_id;
                                 doc.preview.layout.clear();
+                                // Pre-tokenize every fenced code block with a
+                                // resolvable `lang` so the preview can render
+                                // it with syntax colours. Lookup reuses the
+                                // editor's compiled-syntax cache keyed by file
+                                // extension.
+                                doc.preview.code_tokens = doc
+                                    .preview
+                                    .blocks
+                                    .iter()
+                                    .map(|blk| {
+                                        let (lang, code_text) = match blk {
+                                            crate::editor::markdown::Block::Code {
+                                                lang: Some(l),
+                                                text,
+                                            } => (l.as_str(), text.as_str()),
+                                            _ => return None,
+                                        };
+                                        let ext = markdown_lang_to_ext(lang);
+                                        let ext_owned = ext.to_string();
+                                        let pseudo = format!("f.{ext}");
+                                        let compiled_opt = compiled_syntax_cache
+                                            .entry(ext_owned.clone())
+                                            .or_insert_with(|| {
+                                                let entry = crate::editor::syntax::match_syntax_entry(
+                                                    &pseudo,
+                                                    &syntax_index,
+                                                )?;
+                                                let def = entry.load_full()?;
+                                                tokenizer::compile_from_definition(&def).ok()
+                                            })
+                                            .as_ref()?;
+                                        // Touch MRU so preview-only highlights
+                                        // don't immediately get evicted.
+                                        compiled_syntax_mru.retain(|e| e != &ext_owned);
+                                        compiled_syntax_mru.insert(0, ext_owned);
+                                        Some(
+                                            code_text
+                                                .split('\n')
+                                                .map(|line| {
+                                                    tokenizer::tokenize_line(compiled_opt, line)
+                                                })
+                                                .collect(),
+                                        )
+                                    })
+                                    .collect();
                             }
                             let rect = doc.preview.rect;
                             // No smooth scroll: track the target directly so
@@ -8562,6 +8859,42 @@ pub fn run(
                     );
                 }
 
+                // Draw "overwrite existing file?" confirmation bar.
+                if let Nag::OverwriteFile { save_path, .. } = &nag {
+                    crate::editor::app_state::clip_init(width, height);
+                    use crate::editor::view::DrawContext as _;
+                    let bar_h = style.font_height + style.padding_y * 2.0;
+                    draw_ctx.draw_rect(0.0, 0.0, width, bar_h, style.nagbar.to_array());
+                    let msg = format!(
+                        "{save_path} already exists. Overwrite?  [Y]es  [N]o"
+                    );
+                    draw_ctx.draw_text(
+                        style.font,
+                        &msg,
+                        style.padding_x,
+                        style.padding_y,
+                        style.nagbar_text.to_array(),
+                    );
+                }
+
+                // Draw "no extension detected?" confirmation bar.
+                if let Nag::NoExtension { save_path, .. } = &nag {
+                    crate::editor::app_state::clip_init(width, height);
+                    use crate::editor::view::DrawContext as _;
+                    let bar_h = style.font_height + style.padding_y * 2.0;
+                    draw_ctx.draw_rect(0.0, 0.0, width, bar_h, style.nagbar.to_array());
+                    let msg = format!(
+                        "No extension detected ({save_path}). Save anyway?  [Y]es  [N]o"
+                    );
+                    draw_ctx.draw_text(
+                        style.font,
+                        &msg,
+                        style.padding_x,
+                        style.padding_y,
+                        style.nagbar_text.to_array(),
+                    );
+                }
+
                 // Draw reload nag bar if active.
                 if let Nag::ReloadFromDisk { path } = &nag {
                     crate::editor::app_state::clip_init(width, height);
@@ -9172,7 +9505,21 @@ pub fn run(
                     let max_visible = 15usize;
                     let visible_count = cmdview_suggestions.len().min(max_visible);
                     let cv_h = line_h * (visible_count as f64 + 1.0) + style.padding_y * 2.0;
-                    let cv_y = style.padding_y * 2.0;
+                    // When a nag is active, push the cmdview down so the
+                    // nag bar stays visible at the top and its key focus
+                    // isn't hidden behind the picker.
+                    let nag_offset = if matches!(
+                        nag,
+                        Nag::OverwriteFile { .. }
+                            | Nag::CreateDir { .. }
+                            | Nag::ReloadFromDisk { .. }
+                            | Nag::NoExtension { .. }
+                    ) {
+                        style.font_height + style.padding_y * 2.0 + style.padding_y
+                    } else {
+                        0.0
+                    };
+                    let cv_y = style.padding_y * 2.0 + nag_offset;
 
                     // Border + background.
                     draw_ctx.draw_rect(
@@ -10116,13 +10463,12 @@ fn handle_doc_command(
         let mut col = cursor_col;
 
         match cmd {
-            "doc:select-none" => {
-                if buffer::cursor_count(b) > 1 {
+            "doc:select-none"
+                if buffer::cursor_count(b) > 1 => {
                     buffer::remove_extra_cursors(b);
                     return Ok(());
                 }
                 // Collapse selection to cursor.
-            }
             "doc:create-cursor-previous-line" => {
                 let last_idx = b.selections.len() - 4;
                 let last_line = b.selections[last_idx + 2];
@@ -10177,20 +10523,18 @@ fn handle_doc_command(
                     col = 1;
                 }
             }
-            "doc:move-to-previous-line" | "doc:select-to-previous-line" => {
-                if line > 1 {
+            "doc:move-to-previous-line" | "doc:select-to-previous-line"
+                if line > 1 => {
                     line -= 1;
                     let max_col = char_count(b.lines[line - 1].trim_end_matches('\n')) + 1;
                     col = col.min(max_col);
                 }
-            }
-            "doc:move-to-next-line" | "doc:select-to-next-line" => {
-                if line < line_count {
+            "doc:move-to-next-line" | "doc:select-to-next-line"
+                if line < line_count => {
                     line += 1;
                     let max_col = char_count(b.lines[line - 1].trim_end_matches('\n')) + 1;
                     col = col.min(max_col);
                 }
-            }
             "doc:move-to-start-of-indentation" | "doc:select-to-start-of-indentation" => {
                 let text = b.lines[line - 1].trim_end_matches('\n');
                 let indent = text.len() - text.trim_start().len();
@@ -10306,20 +10650,18 @@ fn handle_doc_command(
                     col = 1;
                 }
             }
-            "doc:move-lines-up" => {
-                if line > 1 {
+            "doc:move-lines-up"
+                if line > 1 => {
                     buffer::push_undo(b);
                     b.lines.swap(line - 1, line - 2);
                     line -= 1;
                 }
-            }
-            "doc:move-lines-down" => {
-                if line < line_count {
+            "doc:move-lines-down"
+                if line < line_count => {
                     buffer::push_undo(b);
                     b.lines.swap(line - 1, line);
                     line += 1;
                 }
-            }
             "doc:move-to-previous-page" | "doc:select-to-previous-page" => {
                 let page = (dv.rect().h / (style.code_font_height * 1.2)) as usize;
                 line = line.saturating_sub(page).max(1);
@@ -10532,8 +10874,8 @@ fn handle_doc_command(
                 line = start;
                 col = 1;
             }
-            "doc:upper-case" | "doc:lower-case" => {
-                if anchor_line != cursor_line || anchor_col != cursor_col {
+            "doc:upper-case" | "doc:lower-case"
+                if (anchor_line != cursor_line || anchor_col != cursor_col) => {
                     buffer::push_undo(b);
                     let (s_line, s_col, e_line, e_col) = if anchor_line < cursor_line
                         || (anchor_line == cursor_line && anchor_col <= cursor_col)
@@ -10585,7 +10927,6 @@ fn handle_doc_command(
                         }
                     }
                 }
-            }
             "doc:toggle-line-comments" => {
                 let Some(marker) = comment_marker else {
                     // Language has no defined comment style; do nothing
@@ -10785,7 +11126,11 @@ fn handle_doc_command(
     });
 
     // Auto-scroll to keep cursor visible — only for keyboard-initiated
-    // navigation where the cursor's line actually changed.
+    // navigation where the cursor's line actually changed. Snap scroll_y
+    // to the new target so Enter on the last line doesn't leave the
+    // fresh line visibly clipped for the ~6 frames the lerp takes to
+    // settle — the old behaviour was only "saved" by the user issuing
+    // another command (save, etc.) that triggered an unrelated repaint.
     if auto_scroll {
         let _ = buffer::with_buffer(buf_id, |b| {
             let cursor_line = *b.selections.get(2).unwrap_or(&1);
@@ -10794,10 +11139,20 @@ fn handle_doc_command(
             }
             let cursor_y = (cursor_line as f64 - 1.0) * line_h;
             let view_h = dv.rect().h;
-            if cursor_y < dv.target_scroll_y {
-                dv.target_scroll_y = cursor_y;
-            } else if cursor_y + line_h > dv.target_scroll_y + view_h {
-                dv.target_scroll_y = cursor_y + line_h - view_h;
+            // One line of margin above and below the cursor so it's never
+            // drawn flush with the viewport edge (would otherwise clip
+            // the descender, and on the last line the glyph sat at
+            // half-height until some later event forced another scroll).
+            let margin = line_h;
+            let mut new_target = dv.target_scroll_y;
+            if cursor_y - margin < new_target {
+                new_target = (cursor_y - margin).max(0.0);
+            } else if cursor_y + line_h + margin > new_target + view_h {
+                new_target = cursor_y + line_h + margin - view_h;
+            }
+            if new_target != dv.target_scroll_y {
+                dv.target_scroll_y = new_target;
+                dv.scroll_y = new_target;
             }
             Ok(())
         });
@@ -10874,8 +11229,8 @@ fn handle_doc_command(
                 Ok(())
             });
         }
-        "doc:next-bookmark" => {
-            if !dv.bookmarks.is_empty() {
+        "doc:next-bookmark"
+            if !dv.bookmarks.is_empty() => {
                 let _ = buffer::with_buffer_mut(buf_id, |b| {
                     let cursor_line = *b.selections.get(2).unwrap_or(&1);
                     let target = dv
@@ -10889,9 +11244,8 @@ fn handle_doc_command(
                 });
                 scroll_to_cursor(dv);
             }
-        }
-        "doc:previous-bookmark" => {
-            if !dv.bookmarks.is_empty() {
+        "doc:previous-bookmark"
+            if !dv.bookmarks.is_empty() => {
                 let _ = buffer::with_buffer_mut(buf_id, |b| {
                     let cursor_line = *b.selections.get(2).unwrap_or(&1);
                     let target = dv
@@ -10906,7 +11260,6 @@ fn handle_doc_command(
                 });
                 scroll_to_cursor(dv);
             }
-        }
         _ => {}
     }
 }

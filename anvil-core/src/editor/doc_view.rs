@@ -530,6 +530,31 @@ pub(crate) fn syntax_color(token_type: &str, style: &StyleContext) -> [u8; 4] {
 }
 
 /// Classify a word as a syntax token type based on common keywords.
+/// Whether `simple_tokenize` has a keyword / comment rule set for `ext`. If
+/// it doesn't, callers should render the line as a single plain-text token
+/// instead — otherwise the tokenizer's universal quote-matching would dress
+/// up every `'` / `"` in a `.txt` or `.gitignore` as a string literal.
+pub(crate) fn fallback_tokenize_supports(ext: &str) -> bool {
+    matches!(
+        ext,
+        "rs" | "lua"
+            | "py"
+            | "js"
+            | "ts"
+            | "jsx"
+            | "tsx"
+            | "c"
+            | "h"
+            | "cpp"
+            | "hpp"
+            | "cc"
+            | "toml"
+            | "sh"
+            | "yml"
+            | "yaml"
+    )
+}
+
 pub(crate) fn classify_word(word: &str, ext: &str) -> &'static str {
     match ext {
         "rs" => match word {
@@ -837,7 +862,7 @@ pub(crate) fn build_render_lines(
     });
 
     buffer::with_buffer(buf_id, |b| {
-        let first = ((dv.scroll_y / line_h).floor() as usize).max(0) + 1;
+        let first = ((dv.scroll_y / line_h).floor() as usize) + 1;
         let last = (first + visible_lines + 1).min(b.lines.len());
         let mut render = Vec::new();
         let mut i = first;
@@ -897,70 +922,19 @@ pub(crate) fn build_render_lines(
                         }
                     })
                     .collect()
-            } else {
+            } else if fallback_tokenize_supports(file_ext) {
                 simple_tokenize(text, file_ext, style)
+            } else {
+                // No compiled syntax and no fallback keyword set for this
+                // extension — render the line as a single plain-coloured run.
+                // Previously `simple_tokenize` ran unconditionally and its
+                // quote-matching tinted every `'` / `"` in plain-text and
+                // dotfiles (e.g. `.gitignore`, `.txt`) as string literals.
+                vec![RenderToken {
+                    text: text.to_string(),
+                    color: style.text.to_array(),
+                }]
             };
-
-            // Bracket pair colorization: color ()[]{}  by nesting depth.
-            let bracket_colors: [Option<[u8; 4]>; 3] = SYNTAX_COLORS.with(|s| {
-                let c = s.borrow();
-                [
-                    c.get("bracket1").copied(),
-                    c.get("bracket2").copied(),
-                    c.get("bracket3").copied(),
-                ]
-            });
-            if bracket_colors[0].is_some() {
-                let mut depth: usize = 0;
-                let mut new_tokens = Vec::with_capacity(tokens.len());
-                for tok in tokens {
-                    let has_bracket = tok.text.contains(['(', ')', '[', ']', '{', '}']);
-                    if !has_bracket {
-                        new_tokens.push(tok);
-                        continue;
-                    }
-                    let base = tok.color;
-                    let mut run = String::new();
-                    for ch in tok.text.chars() {
-                        if matches!(ch, '(' | '[' | '{') {
-                            if !run.is_empty() {
-                                new_tokens.push(RenderToken {
-                                    text: std::mem::take(&mut run),
-                                    color: base,
-                                });
-                            }
-                            let bc = bracket_colors[depth % 3].unwrap_or(base);
-                            new_tokens.push(RenderToken {
-                                text: ch.to_string(),
-                                color: bc,
-                            });
-                            depth += 1;
-                        } else if matches!(ch, ')' | ']' | '}') {
-                            if !run.is_empty() {
-                                new_tokens.push(RenderToken {
-                                    text: std::mem::take(&mut run),
-                                    color: base,
-                                });
-                            }
-                            depth = depth.saturating_sub(1);
-                            let bc = bracket_colors[depth % 3].unwrap_or(base);
-                            new_tokens.push(RenderToken {
-                                text: ch.to_string(),
-                                color: bc,
-                            });
-                        } else {
-                            run.push(ch);
-                        }
-                    }
-                    if !run.is_empty() {
-                        new_tokens.push(RenderToken {
-                            text: run,
-                            color: base,
-                        });
-                    }
-                }
-                tokens = new_tokens;
-            }
 
             // Inject inlay hints inline between tokens.
             // Hints use byte_col (0-based byte offset in the line text).

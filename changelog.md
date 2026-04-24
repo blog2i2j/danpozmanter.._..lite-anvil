@@ -1,5 +1,20 @@
 # Change Log
 
+## [2.11.7] - 2026-04-24 -- Markdown preview styling + code-block syntax, Save As overwrite guard, faster path suggestions, highlighting fixes.
+
+* Markdown preview: `**bold**` renders via synthetic double-strike (we don't ship a bold font slot); `*italic*` renders in the accent colour so it's visibly distinct from body text.
+* Fenced code blocks tagged with a language (e.g. ```` ```sh ````, ```` ```rust ````, ```` ```python ````) render with the matching bundled syntax highlighter — pre-tokenized once per reparse, reuses the editor's compiled-syntax cache.
+* Markdown preview: code blocks with no (or unknown) fence language render in the plain body text colour instead of the green `style.good` tint.
+* Editor: files whose extension has no compiled syntax *and* no fallback keyword set (plain text, dotfiles, etc.) now render as single plain-text runs — quotes and `//` are no longer tinted as strings / comments in prose.
+* Removed nesting-depth bracket-pair colorization — `()`, `[]`, `{}` now inherit their surrounding token colour; the cursor-on-bracket match underline is unaffected.
+* Save As now prompts `[Y]es / [N]o` before overwriting a different existing file; No returns to the picker so you can rename.
+* Save As Enter commits exactly the typed filename — no more silently substituting the highlighted autocomplete suggestion. Tab and right-arrow still accept the highlight; only Enter is the firm commit.
+* Save As without an extension prompts `No extension detected (<path>). Save anyway?  [Y]es  [N]o`; confirming then runs the existing overwrite check before writing.
+* Right-arrow at end of input in Open / Open Folder / Save As accepts the highlighted suggestion (like Tab) instead of committing, closing the autocomplete-races-Enter window.
+* When a nag (overwrite / create-dir / no-extension / reload-from-disk) is active over the Save As / Open picker, the picker shifts down below the nag bar so the prompt and its `[Y]es [N]o` buttons are fully visible, and the cmdview key handler steps aside so `Y` / `N` / `Enter` actually reach the nag.
+* `path_suggest` filters before sorting and caps results at 500, so typing in directories with thousands of entries no longer stutters.
+* Enter on the last visible line now snaps the viewport so the new line is fully on-screen; auto-scroll also reserves a one-line margin above/below the cursor.
+
 ## [2.11.6] - 2026-04-23 -- Tab overflow UI, tab right-click menu, Open Recent stale-render fix, preview auto-scroll fix.
 
 * Tab bar overflow: tab names truncate to 10 chars + `...` when they don't all fit.

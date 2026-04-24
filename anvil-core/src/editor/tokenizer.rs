@@ -24,8 +24,7 @@ pub fn usub(text: &str, start: usize, end: usize) -> &str {
     }
     let mut start_byte = None;
     let mut end_byte = None;
-    let mut idx = 1usize;
-    for (byte_idx, _) in text.char_indices() {
+    for (idx, (byte_idx, _)) in (1usize..).zip(text.char_indices()) {
         if idx == start {
             start_byte = Some(byte_idx);
         }
@@ -33,7 +32,6 @@ pub fn usub(text: &str, start: usize, end: usize) -> &str {
             end_byte = Some(byte_idx);
             break;
         }
-        idx += 1;
     }
     let Some(start_byte) = start_byte else {
         return "";

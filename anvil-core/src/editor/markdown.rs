@@ -221,11 +221,10 @@ fn handle_start(
                 spans: vec![],
             });
         }
-        Tag::Paragraph => {
-            if !in_item(stack) {
+        Tag::Paragraph
+            if !in_item(stack) => {
                 stack.push(Frame::Paragraph { spans: vec![] });
             }
-        }
         Tag::CodeBlock(kind) => {
             let lang = match kind {
                 CodeBlockKind::Fenced(info) => {
@@ -314,13 +313,12 @@ fn handle_end(
                 );
             }
         }
-        TagEnd::Paragraph => {
-            if !in_item(stack) {
+        TagEnd::Paragraph
+            if !in_item(stack) => {
                 if let Some(Frame::Paragraph { spans }) = stack.pop() {
                     push_block(stack, Block::Paragraph { inlines: spans });
                 }
             }
-        }
         TagEnd::CodeBlock => {
             if let Some(Frame::CodeBlock { lang, text }) = stack.pop() {
                 let text = text.strip_suffix('\n').unwrap_or(&text).to_string();
@@ -406,11 +404,10 @@ fn handle_end(
         | TagEnd::Strong
         | TagEnd::Strikethrough
         | TagEnd::Link
-        | TagEnd::Image => {
-            if style_stack.len() > 1 {
+        | TagEnd::Image
+            if style_stack.len() > 1 => {
                 style_stack.pop();
             }
-        }
         _ => {}
     }
 }

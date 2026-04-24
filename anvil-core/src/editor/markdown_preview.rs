@@ -59,6 +59,12 @@ pub struct MarkdownPreviewState {
     /// Rectangle this preview occupies. Refreshed each frame by the layout
     /// pass so hit-tests in the main loop know which pane a click is in.
     pub rect: Rect,
+    /// Parallel to `blocks`: pre-tokenized code-block lines (one entry per
+    /// line) when the block's fence lang resolves to a bundled syntax; None
+    /// otherwise. Populated by the main loop after each reparse so draws
+    /// don't pay the tokenize cost every frame.
+    pub code_tokens:
+        Vec<Option<Vec<Vec<crate::editor::tokenizer::Token>>>>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -333,16 +339,19 @@ fn span_color(span: &Span, style: &StyleContext) -> [u8; 4] {
     if span.code {
         return style.good.to_array();
     }
-    if span.italic {
-        return style.dim.to_array();
-    }
     if span.strikethrough {
         let mut c = style.dim.to_array();
         c[3] = (c[3] as u16 * 3 / 4).min(255) as u8;
         return c;
     }
-    // Bold and plain body share the theme text color. The renderer has no
-    // bold font slot, so tinting bold would just confuse it with a link.
+    // Italic has no italic font slot, so give it a distinctive tint instead —
+    // the previous `style.dim` was too close to the strikethrough colour and
+    // emphasis was invisible against body text. Using the accent colour makes
+    // `*italic*` visually pop while staying theme-aware.
+    if span.italic {
+        return style.accent.to_array();
+    }
+    // Bold uses synthetic double-strike (see draw_inlines); no colour change.
     style.text.to_array()
 }
 
@@ -420,6 +429,14 @@ fn draw_inlines(
                 ctx.draw_rect(wx0 - 2.0, y, ww + 4.0, base_lh, bg);
             }
             x = ctx.draw_text(font, word, wx0, y, col);
+            // Synthetic bold: draw a second time offset by one pixel so the
+            // glyph strokes thicken. Cheap and font-agnostic — we don't ship a
+            // bold font slot, so this is the only way `**bold**` actually
+            // looks bold. Applies to every bold span except inline code (which
+            // already has its own colour).
+            if span.bold && !span.code {
+                ctx.draw_text(font, word, wx0 + 1.0, y, col);
+            }
             if strike_through || span.strikethrough {
                 // 1px horizontal line through the word at its visual
                 // midline. `base_lh * 0.55` lands near the x-height
@@ -451,6 +468,7 @@ fn draw_block(
     y: f64,
     max_x: f64,
     style: &StyleContext,
+    code_tokens: Option<&Vec<Vec<crate::editor::tokenizer::Token>>>,
     link_regions: &mut Vec<LinkRegion>,
     checkbox_regions: &mut Vec<CheckboxRegion>,
 ) {
@@ -521,12 +539,42 @@ fn draw_block(
             // Panel background + a thin left accent bar.
             ctx.draw_rect(x, y, max_x - x, total_h, style.background2.to_array());
             ctx.draw_rect(x, y, 3.0, total_h, style.accent.to_array());
-            let code_color = style.good.to_array();
             let mut cy = y + pad;
             let text_x = x + pad + 3.0;
-            for line in text.split('\n') {
-                ctx.draw_text(style.code_font, line, text_x, cy, code_color);
-                cy += clh;
+            if let Some(lines) = code_tokens {
+                // Tokenized path: colour each run using the active theme's
+                // syntax palette so ```lang fences read like the editor does.
+                for (line_idx, line) in text.split('\n').enumerate() {
+                    if let Some(tokens) = lines.get(line_idx) {
+                        let mut tx = text_x;
+                        for tok in tokens {
+                            let color = crate::editor::doc_view::syntax_color(
+                                &tok.token_type,
+                                style,
+                            );
+                            tx = ctx.draw_text(style.code_font, &tok.text, tx, cy, color);
+                        }
+                    } else {
+                        ctx.draw_text(
+                            style.code_font,
+                            line,
+                            text_x,
+                            cy,
+                            style.text.to_array(),
+                        );
+                    }
+                    cy += clh;
+                }
+            } else {
+                // No fence language (or an unknown one) — render with the
+                // plain body text colour. The old green `style.good` tint
+                // looked like "this is highlighted" even when there was no
+                // syntax behind it, which misled readers.
+                let code_color = style.text.to_array();
+                for line in text.split('\n') {
+                    ctx.draw_text(style.code_font, line, text_x, cy, code_color);
+                    cy += clh;
+                }
             }
         }
         Block::Rule => {
@@ -547,6 +595,10 @@ fn draw_block(
                 if !first {
                     cur_y += GAP;
                 }
+                // Nested blockquotes don't carry pre-tokenized code; pass None
+                // so the inner code block falls back to plain colour. Top-level
+                // fences still highlight — this only affects fences embedded
+                // inside quotes, which are rare.
                 draw_block(
                     ctx,
                     sub,
@@ -554,6 +606,7 @@ fn draw_block(
                     cur_y,
                     max_x,
                     style,
+                    None,
                     link_regions,
                     checkbox_regions,
                 );
@@ -895,6 +948,7 @@ pub fn draw(
         if sy > py + ph {
             break;
         }
+        let tokens = state.code_tokens.get(i).and_then(|o| o.as_ref());
         draw_block(
             ctx,
             blk,
@@ -902,6 +956,7 @@ pub fn draw(
             sy,
             inner_max_x,
             style,
+            tokens,
             &mut state.link_regions,
             &mut state.checkbox_regions,
         );

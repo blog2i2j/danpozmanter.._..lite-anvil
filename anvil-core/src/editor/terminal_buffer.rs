@@ -622,8 +622,8 @@ impl TerminalBufferInner {
                 let bottom = if p2 <= 0 { self.rows } else { p2 as usize };
                 self.set_scroll_region(top, bottom);
             }
-            'h' => {
-                if prefix == '?' {
+            'h'
+                if prefix == '?' => {
                     for param in params.iter().copied() {
                         match param {
                             25 => self.cursor_visible = true,
@@ -638,9 +638,8 @@ impl TerminalBufferInner {
                         }
                     }
                 }
-            }
-            'l' => {
-                if prefix == '?' {
+            'l'
+                if prefix == '?' => {
                     for param in params.iter().copied() {
                         match param {
                             25 => self.cursor_visible = false,
@@ -655,7 +654,6 @@ impl TerminalBufferInner {
                         }
                     }
                 }
-            }
             'm' => self.apply_sgr(&params),
             _ => {}
         }
