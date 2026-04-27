@@ -227,6 +227,7 @@ pub(crate) fn ext_to_lsp_filetype(ext: &str) -> Option<&'static str> {
         "cs" => Some("c#"),
         "fs" | "fsi" | "fsx" => Some("f#"),
         "svelte" => Some("svelte"),
+        "gos" => Some("gossamer"),
         _ => None,
     }
 }
@@ -575,6 +576,7 @@ mod tests {
         assert_eq!(ext_to_lsp_filetype("tsx"), Some("tsx"));
         assert_eq!(ext_to_lsp_filetype("cpp"), Some("c++"));
         assert_eq!(ext_to_lsp_filetype("cs"), Some("c#"));
+        assert_eq!(ext_to_lsp_filetype("gos"), Some("gossamer"));
     }
 
     #[test]

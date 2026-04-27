@@ -415,6 +415,12 @@ pub fn builtin_specs() -> Vec<LspSpec> {
             &["svelte.config.js", "package.json", ".git"],
         ),
         lsp_spec("zls", &["zls"], &["zig"], &["build.zig", ".git"]),
+        lsp_spec(
+            "gossamer_lsp",
+            &["gos", "lsp"],
+            &["gossamer"],
+            &["project.toml", ".git"],
+        ),
     ]
 }
 

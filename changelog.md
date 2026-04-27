@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.11.9] - 2026-04-27 -- Gossamer LSP wiring.
+
+* Builtin LSP spec for Gossamer: editor now auto-launches `gos lsp` for `.gos` buffers when a `project.toml` (or `.git`) root is found, enabling diagnostics, semantic tokens, hover, and inlay hints from the Gossamer language server.
+
 ## [2.11.8] - 2026-04-25 -- Gossamer language support, icon alignment, context menu highlighting.
 
 * New syntax definition for `.gos` files (Gossamer)

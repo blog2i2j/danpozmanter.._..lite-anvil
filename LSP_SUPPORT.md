@@ -40,6 +40,7 @@ Anvil does not install language servers for you.
 | Crystal | Crystalline | `crystalline` | `shard.yml` |
 | Lua | lua-language-server | `lua-language-server` | `.luarc.json` |
 | Bash | bash-language-server | `bash-language-server start` | `.git` |
+| Gossamer | gossamer-lsp (via `gos`) | `gos lsp` | `project.toml` |
 
 All builtin specs fall back to `.git` as a final root marker.
 
